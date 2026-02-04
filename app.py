@@ -5,7 +5,7 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v46.7")
+st.title("🛡️ Titan Strategy v46.8")
 st.caption("Institutional Protocol: Trend + Volatility + Relative Strength")
 
 RISK_UNIT = 2300  
@@ -59,7 +59,7 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
-# --- STYLING FUNCTION (Traffic Lights) ---
+# --- STYLING FUNCTION (Forces Traffic Light Colors) ---
 def style_final(styler):
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
@@ -76,17 +76,15 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Fetching Data (This may take 30s)...'):
+    with st.spinner('Calculating (10 Years History for Precision)...'):
         tickers = list(DATA_MAP.keys())
         data_cache = {}
 
-        # 1. SAFER DATA FETCHING (yf.Ticker)
-        # This prevents the "MultiIndex" bugs causing bad data structure
         for t in tickers:
             try:
-                # Use Ticker().history instead of download() for stability
+                # 1. FETCH 10Y DATA (Matches Colab Math)
                 ticker_obj = yf.Ticker(t)
-                df = ticker_obj.history(period="5y") 
+                df = ticker_obj.history(period="10y") 
                 
                 # Clean Timezone
                 df.index = pd.to_datetime(df.index).tz_localize(None)
@@ -95,7 +93,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if not df.empty and 'Close' in df.columns:
                      data_cache[t] = df
             except Exception as e:
-                print(f"Error fetching {t}: {e}")
+                pass
 
         # 2. CALCULATION ENGINE
         def get_titan_score(ticker, timeframe='D'):
@@ -260,11 +258,3 @@ if st.button("RUN ANALYSIS", type="primary"):
         # DISPLAY AS HTML (Forces Colors)
         df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
         st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
-        
-        # DEBUG CHECK
-        with st.expander("🛠️ DEBUG DATA (Check this if Output is Empty)"):
-            st.write("Checking SPY Data Structure:")
-            if "SPY" in data_cache:
-                st.write(data_cache["SPY"].tail())
-            else:
-                st.write("❌ SPY Not Loaded")
