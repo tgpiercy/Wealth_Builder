@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.2")
-st.caption("Institutional Protocol: Daily-to-Weekly Resampling (Single Source of Truth)")
+st.title("🛡️ Titan Strategy v47.3")
+st.caption("Institutional Protocol: Diagnostic Mode")
 
 RISK_UNIT = 2300  
 
@@ -46,8 +46,6 @@ def calc_ad(high, low, close, volume):
     return mfv.cumsum()
 
 def calc_ichimoku(high, low, close):
-    # Cloud projected forward 26 periods.
-    # We shift result so index [t] aligns with Price [t]
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
     span_a = ((tenkan + kijun) / 2).shift(26)
@@ -78,12 +76,92 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Fetching Daily Data & Resampling to Weekly (Precision Mode)...'):
+    
+    # --- PHASE 1: MARKET DIAGNOSTIC ---
+    # We fetch SPY, IEF, and VIX separately to ensure they exist before doing anything else.
+    with st.spinner('Checking Market Vitals (SPY, IEF, VIX)...'):
+        market_tickers = ["SPY", "IEF", "^VIX"]
+        market_data = {}
+        
+        for t in market_tickers:
+            try:
+                # Force download with auto_adjust=True to get clean close data
+                df = yf.download(t, period="2y", interval="1d", progress=False, auto_adjust=True)
+                
+                # Column Cleaning (Fixes the MultiIndex Bug)
+                if isinstance(df.columns, pd.MultiIndex):
+                    if t in df.columns.get_level_values(0): df.columns = df.columns.droplevel(0)
+                    elif t in df.columns.get_level_values(1): df.columns = df.columns.droplevel(1)
+                
+                df.index = pd.to_datetime(df.index).tz_localize(None)
+                if not df.empty and 'Close' in df.columns:
+                     market_data[t] = df
+            except Exception as e:
+                pass
+        
+        # Calculate Market Health
+        spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
+        
+        mkt_score = 0; vix_val = 0; vix_msg = "Error: Missing Data"
+        diag_msg = []
+        
+        if spy is not None and ief is not None and vix is not None:
+            # 1. SPY Trend
+            spy_ma = calc_sma(spy['Close'], 18).iloc[-1]
+            if spy.iloc[-1]['Close'] > spy_ma: 
+                mkt_score += 1
+            else:
+                diag_msg.append("SPY < SMA18")
+                
+            # 2. Risk Ratio
+            aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
+            ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
+            ratio_sma18 = calc_sma(ratio, 18)
+            if ratio.iloc[-1] > ratio_sma18.iloc[-1]: 
+                mkt_score += 1
+            else:
+                diag_msg.append("Ratio < SMA18")
+
+            # 3. VIX
+            vix_val = vix.iloc[-1]['Close']
+            if vix_val < 20: 
+                mkt_score += 1
+            else:
+                diag_msg.append("VIX > 20")
+
+            # Risk sizing
+            if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
+            elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
+            else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
+            
+        else:
+            # Diagnostic Failure
+            missing = []
+            if spy is None: missing.append("SPY")
+            if ief is None: missing.append("IEF")
+            if vix is None: missing.append("VIX")
+            vix_msg = f"❌ FAILED LOAD: {', '.join(missing)}"
+            risk_per_trade = 0 # Safety Lock
+            
+    # Display Dashboard Header
+    col1, col2 = st.columns(2)
+    score_color = "Bullish" if mkt_score==3 else ("Caution" if mkt_score > 0 else "Bearish/Error")
+    col1.metric("Market Score", f"{mkt_score}/3", delta=score_color)
+    col2.metric("VIX", f"{vix_val:.2f}", delta=vix_msg, delta_color="inverse")
+    
+    if mkt_score < 3 and spy is not None:
+        st.warning(f"Market Weakness Detected: {', '.join(diag_msg)}")
+
+    # --- PHASE 2: ASSET ANALYSIS ---
+    with st.spinner('Scanning Assets...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {} 
         
-        # 1. FETCH DAILY ONLY (5 Years)
+        # Add market data to cache so we don't re-fetch
+        cache_d.update(market_data)
+        
         for t in tickers:
+            if t in cache_d: continue # Skip if already loaded
             try:
                 tk = yf.Ticker(t)
                 df_d = tk.history(period="5y", interval="1d")
@@ -91,32 +169,12 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if not df_d.empty and 'Close' in df_d.columns: cache_d[t] = df_d
             except: pass
 
-        # MARKET HEALTH
-        spy = cache_d.get("SPY"); ief = cache_d.get("IEF"); vix = cache_d.get("^VIX")
-        mkt_score = 0; vix_val = 0; vix_msg = "No Data"
-        if spy is not None and ief is not None and vix is not None:
-            aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
-            ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            ratio_sma18 = calc_sma(ratio, 18)
-            if spy.iloc[-1]['Close'] > calc_sma(spy['Close'], 18).iloc[-1]: mkt_score += 1
-            if ratio.iloc[-1] > ratio_sma18.iloc[-1]: mkt_score += 1
-            if vix.iloc[-1]['Close'] < 20: mkt_score += 1
-            vix_val = vix.iloc[-1]['Close']
-            if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
-            elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
-            else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
-        
-        col1, col2 = st.columns(2)
-        col1.metric("Market Score", f"{mkt_score}/3", delta="Bullish" if mkt_score==3 else "Caution")
-        col2.metric("VIX", f"{vix_val:.2f}", delta=vix_msg, delta_color="inverse")
-
-        # ENGINE
         results = []
         for t, meta in DATA_MAP.items():
             if meta[0] in ["BENCH"]: continue
             if t not in cache_d: continue
             
-            # --- DAILY ---
+            # DAILY DATA
             df_d = cache_d[t].copy()
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -126,26 +184,22 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # --- WEEKLY RESAMPLE (The Fix) ---
-            # We build Weekly from Daily to avoid Yahoo Glitches
+            # WEEKLY RESAMPLE
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
-            # Resample to Friday (W-FRI) to align with standard bars
             df_w = df_d.resample('W-FRI').agg(logic)
-            # Remove any empty rows created by holidays
             df_w.dropna(subset=['Close'], inplace=True)
             
-            # Weekly Indicators
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
             df_w['SMA40'] = calc_sma(df_w['Close'], 40)
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
             df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
-            # --- POINTERS ---
+            # POINTERS
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
             wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            # --- RS & BANDS ---
+            # RS & BANDS
             bench_ticker = meta[1]
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
@@ -159,14 +213,13 @@ if st.button("RUN ANALYSIS", type="primary"):
                 pp_rs_sma = rs_sma18.iloc[-3]
                 rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
-            # --- AD LOGIC ---
+            # AD LOGIC
             ad_pass = False
             if not pd.isna(dc['AD_SMA18']):
                 ad_lower = dc['AD_SMA18'] * 0.995
                 ad_pass = (dc['AD'] >= ad_lower) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
             
-            # --- VOLUME LOGIC (Hybrid Fix) ---
-            # If Today(Live) is weak, check Yesterday(Prev) to verify if it's just morning quietness
+            # VOLUME (Hybrid)
             vol_msg = "NORMAL"
             live_spike = dc['Volume'] > (dc['VolSMA'] * 1.5)
             live_high = dc['Volume'] > dc['VolSMA']
@@ -178,13 +231,13 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif live_high: vol_msg = "HIGH (Live)"
             elif prev_high: vol_msg = "HIGH (Prev)"
 
-            # --- IMPULSE ---
+            # IMPULSE
             w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
             d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
             w_pulse = "NO"
             if w_uptrend: w_pulse = "GOOD" if d_health_ok else "WEAK"
             
-            # --- SCORES ---
+            # SCORES
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
             if wc['SMA18'] > wp['SMA18']: w_score += 1
@@ -195,7 +248,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
             d_score = sum(d_chk.values())
 
-            # --- DECISION ---
+            # DECISION
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
                 if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
