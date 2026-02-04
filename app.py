@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.0")
-st.caption("Institutional Protocol: Direct Weekly + Daily Fetch")
+st.title("🛡️ Titan Strategy v47.1")
+st.caption("Institutional Protocol: Weekly Cloud + Hybrid Volume Check")
 
 RISK_UNIT = 2300  
 
@@ -46,6 +46,8 @@ def calc_ad(high, low, close, volume):
     return mfv.cumsum()
 
 def calc_ichimoku(high, low, close):
+    # Note: Cloud is projected forward 26 periods.
+    # We shift it here so that index [t] contains the cloud value relevant for price [t]
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
     span_a = ((tenkan + kijun) / 2).shift(26)
@@ -76,24 +78,24 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Fetching Data (Dual-Stream: Daily & Weekly)...'):
+    with st.spinner('Checking Volume & Cloud Data...'):
         tickers = list(DATA_MAP.keys())
-        cache_d = {} # Daily Cache
-        cache_w = {} # Weekly Cache
+        cache_d = {} 
+        cache_w = {} 
 
         for t in tickers:
             try:
-                # 1. FETCH DAILY (For Score & Stops)
+                # 1. FETCH DAILY (2y is enough for Daily Score)
                 tk = yf.Ticker(t)
                 df_d = tk.history(period="2y", interval="1d")
                 df_d.index = pd.to_datetime(df_d.index).tz_localize(None)
                 if not df_d.empty and 'Close' in df_d.columns: cache_d[t] = df_d
 
-                # 2. FETCH WEEKLY (For Impulse & Cloud)
+                # 2. FETCH WEEKLY (5y ensures valid Cloud Shift)
                 df_w = tk.history(period="5y", interval="1wk")
                 df_w.index = pd.to_datetime(df_w.index).tz_localize(None)
-                # Drop the last row if it's the current incomplete week? 
-                # Actually, for "Impulse" we want to see where we are NOW vs last week. Keep it.
+                # CRITICAL FIX: Drop empty rows before math
+                df_w.dropna(subset=['Close'], inplace=True)
                 if not df_w.empty and 'Close' in df_w.columns: cache_w[t] = df_w
             except: pass
 
@@ -122,7 +124,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             if meta[0] in ["BENCH"]: continue
             if t not in cache_d or t not in cache_w: continue
             
-            # --- DAILY CALCULATIONS ---
+            # --- DAILY ---
             df_d = cache_d[t].copy()
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -132,11 +134,13 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # --- WEEKLY CALCULATIONS ---
+            # --- WEEKLY (With Fixes) ---
             df_w = cache_w[t].copy()
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
             df_w['SMA40'] = calc_sma(df_w['Close'], 40)
+            
+            # Cloud Calc (Now on clean data)
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
             df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
@@ -144,7 +148,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
             wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            # --- RS & BANDS (Daily) ---
+            # --- RS & BANDS ---
             bench_ticker = meta[1]
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
@@ -152,46 +156,44 @@ if st.button("RUN ANALYSIS", type="primary"):
                 aligned = pd.concat([df_d['Close'], bench_df['Close']], axis=1, join='inner')
                 rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
                 rs_sma18 = calc_sma(rs_series, 18)
-                
-                c_rs = rs_series.iloc[-1]
-                c_rs_sma = rs_sma18.iloc[-1]
-                p_rs_sma = rs_sma18.iloc[-2]
-                pp_rs_sma = rs_sma18.iloc[-3]
-                
+                c_rs = rs_series.iloc[-1]; c_rs_sma = rs_sma18.iloc[-1]; p_rs_sma = rs_sma18.iloc[-2]
                 lower_band = rs_sma18.iloc[-1] * 0.995
                 rs_score_pass = (c_rs >= lower_band) and (c_rs_sma >= p_rs_sma)
+                pp_rs_sma = rs_sma18.iloc[-3]
                 rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
-            # --- AD LOGIC (Daily) ---
+            # --- AD LOGIC ---
             ad_pass = False
             if not pd.isna(dc['AD_SMA18']):
                 ad_lower = dc['AD_SMA18'] * 0.995
                 ad_pass = (dc['AD'] >= ad_lower) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
             
-            # --- IMPULSE (Mixed) ---
-            # Weekly Uptrend?
+            # --- VOLUME LOGIC (HYBRID) ---
+            # Check Today (Partial) OR Yesterday (Confirmed)
+            vol_msg = "NORMAL"
+            if dc['Volume'] > (dc['VolSMA'] * 1.5): vol_msg = "SPIKE (Live)"
+            elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
+            elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
+            elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
+
+            # --- IMPULSE ---
             w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
-            # Daily Health?
             d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
-            
             w_pulse = "NO"
             if w_uptrend: w_pulse = "GOOD" if d_health_ok else "WEAK"
             
             # --- SCORES ---
-            # Weekly Score (Simulated based on Weekly Data)
-            # W-Price, W-Trend, W-Align, W-Cloud...
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
             if wc['SMA18'] > wp['SMA18']: w_score += 1
             if wc['SMA18'] > wc['SMA40']: w_score += 1
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
-            if wc['SMA8'] > 0: w_score += 1 # Free point if data exists
+            if wc['SMA8'] > 0: w_score += 1 
             
-            # Daily Score
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
             d_score = sum(d_chk.values())
 
-            # --- LOGIC GATES ---
+            # --- DECISION ---
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
                 if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
@@ -216,13 +218,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             # Stops
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
             stop_dist = 2.618 * atr
-            shares = int(final_risk / stop_dist) if stop_dist > 0 and "WATCH" not in decision and "AVOID" not in decision else 0
-            # Fix final_risk reference
             final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
-            shares = int(final_risk / stop_dist) if stop_dist > 0 and "BUY" in decision or "SCOUT" in decision else 0
-            
+            shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
             stop_price = dc['Close'] - stop_dist
-            stop_pct = (stop_dist / dc['Close']) * 100
+            stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
 
             row = {
                 "Sector": meta[0], "Industry": meta[2], "Ticker": t,
@@ -231,7 +230,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
                 "Structure": "Above 18" if d_chk['Price'] else "BELOW 18",
                 "Ichimoku Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
-                "Volume": "NORMAL", "Action": decision, "Reasoning": reason,
+                "Volume": vol_msg, "Action": decision, "Reasoning": reason,
                 "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
             }
             results.append(row)
