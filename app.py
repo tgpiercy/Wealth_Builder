@@ -209,4 +209,63 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             vix_val = vix.iloc[-1]['Close']
             if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
-            elif vix_val > 20: risk_per_trade = RISK_UNIT / 2
+            elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
+            else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
+        else:
+             mkt_score = 0; vix_val = 0; vix_msg = "Error Loading Market Data"
+
+        col1, col2 = st.columns(2)
+        col1.metric("Market Score", f"{mkt_score}/3", delta="Bullish" if mkt_score==3 else "Caution")
+        col2.metric("VIX", f"{vix_val:.2f}", delta=vix_msg, delta_color="inverse")
+
+        # LOOP
+        results = []
+        for t, meta in DATA_MAP.items():
+            if meta[0] in ["BENCH"]: continue
+            w_score, _, _, w_cloud, _, _, w_pulse, _, w_sma8, _, _, w_rs_exit = get_titan_score(t, 'W')
+            d_score, d_chk, d_atr, _, d_vol, d_ad_stat, d_pulse, d_200, _, d_price, d_atr_val, d_rs_exit = get_titan_score(t, 'D')
+            
+            decision = "AVOID"; reason = "Low Score"
+            if w_score == 5:
+                if d_score >= 5: decision = "BUY"; reason = "Score 5/5"
+                elif d_score == 4: decision = "SOON"; reason = "D-Score 4"
+                elif d_score == 3: decision = "SCOUT"; reason = "Dip Buy"
+                else: decision = "WATCH"; reason = "Daily Weak"
+            elif w_score == 4:
+                if d_score == 5: decision = "STRONG BUY"; reason = "Score 4/5"
+                elif d_score >= 3: decision = "SCOUT"; reason = "Dip Buy"
+                else: decision = "WATCH"; reason = "Daily Weak"
+            else: decision = "AVOID"; reason = "Weekly Weak"
+
+            if not w_sma8: decision = "WATCH"; reason = "BELOW W-SMA8"
+            elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak" 
+            elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
+            elif "BUY" in decision and not d_200: decision = "SCOUT"; reason = "Below 200MA"
+            elif not w_cloud and "BUY" in decision: decision = "WATCH"; reason = "Cloud Fail"
+            elif "SCOUT" in decision and not d_chk['Price']: decision = "WATCH"; reason = "Price Low"
+            elif d_rs_exit: decision = "WATCH"; reason = "RS BREAK"
+            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): decision = "WATCH"; reason = "VIX Lock"
+
+            final_risk = risk_per_trade
+            if "SCOUT" in decision: final_risk = risk_per_trade / 3
+            stop_dist = 2.618 * d_atr_val
+            shares = int(final_risk / stop_dist) if stop_dist > 0 and "WATCH" not in decision and "AVOID" not in decision else 0
+            stop_price = d_price - stop_dist
+            stop_pct = (stop_dist/d_price)*100 if d_price else 0
+
+            # EXACT COLUMN NAMES AS COLAB
+            row = {
+                "Sector": meta[0], "Industry": meta[2], "Ticker": t,
+                "Weekly SMA8": "PASS" if w_sma8 else "FAIL", 
+                "Weekly Impulse": w_pulse, 
+                "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
+                "Structure": "Above 18" if d_chk.get('Price') else "BELOW 18",
+                "Ichimoku Cloud": "PASS" if w_cloud else "FAIL", "A/D Breadth": d_ad_stat,
+                "Volume": d_vol, "Action": decision, "Reasoning": reason,
+                "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
+            }
+            results.append(row)
+        
+        # DISPLAY AS HTML (Forces Colors)
+        df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
+        st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
