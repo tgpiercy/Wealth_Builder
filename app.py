@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.3")
-st.caption("Institutional Protocol: Diagnostic Mode")
+st.title("🛡️ Titan Strategy v47.4")
+st.caption("Institutional Protocol: Strict Logic Match")
 
 RISK_UNIT = 2300  
 
@@ -77,91 +77,53 @@ def style_final(styler):
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET DIAGNOSTIC ---
-    # We fetch SPY, IEF, and VIX separately to ensure they exist before doing anything else.
-    with st.spinner('Checking Market Vitals (SPY, IEF, VIX)...'):
+    # PHASE 1: MARKET DIAGNOSTIC
+    with st.spinner('Checking Market Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         
         for t in market_tickers:
             try:
-                # Force download with auto_adjust=True to get clean close data
                 df = yf.download(t, period="2y", interval="1d", progress=False, auto_adjust=True)
-                
-                # Column Cleaning (Fixes the MultiIndex Bug)
                 if isinstance(df.columns, pd.MultiIndex):
                     if t in df.columns.get_level_values(0): df.columns = df.columns.droplevel(0)
                     elif t in df.columns.get_level_values(1): df.columns = df.columns.droplevel(1)
-                
                 df.index = pd.to_datetime(df.index).tz_localize(None)
-                if not df.empty and 'Close' in df.columns:
-                     market_data[t] = df
-            except Exception as e:
-                pass
+                if not df.empty and 'Close' in df.columns: market_data[t] = df
+            except: pass
         
-        # Calculate Market Health
         spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
-        
-        mkt_score = 0; vix_val = 0; vix_msg = "Error: Missing Data"
-        diag_msg = []
+        mkt_score = 0; vix_val = 0; vix_msg = "Error"
         
         if spy is not None and ief is not None and vix is not None:
-            # 1. SPY Trend
-            spy_ma = calc_sma(spy['Close'], 18).iloc[-1]
-            if spy.iloc[-1]['Close'] > spy_ma: 
-                mkt_score += 1
-            else:
-                diag_msg.append("SPY < SMA18")
-                
-            # 2. Risk Ratio
+            if spy.iloc[-1]['Close'] > calc_sma(spy['Close'], 18).iloc[-1]: mkt_score += 1
+            
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            ratio_sma18 = calc_sma(ratio, 18)
-            if ratio.iloc[-1] > ratio_sma18.iloc[-1]: 
-                mkt_score += 1
-            else:
-                diag_msg.append("Ratio < SMA18")
+            if ratio.iloc[-1] > calc_sma(ratio, 18).iloc[-1]: mkt_score += 1
 
-            # 3. VIX
             vix_val = vix.iloc[-1]['Close']
-            if vix_val < 20: 
-                mkt_score += 1
-            else:
-                diag_msg.append("VIX > 20")
+            if vix_val < 20: mkt_score += 1
 
-            # Risk sizing
             if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
             elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
             else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
-            
         else:
-            # Diagnostic Failure
-            missing = []
-            if spy is None: missing.append("SPY")
-            if ief is None: missing.append("IEF")
-            if vix is None: missing.append("VIX")
-            vix_msg = f"❌ FAILED LOAD: {', '.join(missing)}"
-            risk_per_trade = 0 # Safety Lock
-            
-    # Display Dashboard Header
+            risk_per_trade = 0
+
     col1, col2 = st.columns(2)
-    score_color = "Bullish" if mkt_score==3 else ("Caution" if mkt_score > 0 else "Bearish/Error")
+    score_color = "Bullish" if mkt_score==3 else ("Caution" if mkt_score > 0 else "Bearish")
     col1.metric("Market Score", f"{mkt_score}/3", delta=score_color)
     col2.metric("VIX", f"{vix_val:.2f}", delta=vix_msg, delta_color="inverse")
-    
-    if mkt_score < 3 and spy is not None:
-        st.warning(f"Market Weakness Detected: {', '.join(diag_msg)}")
 
-    # --- PHASE 2: ASSET ANALYSIS ---
+    # PHASE 2: SCANNER
     with st.spinner('Scanning Assets...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {} 
-        
-        # Add market data to cache so we don't re-fetch
         cache_d.update(market_data)
         
         for t in tickers:
-            if t in cache_d: continue # Skip if already loaded
+            if t in cache_d: continue
             try:
                 tk = yf.Ticker(t)
                 df_d = tk.history(period="5y", interval="1d")
@@ -174,7 +136,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             if meta[0] in ["BENCH"]: continue
             if t not in cache_d: continue
             
-            # DAILY DATA
+            # DATA
             df_d = cache_d[t].copy()
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -184,11 +146,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # WEEKLY RESAMPLE
+            # WEEKLY RESAMPLE (Fixed)
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
             df_w.dropna(subset=['Close'], inplace=True)
-            
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
             df_w['SMA40'] = calc_sma(df_w['Close'], 40)
@@ -199,7 +160,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
             wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            # RS & BANDS
+            # RS & AD & VOL
             bench_ticker = meta[1]
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
@@ -208,28 +169,19 @@ if st.button("RUN ANALYSIS", type="primary"):
                 rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
                 rs_sma18 = calc_sma(rs_series, 18)
                 c_rs = rs_series.iloc[-1]; c_rs_sma = rs_sma18.iloc[-1]; p_rs_sma = rs_sma18.iloc[-2]
-                lower_band = rs_sma18.iloc[-1] * 0.995
-                rs_score_pass = (c_rs >= lower_band) and (c_rs_sma >= p_rs_sma)
+                rs_score_pass = (c_rs >= rs_sma18.iloc[-1] * 0.995) and (c_rs_sma >= p_rs_sma)
                 pp_rs_sma = rs_sma18.iloc[-3]
                 rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
-            # AD LOGIC
             ad_pass = False
             if not pd.isna(dc['AD_SMA18']):
-                ad_lower = dc['AD_SMA18'] * 0.995
-                ad_pass = (dc['AD'] >= ad_lower) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
+                ad_pass = (dc['AD'] >= dc['AD_SMA18'] * 0.995) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
             
-            # VOLUME (Hybrid)
             vol_msg = "NORMAL"
-            live_spike = dc['Volume'] > (dc['VolSMA'] * 1.5)
-            live_high = dc['Volume'] > dc['VolSMA']
-            prev_spike = dp['Volume'] > (dp['VolSMA'] * 1.5)
-            prev_high = dp['Volume'] > dp['VolSMA']
-
-            if live_spike: vol_msg = "SPIKE (Live)"
-            elif prev_spike: vol_msg = "SPIKE (Prev)"
-            elif live_high: vol_msg = "HIGH (Live)"
-            elif prev_high: vol_msg = "HIGH (Prev)"
+            if dc['Volume'] > (dc['VolSMA'] * 1.5): vol_msg = "SPIKE (Live)"
+            elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
+            elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
+            elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
 
             # IMPULSE
             w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
@@ -237,13 +189,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             w_pulse = "NO"
             if w_uptrend: w_pulse = "GOOD" if d_health_ok else "WEAK"
             
-            # SCORES
+            # --- SCORES (CORRECTED) ---
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
             if wc['SMA18'] > wp['SMA18']: w_score += 1
             if wc['SMA18'] > wc['SMA40']: w_score += 1
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
-            if wc['SMA8'] > 0: w_score += 1 
+            # BUG FIX: Was checking SMA8 > 0. Now checks Price > SMA8
+            if wc['Close'] > wc['SMA8']: w_score += 1 
             
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
             d_score = sum(d_chk.values())
