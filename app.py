@@ -5,7 +5,7 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v46.8")
+st.title("🛡️ Titan Strategy v46.9")
 st.caption("Institutional Protocol: Trend + Volatility + Relative Strength")
 
 RISK_UNIT = 2300  
@@ -37,7 +37,8 @@ DATA_MAP = {
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
-    return series.rolling(window=length).mean()
+    # min_periods=1 ensures we get values even if there's a slight gap, though we clean data first
+    return series.rolling(window=length, min_periods=length).mean()
 
 def calc_ad(high, low, close, volume):
     mfm = ((close - low) - (high - close)) / (high - low)
@@ -59,7 +60,7 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
-# --- STYLING FUNCTION (Forces Traffic Light Colors) ---
+# --- STYLING ---
 def style_final(styler):
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
@@ -76,38 +77,47 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Calculating (10 Years History for Precision)...'):
+    with st.spinner('Checking Market Data...'):
         tickers = list(DATA_MAP.keys())
         data_cache = {}
 
         for t in tickers:
             try:
-                # 1. FETCH 10Y DATA (Matches Colab Math)
+                # 1. FETCH
                 ticker_obj = yf.Ticker(t)
                 df = ticker_obj.history(period="10y") 
                 
-                # Clean Timezone
+                # 2. CLEAN INDEX & COLS
                 df.index = pd.to_datetime(df.index).tz_localize(None)
-
-                # Ensure we have columns
+                
+                # 3. VERIFY
                 if not df.empty and 'Close' in df.columns:
                      data_cache[t] = df
-            except Exception as e:
-                pass
+            except: pass
 
-        # 2. CALCULATION ENGINE
+        # ENGINE
         def get_titan_score(ticker, timeframe='D'):
             try:
                 if ticker not in data_cache: return 0, {}, 0, False, "NORMAL", "NEUTRAL", "NO", False, False, 0, 0, False
                 df_raw = data_cache[ticker].copy()
                 bench_ticker = DATA_MAP[ticker][1]
                 
-                # PREPARE DATA
+                # --- WEEKLY AGGREGATION (THE FIX) ---
+                # We construct the Weekly DF carefully to avoid NaNs
                 df_w = pd.DataFrame()
                 df_w['Close'] = df_raw['Close'].resample('W').last()
+                df_w['High'] = df_raw['High'].resample('W').max()
+                df_w['Low'] = df_raw['Low'].resample('W').min()
+                df_w['Volume'] = df_raw['Volume'].resample('W').sum()
+                
+                # AGGRESSIVE CLEANING: Drop any weeks that came up empty (NaN)
+                df_w.dropna(inplace=True) 
+
+                # NOW Calc Indicators on Clean Data
                 df_w['SMA18'] = calc_sma(df_w['Close'], 18)
                 df_w['SMA40'] = calc_sma(df_w['Close'], 40)
                 
+                # --- DAILY DATA ---
                 df_d = df_raw.copy()
                 df_d['SMA8'] = calc_sma(df_d['Close'], 8)
                 df_d['SMA18'] = calc_sma(df_d['Close'], 18)
@@ -118,13 +128,14 @@ if st.button("RUN ANALYSIS", type="primary"):
                 df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
                 df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
                 
+                # --- SELECT ACTIVE DF ---
                 if timeframe == 'W':
                     df = df_w.copy()
-                    df['High'] = df_raw['High'].resample('W').max()
-                    df['Low'] = df_raw['Low'].resample('W').min()
-                    df['Close'] = df_raw['Close'].resample('W').last()
-                    df['Volume'] = df_raw['Volume'].resample('W').sum()
+                    df['SMA8'] = calc_sma(df['Close'], 8)
                     df['VolSMA'] = calc_sma(df['Volume'], 18)
+                    # Cloud on Weekly
+                    span_a, span_b = calc_ichimoku(df['High'], df['Low'], df['Close'])
+                    df['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
                 else:
                     df = df_d.copy()
 
@@ -132,7 +143,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 rs_score_pass = False; rs_breakdown = False
                 if bench_ticker in data_cache:
                     bench_df = data_cache[bench_ticker]
-                    # Ensure alignment of dates
+                    # Align Dates
                     aligned = pd.concat([df_d['Close'], bench_df['Close']], axis=1, join='inner')
                     rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
                     rs_sma18 = calc_sma(rs_series, 18)
@@ -144,12 +155,10 @@ if st.button("RUN ANALYSIS", type="primary"):
                     c_rs_sma = rs_sma18.iloc[-1]
                     p_rs_sma = rs_sma18.iloc[-2]
                     
-                    # RS Logic: In Zone (Above Lower) AND Not Down
                     rs_in_zone = c_rs >= lower_band.iloc[-1]
                     rs_not_down = c_rs_sma >= p_rs_sma
                     rs_score_pass = rs_in_zone and rs_not_down
                     
-                    # Hard RS Exit
                     pp_rs_sma = rs_sma18.iloc[-3]
                     rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
@@ -161,6 +170,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 ad_score_pass = (c_ad >= ad_lower_band) and (c_ad_sma >= p_ad_sma)
 
                 # IMPULSE (Composite)
+                # Use df_w for weekly trend checks
                 wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
                 w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
                 dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
@@ -176,28 +186,34 @@ if st.button("RUN ANALYSIS", type="primary"):
                 score = sum(chk.values())
                 
                 ad_status = "STRONG" if ad_score_pass else "WEAK"
-                span_a, span_b = calc_ichimoku(df['High'], df['Low'], df['Close'])
-                cloud_top = pd.concat([span_a, span_b], axis=1).max(axis=1).iloc[-1]
-                cloud_ok = c['Close'] > cloud_top if timeframe == 'W' else True
+                
+                # Cloud Check
+                cloud_ok = True
+                if timeframe == 'W':
+                     # Cloud is calculated 26 periods ahead, so we just check if Price > Current SpanA/B
+                     # Note: Our calc_ichimoku shifts the plot forward. 
+                     # So df['Cloud_Top'] at index -1 IS the cloud value for today.
+                     cloud_ok = c['Close'] > c['Cloud_Top']
+                
                 atr_val = calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
                 vol_status = "SPIKE" if c['Volume'] > (c['VolSMA'] * 1.5) else ("HIGH" if c['Volume'] > c['VolSMA'] else "NORMAL")
+                
+                # SMA8 Check (Weekly or Daily depending on timeframe)
+                sma8_ok = c['Close'] > c['SMA8']
 
-                return score, chk, atr_val, cloud_ok, vol_status, ad_status, pulse_status, c['Close'] > c['SMA200'], c['Close'] > c['SMA8'], c['Close'], atr_val, rs_breakdown
+                return score, chk, atr_val, cloud_ok, vol_status, ad_status, pulse_status, c['Close'] > c['SMA200'], sma8_ok, c['Close'], atr_val, rs_breakdown
             except: return 0, {}, 0, False, "NORMAL", "NEUTRAL", "NO", False, False, 0, 0, False
 
         # MARKET HEALTH
         spy = data_cache.get("SPY"); ief = data_cache.get("IEF"); vix = data_cache.get("^VIX")
-        
         mkt_score = 0; vix_val = 0; vix_msg = "No Data"
         if spy is not None and ief is not None and vix is not None:
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
             ratio_sma18 = calc_sma(ratio, 18)
-            
             if spy.iloc[-1]['Close'] > calc_sma(spy['Close'], 18).iloc[-1]: mkt_score += 1
             if ratio.iloc[-1] > ratio_sma18.iloc[-1]: mkt_score += 1
             if vix.iloc[-1]['Close'] < 20: mkt_score += 1
-            
             vix_val = vix.iloc[-1]['Close']
             if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
             elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
@@ -242,7 +258,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_price = d_price - stop_dist
             stop_pct = (stop_dist/d_price)*100 if d_price else 0
 
-            # EXACT COLUMN NAMES AS COLAB
             row = {
                 "Sector": meta[0], "Industry": meta[2], "Ticker": t,
                 "Weekly SMA8": "PASS" if w_sma8 else "FAIL", 
@@ -255,6 +270,5 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
         
-        # DISPLAY AS HTML (Forces Colors)
         df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
         st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
