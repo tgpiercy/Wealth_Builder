@@ -5,7 +5,7 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v46.6")
+st.title("🛡️ Titan Strategy v46.7")
 st.caption("Institutional Protocol: Trend + Volatility + Relative Strength")
 
 RISK_UNIT = 2300  
@@ -59,7 +59,7 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
-# --- STYLING FUNCTION ---
+# --- STYLING FUNCTION (Traffic Lights) ---
 def style_final(styler):
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
@@ -76,30 +76,22 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Fetching Data & Crunching Numbers...'):
+    with st.spinner('Fetching Data (This may take 30s)...'):
         tickers = list(DATA_MAP.keys())
         data_cache = {}
 
-        # 1. ROBUST DATA FETCHING
+        # 1. SAFER DATA FETCHING (yf.Ticker)
+        # This prevents the "MultiIndex" bugs causing bad data structure
         for t in tickers:
             try:
-                # Fetch 10y to ensure moving averages are stable
-                df = yf.download(t, period="10y", interval="1d", progress=False, auto_adjust=True)
+                # Use Ticker().history instead of download() for stability
+                ticker_obj = yf.Ticker(t)
+                df = ticker_obj.history(period="5y") 
                 
-                # --- FIX: COLUMN CLEANER ---
-                # Check if columns are MultiIndex (e.g., ('AAPL', 'Close'))
-                if isinstance(df.columns, pd.MultiIndex):
-                    # If the ticker name is in the columns, drop that level
-                    if t in df.columns.get_level_values(0):
-                         df.columns = df.columns.droplevel(0)
-                    # Backup: Try dropping level 1 if level 0 failed
-                    elif t in df.columns.get_level_values(1):
-                         df.columns = df.columns.droplevel(1)
-                
-                # --- FIX: TIMEZONE ---
-                # Strip timezones to prevent index mismatch errors
+                # Clean Timezone
                 df.index = pd.to_datetime(df.index).tz_localize(None)
 
+                # Ensure we have columns
                 if not df.empty and 'Close' in df.columns:
                      data_cache[t] = df
             except Exception as e:
@@ -139,6 +131,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                     df = df_d.copy()
 
                 # RS & BANDS
+                rs_score_pass = False; rs_breakdown = False
                 if bench_ticker in data_cache:
                     bench_df = data_cache[bench_ticker]
                     # Ensure alignment of dates
@@ -152,15 +145,15 @@ if st.button("RUN ANALYSIS", type="primary"):
                     c_rs = rs_series.iloc[-1]
                     c_rs_sma = rs_sma18.iloc[-1]
                     p_rs_sma = rs_sma18.iloc[-2]
-                    pp_rs_sma = rs_sma18.iloc[-3]
                     
+                    # RS Logic: In Zone (Above Lower) AND Not Down
                     rs_in_zone = c_rs >= lower_band.iloc[-1]
                     rs_not_down = c_rs_sma >= p_rs_sma
                     rs_score_pass = rs_in_zone and rs_not_down
+                    
+                    # Hard RS Exit
+                    pp_rs_sma = rs_sma18.iloc[-3]
                     rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
-                else:
-                    rs_score_pass = False
-                    rs_breakdown = False
 
                 # AD LOGIC
                 c_ad = df['AD'].iloc[-1]
@@ -197,12 +190,12 @@ if st.button("RUN ANALYSIS", type="primary"):
         # MARKET HEALTH
         spy = data_cache.get("SPY"); ief = data_cache.get("IEF"); vix = data_cache.get("^VIX")
         
+        mkt_score = 0; vix_val = 0; vix_msg = "No Data"
         if spy is not None and ief is not None and vix is not None:
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
             ratio_sma18 = calc_sma(ratio, 18)
             
-            mkt_score = 0
             if spy.iloc[-1]['Close'] > calc_sma(spy['Close'], 18).iloc[-1]: mkt_score += 1
             if ratio.iloc[-1] > ratio_sma18.iloc[-1]: mkt_score += 1
             if vix.iloc[-1]['Close'] < 20: mkt_score += 1
@@ -211,8 +204,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
             elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
             else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
-        else:
-             mkt_score = 0; vix_val = 0; vix_msg = "Error Loading Market Data"
 
         col1, col2 = st.columns(2)
         col1.metric("Market Score", f"{mkt_score}/3", delta="Bullish" if mkt_score==3 else "Caution")
@@ -237,7 +228,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 else: decision = "WATCH"; reason = "Daily Weak"
             else: decision = "AVOID"; reason = "Weekly Weak"
 
-            if not w_sma8: decision = "WATCH"; reason = "BELOW W-SMA8"
+            if not w_sma8: decision = "WATCH"; reason = "BELOW\nW-SMA8"
             elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak" 
             elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
             elif "BUY" in decision and not d_200: decision = "SCOUT"; reason = "Below 200MA"
@@ -269,3 +260,11 @@ if st.button("RUN ANALYSIS", type="primary"):
         # DISPLAY AS HTML (Forces Colors)
         df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
         st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
+        
+        # DEBUG CHECK
+        with st.expander("🛠️ DEBUG DATA (Check this if Output is Empty)"):
+            st.write("Checking SPY Data Structure:")
+            if "SPY" in data_cache:
+                st.write(data_cache["SPY"].tail())
+            else:
+                st.write("❌ SPY Not Loaded")
