@@ -59,6 +59,21 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
+# --- STYLING FUNCTION (The "Traffic Light" Logic) ---
+def style_final(styler):
+    return styler.set_table_styles([
+        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
+        {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
+    ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00' if "SOON" in v else 'color: white')), subset=["Action"])\
+      .map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"])\
+      .map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku Cloud", "Weekly SMA8"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly Impulse"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly Score (Max 5)", "Daily Score (Max 5)"])\
+      .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
+      .hide(axis='index')
+
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     with st.spinner('Fetching Data & Crunching Numbers...'):
@@ -131,8 +146,6 @@ if st.button("RUN ANALYSIS", type="primary"):
                 c_ad_sma = df['AD_SMA18'].iloc[-1]
                 p_ad_sma = df['AD_SMA18'].iloc[-2]
                 ad_lower_band = c_ad_sma * 0.995
-                
-                # AD Logic: In Zone (Above Lower) AND Not Down
                 ad_score_pass = (c_ad >= ad_lower_band) and (c_ad_sma >= p_ad_sma)
 
                 # IMPULSE (Composite)
@@ -199,7 +212,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 else: decision = "WATCH"; reason = "Daily Weak"
             else: decision = "AVOID"; reason = "Weekly Weak"
 
-            if not w_sma8: decision = "WATCH"; reason = "BELOW W-SMA8"
+            if not w_sma8: decision = "WATCH"; reason = "BELOW\nW-SMA8"
             elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak" 
             elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
             elif "BUY" in decision and not d_200: decision = "SCOUT"; reason = "Below 200MA"
@@ -215,14 +228,19 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_price = d_price - stop_dist
             stop_pct = (stop_dist/d_price)*100 if d_price else 0
 
+            # EXACT COLUMN NAMES AS COLAB
             row = {
-                "Ticker": t,
-                "Structure": "🟢 Above 18" if d_chk.get('Price') else "🟠 BELOW 18",
-                "Action": decision,
-                "Reason": reason,
-                "Stop": f"${stop_price:.2f} (-{stop_pct:.1f}%)",
-                "Size": f"{shares} shares"
+                "Sector": meta[0], "Industry": meta[2], "Ticker": t,
+                "Weekly SMA8": "PASS" if w_sma8 else "FAIL", 
+                "Weekly Impulse": w_pulse, 
+                "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
+                "Structure": "Above 18" if d_chk.get('Price') else "BELOW 18",
+                "Ichimoku Cloud": "PASS" if w_cloud else "FAIL", "A/D Breadth": d_ad_stat,
+                "Volume": d_vol, "Action": decision, "Reasoning": reason,
+                "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
             }
             results.append(row)
         
-        st.dataframe(pd.DataFrame(results).style.map(lambda v: 'color: #22c55e; font-weight: bold' if 'BUY' in str(v) else ('color: #f59e0b; font-weight: bold' if 'SCOUT' in str(v) else ('color: #ef4444; font-weight: bold' if 'WATCH' in str(v) else '')), subset=['Action']))
+        # DISPLAY AS HTML (Forces Colors)
+        df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
+        st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
