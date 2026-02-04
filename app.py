@@ -5,7 +5,7 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v46.4")
+st.title("🛡️ Titan Strategy v46.5")
 st.caption("Institutional Protocol: Trend + Volatility + Relative Strength")
 
 RISK_UNIT = 2300  
@@ -82,8 +82,16 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         for t in tickers:
             try:
-                df = yf.download(t, period="2y", interval="1d", progress=False, auto_adjust=True)
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+                # FIX 1: Set period to 10y to match Colab Math
+                df = yf.download(t, period="10y", interval="1d", progress=False, auto_adjust=True)
+                
+                # FIX 2: Handle MultiIndex (yfinance v0.2 bug)
+                if isinstance(df.columns, pd.MultiIndex): 
+                    df.columns = df.columns.get_level_values(0)
+                
+                # FIX 3: Ensure index is Datetime
+                df.index = pd.to_datetime(df.index)
+                
                 if not df.empty: data_cache[t] = df
             except: pass
 
