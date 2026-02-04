@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.1")
-st.caption("Institutional Protocol: Weekly Cloud + Hybrid Volume Check")
+st.title("🛡️ Titan Strategy v47.2")
+st.caption("Institutional Protocol: Daily-to-Weekly Resampling (Single Source of Truth)")
 
 RISK_UNIT = 2300  
 
@@ -46,8 +46,8 @@ def calc_ad(high, low, close, volume):
     return mfv.cumsum()
 
 def calc_ichimoku(high, low, close):
-    # Note: Cloud is projected forward 26 periods.
-    # We shift it here so that index [t] contains the cloud value relevant for price [t]
+    # Cloud projected forward 26 periods.
+    # We shift result so index [t] aligns with Price [t]
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
     span_a = ((tenkan + kijun) / 2).shift(26)
@@ -78,25 +78,17 @@ def style_final(styler):
 
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
-    with st.spinner('Checking Volume & Cloud Data...'):
+    with st.spinner('Fetching Daily Data & Resampling to Weekly (Precision Mode)...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {} 
-        cache_w = {} 
-
+        
+        # 1. FETCH DAILY ONLY (5 Years)
         for t in tickers:
             try:
-                # 1. FETCH DAILY (2y is enough for Daily Score)
                 tk = yf.Ticker(t)
-                df_d = tk.history(period="2y", interval="1d")
+                df_d = tk.history(period="5y", interval="1d")
                 df_d.index = pd.to_datetime(df_d.index).tz_localize(None)
                 if not df_d.empty and 'Close' in df_d.columns: cache_d[t] = df_d
-
-                # 2. FETCH WEEKLY (5y ensures valid Cloud Shift)
-                df_w = tk.history(period="5y", interval="1wk")
-                df_w.index = pd.to_datetime(df_w.index).tz_localize(None)
-                # CRITICAL FIX: Drop empty rows before math
-                df_w.dropna(subset=['Close'], inplace=True)
-                if not df_w.empty and 'Close' in df_w.columns: cache_w[t] = df_w
             except: pass
 
         # MARKET HEALTH
@@ -122,7 +114,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         results = []
         for t, meta in DATA_MAP.items():
             if meta[0] in ["BENCH"]: continue
-            if t not in cache_d or t not in cache_w: continue
+            if t not in cache_d: continue
             
             # --- DAILY ---
             df_d = cache_d[t].copy()
@@ -134,13 +126,18 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # --- WEEKLY (With Fixes) ---
-            df_w = cache_w[t].copy()
+            # --- WEEKLY RESAMPLE (The Fix) ---
+            # We build Weekly from Daily to avoid Yahoo Glitches
+            logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
+            # Resample to Friday (W-FRI) to align with standard bars
+            df_w = df_d.resample('W-FRI').agg(logic)
+            # Remove any empty rows created by holidays
+            df_w.dropna(subset=['Close'], inplace=True)
+            
+            # Weekly Indicators
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
             df_w['SMA40'] = calc_sma(df_w['Close'], 40)
-            
-            # Cloud Calc (Now on clean data)
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
             df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
@@ -168,13 +165,18 @@ if st.button("RUN ANALYSIS", type="primary"):
                 ad_lower = dc['AD_SMA18'] * 0.995
                 ad_pass = (dc['AD'] >= ad_lower) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
             
-            # --- VOLUME LOGIC (HYBRID) ---
-            # Check Today (Partial) OR Yesterday (Confirmed)
+            # --- VOLUME LOGIC (Hybrid Fix) ---
+            # If Today(Live) is weak, check Yesterday(Prev) to verify if it's just morning quietness
             vol_msg = "NORMAL"
-            if dc['Volume'] > (dc['VolSMA'] * 1.5): vol_msg = "SPIKE (Live)"
-            elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
-            elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
-            elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
+            live_spike = dc['Volume'] > (dc['VolSMA'] * 1.5)
+            live_high = dc['Volume'] > dc['VolSMA']
+            prev_spike = dp['Volume'] > (dp['VolSMA'] * 1.5)
+            prev_high = dp['Volume'] > dp['VolSMA']
+
+            if live_spike: vol_msg = "SPIKE (Live)"
+            elif prev_spike: vol_msg = "SPIKE (Prev)"
+            elif live_high: vol_msg = "HIGH (Live)"
+            elif prev_high: vol_msg = "HIGH (Prev)"
 
             # --- IMPULSE ---
             w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
