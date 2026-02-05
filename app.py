@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Split Metrics")
+st.title(f"🛡️ Titan Strategy v51.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: CAD Primary View")
 
 RISK_UNIT = 2300  
 
@@ -702,8 +702,8 @@ if st.button("RUN ANALYSIS", type="primary"):
         
         # SPLIT INTO 4 COLUMNS
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f}")
-        c2.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f}")
+        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f} Open P&L")
+        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f} Open P&L")
         c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
