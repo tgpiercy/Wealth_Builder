@@ -5,20 +5,69 @@ import numpy as np
 import os
 from datetime import datetime
 
+# --- SECURITY CONFIGURATION ---
+# CHANGE THESE PASSWORDS!
+CREDENTIALS = {
+    "dad": "1234",
+    "son": "1234"
+}
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v48.3")
-st.caption("Institutional Protocol: Total Portfolio Intelligence (Cash + MANL)")
+
+# --- AUTHENTICATION LOGIC ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+    st.session_state.user = None
+
+def check_login():
+    username = st.session_state.username_input
+    password = st.session_state.password_input
+    
+    if username in CREDENTIALS and CREDENTIALS[username] == password:
+        st.session_state.authenticated = True
+        st.session_state.user = username
+    else:
+        st.error("Incorrect Username or Password")
+
+def logout():
+    st.session_state.authenticated = False
+    st.session_state.user = None
+    st.rerun()
+
+# --- LOGIN SCREEN ---
+if not st.session_state.authenticated:
+    st.title("🛡️ Titan Strategy Login")
+    st.write("Please sign in to access your portfolio.")
+    
+    with st.form("login_form"):
+        st.text_input("Username", key="username_input")
+        st.text_input("Password", type="password", key="password_input")
+        st.form_submit_button("Login", on_click=check_login)
+    
+    st.stop() # STOP EXECUTION HERE IF NOT LOGGED IN
+
+# ==============================================================================
+#  TITAN STRATEGY APP (ONLY RUNS IF LOGGED IN)
+# ==============================================================================
+
+# --- DYNAMIC FILE HANDLING ---
+# This creates separate files: 'portfolio_dad.csv' and 'portfolio_son.csv'
+current_user = st.session_state.user
+PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
+
+st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
+if st.sidebar.button("Log Out"):
+    logout()
+
+st.title(f"🛡️ Titan Strategy v49.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Multi-User Portfolio Intelligence")
 
 RISK_UNIT = 2300  
-PORTFOLIO_FILE = "portfolio.csv"
 
 # --- DATA MAP ---
 DATA_MAP = {
-    # SPECIAL
-    "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"], # Added
-
-    # INDICES & CORE
+    "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"],
     "SPY": ["BENCH", "SPY", "S&P 500"],
     "DIA": ["BENCH", "SPY", "Dow Jones"],
     "QQQ": ["BENCH", "SPY", "Nasdaq 100"],
@@ -26,8 +75,6 @@ DATA_MAP = {
     "IWC": ["BENCH", "SPY", "Micro-Cap"],
     "HXT.TO": ["CANADA", "SPY", "TSX 60 Index"],
     "IBB": ["THEME", "SPY", "Biotech Core"],
-
-    # SECTORS
     "XLB": ["SECTOR", "SPY", "Materials"],
     "XLC": ["SECTOR", "SPY", "Comm Services"],
     "XLE": ["SECTOR", "SPY", "Energy"],
@@ -39,20 +86,14 @@ DATA_MAP = {
     "XLP": ["SECTOR", "SPY", "Cons Staples"],
     "XLRE": ["SECTOR", "SPY", "Real Estate"],
     "XLU": ["SECTOR", "SPY", "Utilities"],
-
-    # COMMODITIES
     "GLD": ["COMMODITY", "SPY", "Gold Bullion"],
     "SLV": ["COMMODITY", "SPY", "Silver Bullion"],
     "BTC-USD": ["COMMODITY", "SPY", "Bitcoin (USD)"],
-    
-    # THEMES
     "BOTZ": ["THEME", "SPY", "Robotics & AI"],
     "XBI":  ["THEME", "SPY", "Biotechnology"],
     "ICLN": ["THEME", "SPY", "Clean Energy"],
     "REMX": ["THEME", "SPY", "Rare Earth Metals"],
     "GDX":  ["THEME", "SPY", "Gold Miners"],
-    
-    # MACRO
     "IEF": ["BENCH", "SPY", "7-10 Year Treasuries"],
     "RSP": ["BENCH", "SPY", "S&P 500 Equal Weight"], 
     "^VIX": ["BENCH", "SPY", "VIX Volatility Index"]
@@ -184,7 +225,6 @@ def save_portfolio(df):
 st.sidebar.header("💼 Portfolio Manager")
 pf_df = load_portfolio()
 
-# Get Current Cash (Sum of 'CASH' ticker shares)
 cash_rows = pf_df[(pf_df['Ticker'] == 'CASH') & (pf_df['Status'] == 'OPEN')]
 current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
 
@@ -209,9 +249,7 @@ with tab1:
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
             
-            # Deduct from Cash if available
             if current_cash >= (b_shares * b_price):
-                 # Add a negative cash entry to balance
                  cash_id = pf_df["ID"].max() + 1
                  cash_row = pd.DataFrame([{
                     "ID": cash_id, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), 
@@ -252,7 +290,6 @@ with tab2:
                     pf_df.at[row_idx, 'Return'] = ret_pct
                     pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
                     
-                    # Add Cash Proceeds
                     cash_id = pf_df["ID"].max() + 1
                     cash_row = pd.DataFrame([{
                         "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * shares), 
@@ -302,7 +339,6 @@ with tab4:
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET HEALTH ---
     with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
@@ -318,13 +354,11 @@ if st.button("RUN ANALYSIS", type="primary"):
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
-            # 1. SPY
             spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
             if spy_c > spy_sma18: status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
             exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status})
 
-            # 2. Ratio
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
             ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
@@ -334,7 +368,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             else: status = "RISK OFF"
             exposure_rows.append({"Metric": "Power (SPY:IEF)", "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)", "Status": status})
 
-            # 3. VIX
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 20: status = "CALM"; total_exp += 20
             elif vix_c < 25: status = "CAUTION"
@@ -354,22 +387,18 @@ if st.button("RUN ANALYSIS", type="primary"):
             risk_per_trade = 0
             st.error("Market Data Failed to Load")
 
-    # --- PHASE 2: MASTER SCANNER ---
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
         pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
-        # Filter out CASH from scanner logic
         pf_tickers = [x for x in pf_tickers if x != "CASH"]
         all_tickers = list(set(tickers + pf_tickers))
         
         cache_d = {}
         cache_d.update(market_data)
         
-        # Fetch Data
         for t in all_tickers:
             if t in cache_d: continue
             try:
-                # MANL LOGIC: Fetch SPY instead
                 fetch_sym = "SPY" if t == "MANL" else t
                 tk = yf.Ticker(fetch_sym)
                 df = tk.history(period="10y", interval="1d") 
@@ -377,7 +406,6 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
 
-        # ANALYZE
         analysis_db = {}
         results = []
         
@@ -482,7 +510,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "ATR": atr
             }
 
-            if is_scanner and t != "MANL": # Don't show MANL in scanner
+            if is_scanner and t != "MANL":
                 final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
@@ -500,11 +528,9 @@ if st.button("RUN ANALYSIS", type="primary"):
                 }
                 results.append(row)
 
-    # --- PHASE 3: ACTIVE PORTFOLIO ---
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
-        # Calculate Total Portfolio Value
         equity_val = 0.0
         if not open_trades.empty:
             for i, row in open_trades.iterrows():
@@ -518,7 +544,6 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        # Breakdown Metrics
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Net Worth", f"${total_acct:,.2f}")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
@@ -533,12 +558,9 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if t not in analysis_db: continue
                 data = analysis_db[t]
                 
-                # For MANL, we calculate value but don't show "Price" as SPY price in the table unless we want to confusion
-                # Actually, displaying SPY price for MANL is correct behavior as it's the proxy
                 curr_price = data['Price']; cost = float(row['Cost_Basis'])
                 pl_pct = ((curr_price - cost) / cost) * 100
                 
-                # SPY Comp
                 try:
                     buy_date = pd.to_datetime(row['Date'])
                     spy_hist = cache_d['SPY']
@@ -563,12 +585,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
 
-    # --- PHASE 4: PERFORMANCE METRICS (HISTORY) ---
     closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
     if not closed_trades.empty:
         st.subheader("📜 Closed Performance")
         
-        # Stats
         wins = closed_trades[closed_trades['Return'] > 0]
         win_rate = (len(wins) / len(closed_trades)) * 100
         avg_ret = closed_trades['Return'].mean()
@@ -579,7 +599,6 @@ if st.button("RUN ANALYSIS", type="primary"):
         c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
         c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
         
-        # History Table
         hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL"]].copy()
         hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
@@ -594,7 +613,6 @@ if st.button("RUN ANALYSIS", type="primary"):
         st.dataframe(hist_view.style.pipe(style_history))
         st.write("---")
 
-    # --- PHASE 5: DISPLAY SCANNER ---
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
