@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Gold Master (Fixed Formatting)")
+st.title(f"🛡️ Titan Strategy v50.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Net Worth (USD/CAD) + P&L Delta")
 
 RISK_UNIT = 2300  
 
@@ -173,7 +173,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- FIXED PORTFOLIO STYLER (No coloring for Position) ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -580,6 +579,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             agg_trades[t]['TotalCost'] += (s * c)
             
         equity_val = 0.0
+        total_active_cost = 0.0
         pf_rows = []
         
         for t, data in agg_trades.items():
@@ -591,6 +591,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             pos_val = total_shares * curr_price
             equity_val += pos_val
+            total_active_cost += data['TotalCost']
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             
@@ -614,12 +615,13 @@ if st.button("RUN ANALYSIS", type="primary"):
         cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
         invested_pct = 100 - cash_pct
         total_acct_cad = total_acct * cad_rate
+        
+        # Open P&L Calculation
+        open_pl_val = equity_val - total_active_cost
 
         st.subheader("💼 Active Holdings")
-        
-        # FIXED: Metric format string
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"{total_acct:,.2f} USD$ ({total_acct_cad:,.2f} CAD$)")
+        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD  |  ${total_acct_cad:,.2f} CAD", f"${open_pl_val:,.2f} (Open P&L)")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
