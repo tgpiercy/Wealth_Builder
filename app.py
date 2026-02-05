@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Dual-Currency Net Worth Display")
+st.title(f"🛡️ Titan Strategy v49.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Visual Polish & Header Wrapping")
 
 RISK_UNIT = 2300  
 
@@ -127,20 +127,22 @@ def style_final(styler):
         if isinstance(val, str) and '%' in val:
             try:
                 num = float(val.strip('%'))
-                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+                # CHANGED to pure red (#ff0000) for consistency
+                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff0000; font-weight: bold'
             except: return ''
         return ''
 
+    # Headers wrapper included in props
     return styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('white-space', 'normal')]},
+        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00' if "SOON" in v else 'color: white')), subset=["Action"])\
       .map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"])\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"])\
-      .map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku Cloud", "Weekly SMA8"])\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly Impulse"])\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly Score (Max 5)", "Daily Score (Max 5)"])\
+      .map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .map(color_pct, subset=["4W %", "2W %"])\
       .hide(axis='index')
@@ -177,7 +179,7 @@ def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return"])\
+    ]).map(color_pl, subset=["% Return", "vs SPY"])\
       .map(color_pl_dol, subset=["Position ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
@@ -555,11 +557,11 @@ if st.button("RUN ANALYSIS", type="primary"):
                 row = {
                     "Sector": DATA_MAP[t][0] if t in DATA_MAP else "OTHER", "Ticker": t,
                     "4W %": mom_4w, "2W %": mom_2w,
-                    "Weekly SMA8": "PASS" if w_sma8_pass else "FAIL", 
-                    "Weekly Impulse": w_pulse, 
-                    "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
-                    "Structure": "Above 18" if d_chk['Price'] else "BELOW 18",
-                    "Ichimoku Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
+                    "Weekly<br>SMA8": "PASS" if w_sma8_pass else "FAIL", 
+                    "Weekly<br>Impulse": w_pulse, 
+                    "Weekly<br>Score": w_score, "Daily<br>Score": d_score,
+                    "Structure": "ABOVE 18" if d_chk['Price'] else "BELOW 18",
+                    "Ichimoku<br>Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
                     "Volume": vol_msg, "Action": decision, "Reasoning": reason,
                     "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
                 }
@@ -575,9 +577,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             s = row['Shares']
             c = row['Cost_Basis']
             
-            if t not in agg_trades:
-                agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
-            
+            if t not in agg_trades: agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
             agg_trades[t]['Shares'] += s
             agg_trades[t]['TotalCost'] += (s * c)
             
@@ -664,5 +664,6 @@ if st.button("RUN ANALYSIS", type="primary"):
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
-    cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
+    # Updated column list to match wrapped headers
+    cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
     st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
