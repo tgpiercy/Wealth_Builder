@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Net Worth (USD/CAD) + P&L Delta")
+st.title(f"🛡️ Titan Strategy v50.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Fractional Exits & Scaling Out")
 
 RISK_UNIT = 2300  
 
@@ -135,7 +135,7 @@ def style_final(styler):
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00' if "SOON" in v else 'color: white')), subset=["Action"])\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"])\
       .map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"])\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"])\
@@ -173,6 +173,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# --- FIXED PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -285,25 +286,37 @@ with tab2:
     st.caption("Close Position")
     open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
     if not open_trades.empty:
-        trade_opts = open_trades.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} | {x['Date']}", axis=1).tolist()
-        selected_trade_str = st.selectbox("Select Trade to Sell", trade_opts)
+        # Create dictionary to map display string back to ID and Max Shares
+        trade_map = {}
+        opts = []
+        for idx, row in open_trades.iterrows():
+            label = f"ID:{row['ID']} | {row['Ticker']} | {int(row['Shares'])} shares | {row['Date']}"
+            trade_map[label] = {'id': row['ID'], 'max_shares': int(row['Shares']), 'idx': idx}
+            opts.append(label)
+            
+        selected_trade_str = st.selectbox("Select Position", opts)
         
         if selected_trade_str:
-            sel_id = int(selected_trade_str.split("|")[0].replace("ID:", "").strip())
+            sel_data = trade_map[selected_trade_str]
+            sel_id = sel_data['id']
+            max_qty = sel_data['max_shares']
             
             with st.form("sell_trade"):
+                s_shares = st.number_input("Shares to Sell", min_value=1, max_value=max_qty, value=max_qty, step=1)
                 s_date = st.date_input("Sell Date")
                 s_price = st.number_input("Sell Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
                 
                 if st.form_submit_button("Execute Sell"):
-                    row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
+                    row_idx = sel_data['idx']
                     buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
-                    shares = float(pf_df.at[row_idx, 'Shares'])
+                    # Original Buy Date for SPY Calc
                     buy_date_str = pf_df.at[row_idx, 'Date']
                     
+                    # Logic
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
-                    pl_dollars = (s_price - buy_price) * shares
+                    pl_dollars = (s_price - buy_price) * s_shares
                     
+                    # SPY Fetch
                     spy_ret_val = 0.0
                     try:
                         spy_tk = yf.Ticker("SPY")
@@ -316,23 +329,48 @@ with tab2:
                             spy_ret_val = ((spy_sell - spy_buy) / spy_buy) * 100
                     except: pass
 
-                    pf_df.at[row_idx, 'Status'] = 'CLOSED'
-                    pf_df.at[row_idx, 'Exit_Date'] = s_date
-                    pf_df.at[row_idx, 'Exit_Price'] = s_price
-                    pf_df.at[row_idx, 'Return'] = ret_pct
-                    pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
-                    pf_df.at[row_idx, 'SPY_Return'] = spy_ret_val
+                    # PARTIAL VS FULL SELL
+                    if s_shares < max_qty:
+                        # 1. Reduce current row shares
+                        pf_df.at[row_idx, 'Shares'] -= s_shares
+                        
+                        # 2. Create NEW Closed Row
+                        new_id = pf_df["ID"].max() + 1
+                        new_closed_row = pd.DataFrame([{
+                            "ID": new_id, 
+                            "Ticker": pf_df.at[row_idx, 'Ticker'], 
+                            "Date": buy_date_str, # Same buy date
+                            "Shares": s_shares, 
+                            "Cost_Basis": buy_price, 
+                            "Status": "CLOSED", 
+                            "Exit_Date": s_date, 
+                            "Exit_Price": s_price, 
+                            "Return": ret_pct, 
+                            "Realized_PL": pl_dollars, 
+                            "SPY_Return": spy_ret_val
+                        }])
+                        pf_df = pd.concat([pf_df, new_closed_row], ignore_index=True)
+                        
+                    else:
+                        # FULL SELL - Just close the row
+                        pf_df.at[row_idx, 'Status'] = 'CLOSED'
+                        pf_df.at[row_idx, 'Exit_Date'] = s_date
+                        pf_df.at[row_idx, 'Exit_Price'] = s_price
+                        pf_df.at[row_idx, 'Return'] = ret_pct
+                        pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
+                        pf_df.at[row_idx, 'SPY_Return'] = spy_ret_val
                     
+                    # CASH PROCEEDS
                     cash_id = pf_df["ID"].max() + 1
                     cash_row = pd.DataFrame([{
-                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * shares), 
+                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
                         "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
                         "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
                     }])
                     pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
                     save_portfolio(pf_df)
-                    st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f}")
+                    st.success(f"Sold {s_shares} shares. P&L: ${pl_dollars:+.2f}")
                     st.rerun()
     else:
         st.info("No Open Positions")
@@ -532,7 +570,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif not w_cloud_pass and "BUY" in decision: decision = "WATCH"; reason = "Cloud Fail"
             elif "SCOUT" in decision and not d_chk['Price']: decision = "WATCH"; reason = "Price Low"
             elif rs_breakdown: decision = "WATCH"; reason = "RS BREAK"
-            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): decision = "WATCH"; reason = "VIX Lock"
+            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): 
+                decision = "CAUTION"; reason = "VIX Lock"
 
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
             stop_dist = 2.618 * atr
@@ -602,6 +641,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             if "AVOID" in decision: action = "EXIT (Signal Break)"
             elif curr_price < stop_price: action = "EXIT (Stop Hit)"
             elif "WATCH" in decision: action = "CAUTION / HOLD"
+            elif "CAUTION" in decision: action = "CAUTION / HOLD"
             
             pf_rows.append({
                 "Ticker": t, "Shares": int(total_shares), 
@@ -616,14 +656,22 @@ if st.button("RUN ANALYSIS", type="primary"):
         invested_pct = 100 - cash_pct
         total_acct_cad = total_acct * cad_rate
         
-        # Open P&L Calculation
         open_pl_val = equity_val - total_active_cost
 
         st.subheader("💼 Active Holdings")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD  |  ${total_acct_cad:,.2f} CAD", f"${open_pl_val:,.2f} (Open P&L)")
-        m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
+        
+        # NET WORTH HEADER
+        st.markdown(f"""
+        ### Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD
+        """)
+        
+        # P&L LINE
+        pl_color = "green" if open_pl_val >= 0 else "red"
+        st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
+        m2.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
         if pf_rows:
             df_pf = pd.DataFrame(pf_rows)
@@ -666,6 +714,5 @@ if st.button("RUN ANALYSIS", type="primary"):
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
-    # Updated column list to match wrapped headers
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
     st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
