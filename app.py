@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Precision Accounting (Int Shares / 2-Decimal Dollars)")
+st.title(f"🛡️ Titan Strategy v49.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Consolidated Positions + CAD Conversion")
 
 RISK_UNIT = 2300  
 
@@ -190,7 +190,7 @@ def style_history(styler):
       .map(color_pl_dol, subset=["$ P&L"])\
       .hide(axis='index')
 
-# --- PORTFOLIO ENGINE (PRECISION MODE) ---
+# --- PORTFOLIO ENGINE ---
 def load_portfolio():
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]
     
@@ -203,13 +203,12 @@ def load_portfolio():
     for c in cols:
         if c not in df.columns: df[c] = None
     
-    # Ensure numeric types for calculation
+    # Ensure numeric types
     df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce')
     df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     
-    # Backfill math if missing
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
@@ -224,25 +223,18 @@ def load_portfolio():
     return df
 
 def save_portfolio(df):
-    # Enforce Precision Rules before saving
-    # 1. Round Dollar Columns to 2 decimals
     dollar_cols = ['Cost_Basis', 'Exit_Price', 'Realized_PL', 'Return', 'SPY_Return']
     for col in dollar_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
             
-    # 2. Shares formatting (Stock=Int, Cash=2 Decimals)
-    # We apply a formatting function but keep the dtype as is for pandas compatibility.
-    # The trick is that to_csv will check if it's float.
-    # We will round stocks to 0 decimals (making them effectively ints like 100.0)
-    
     def clean_shares(row):
         val = row['Shares']
         if pd.isna(val): return 0
         if row['Ticker'] == 'CASH':
             return round(val, 2)
         else:
-            return int(val) # Truncate to int for stocks
+            return int(val) 
             
     if not df.empty:
         df['Shares'] = df.apply(clean_shares, axis=1)
@@ -266,9 +258,7 @@ with tab1:
         all_options = list(DATA_MAP.keys())
         b_tick = st.selectbox("Ticker", all_options)
         b_date = st.date_input("Buy Date")
-        # FORCE INT for Shares (step=1)
         b_shares = st.number_input("Shares", min_value=1, value=100, step=1)
-        # FORCE 2 DECIMALS for Price
         b_price = st.number_input("Buy Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
         
         if st.form_submit_button("Execute Buy"):
@@ -313,11 +303,9 @@ with tab2:
                     shares = float(pf_df.at[row_idx, 'Shares'])
                     buy_date_str = pf_df.at[row_idx, 'Date']
                     
-                    # Logic
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * shares
                     
-                    # SPY Comparison
                     spy_ret_val = 0.0
                     try:
                         spy_tk = yf.Ticker("SPY")
@@ -387,7 +375,7 @@ with tab4:
 if st.button("RUN ANALYSIS", type="primary"):
     
     with st.spinner('Checking Vitals...'):
-        market_tickers = ["SPY", "IEF", "^VIX"]
+        market_tickers = ["SPY", "IEF", "^VIX", "CAD=X"]
         market_data = {}
         for t in market_tickers:
             try:
@@ -398,6 +386,9 @@ if st.button("RUN ANALYSIS", type="primary"):
             except: pass
         
         spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
+        cad = market_data.get("CAD=X")
+        cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 # Fallback 1.40
+        
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
@@ -578,58 +569,74 @@ if st.button("RUN ANALYSIS", type="primary"):
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
-        equity_val = 0.0
-        if not open_trades.empty:
-            for i, row in open_trades.iterrows():
-                t = row['Ticker']
-                if t in analysis_db:
-                    equity_val += analysis_db[t]['Price'] * float(row['Shares'])
+        # AGGREGATE LOGIC
+        # 1. Group by Ticker
+        # 2. Sum Shares, Calc Weighted Avg Cost
+        agg_trades = {}
         
+        for index, row in open_trades.iterrows():
+            t = row['Ticker']
+            s = row['Shares']
+            c = row['Cost_Basis']
+            
+            if t not in agg_trades:
+                agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
+            
+            agg_trades[t]['Shares'] += s
+            agg_trades[t]['TotalCost'] += (s * c)
+            
+        # DISPLAY LOGIC
+        equity_val = 0.0
+        pf_rows = []
+        spy_curr = cache_d['SPY'].iloc[-1]['Close']
+        
+        for t, data in agg_trades.items():
+            if t not in analysis_db: continue
+            
+            total_shares = data['Shares']
+            avg_cost = data['TotalCost'] / total_shares if total_shares > 0 else 0
+            curr_price = analysis_db[t]['Price']
+            
+            pos_val = total_shares * curr_price
+            equity_val += pos_val
+            
+            pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
+            
+            # Simple Spy Comp (hard to do accurate w/ multiple buys, so we blank it or use last buy?)
+            # For aggregated view, VS SPY is complex. We will set to 0.0 or omit for now to avoid confusion.
+            vs_spy = 0.0 
+            
+            decision = analysis_db[t]['Decision']
+            stop_price = analysis_db[t]['Stop']
+            
+            action = "HOLD"
+            if "AVOID" in decision: action = "EXIT (Signal Break)"
+            elif curr_price < stop_price: action = "EXIT (Stop Hit)"
+            elif "WATCH" in decision: action = "CAUTION / HOLD"
+            
+            pf_rows.append({
+                "Ticker": t, "Shares": int(total_shares), 
+                "Avg Cost": f"${avg_cost:.2f}", "Current": f"${curr_price:.2f}",
+                "Position ($)": f"${pos_val:,.2f}",
+                "% Return": f"{pl_pct:+.2f}%", "vs SPY": "---", # Aggregated view limits this
+                "Titan Status": decision, "Audit Action": action
+            })
+
         total_acct = current_cash + equity_val
         cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
         invested_pct = 100 - cash_pct
+        
+        # FX Conversion
+        total_acct_cad = total_acct * cad_rate
 
         st.subheader("💼 Active Holdings")
         
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"${total_acct:,.2f}")
+        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD", f"(${total_acct_cad:,.2f} CAD)")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
-        if not open_trades.empty:
-            pf_rows = []
-            spy_curr = cache_d['SPY'].iloc[-1]['Close']
-            
-            for index, row in open_trades.iterrows():
-                t = row['Ticker']
-                if t not in analysis_db: continue
-                data = analysis_db[t]
-                
-                curr_price = data['Price']; cost = float(row['Cost_Basis'])
-                pl_pct = ((curr_price - cost) / cost) * 100
-                pos_val = curr_price * float(row['Shares'])
-                
-                try:
-                    buy_date = pd.to_datetime(row['Date'])
-                    spy_hist = cache_d['SPY']
-                    spy_buy = spy_hist.loc[spy_hist.index >= buy_date].iloc[0]['Close']
-                    spy_ret = ((spy_curr - spy_buy) / spy_buy) * 100
-                    vs_spy = pl_pct - spy_ret
-                except: vs_spy = 0.0
-
-                action = "HOLD"
-                if "AVOID" in data['Decision']: action = "EXIT (Signal Break)"
-                elif curr_price < data['Stop']: action = "EXIT (Stop Hit)"
-                elif "WATCH" in data['Decision']: action = "CAUTION / HOLD"
-                
-                pf_rows.append({
-                    "Ticker": t, "Shares": row['Shares'], 
-                    "Buy Price": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
-                    "Position ($)": f"${pos_val:,.2f}",
-                    "% Return": f"{pl_pct:+.2f}%", "vs SPY": f"{vs_spy:+.2f}%",
-                    "Titan Status": data['Decision'], "Audit Action": action
-                })
-            
+        if pf_rows:
             df_pf = pd.DataFrame(pf_rows)
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
