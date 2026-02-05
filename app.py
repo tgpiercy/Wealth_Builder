@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Net Worth Coloring")
+st.title(f"🛡️ Titan Strategy v50.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Factory Reset + Native UI")
 
 RISK_UNIT = 2300  
 
@@ -173,7 +173,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -390,49 +389,61 @@ with tab4:
     if not pf_df.empty:
         opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
         sel_str = st.selectbox("Select Trade", opts)
-        sel_id = int(sel_str.split("|")[0].replace("ID:", "").strip())
-        row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
         
-        if action_type == "Delete Trade":
-            if st.button("Permanently Delete"):
-                pf_df = pf_df[pf_df['ID'] != sel_id]
-                save_portfolio(pf_df)
-                st.warning(f"Deleted ID {sel_id}")
-                st.rerun()
-        
-        elif action_type == "Edit Trade":
-            with st.form("edit_form"):
-                st.subheader(f"Editing ID: {sel_id}")
-                c1, c2 = st.columns(2)
-                cur_status = pf_df.at[row_idx, 'Status']
-                new_status = c1.selectbox("Status", ["OPEN", "CLOSED"], index=0 if cur_status=="OPEN" else 1)
-                new_shares = c2.number_input("Shares", value=float(pf_df.at[row_idx, 'Shares']))
-                
-                c3, c4 = st.columns(2)
-                new_cost = c3.number_input("Cost Basis", value=float(pf_df.at[row_idx, 'Cost_Basis']))
-                cur_exit = pf_df.at[row_idx, 'Exit_Price']
-                new_exit = c4.number_input("Exit Price (0 if Open)", value=float(cur_exit) if pd.notna(cur_exit) else 0.0)
-                
-                if st.form_submit_button("Update Record"):
-                    pf_df.at[row_idx, 'Status'] = new_status
-                    pf_df.at[row_idx, 'Shares'] = new_shares
-                    pf_df.at[row_idx, 'Cost_Basis'] = new_cost
-                    if new_status == "OPEN":
-                        pf_df.at[row_idx, 'Exit_Price'] = None
-                        pf_df.at[row_idx, 'Exit_Date'] = None
-                        pf_df.at[row_idx, 'Return'] = 0.0
-                        pf_df.at[row_idx, 'Realized_PL'] = 0.0
-                    else:
-                        pf_df.at[row_idx, 'Exit_Price'] = new_exit
-                        if new_exit > 0:
-                            ret = ((new_exit - new_cost)/new_cost)*100
-                            pl = (new_exit - new_cost) * new_shares
-                            pf_df.at[row_idx, 'Return'] = ret
-                            pf_df.at[row_idx, 'Realized_PL'] = pl
-                            
+        if sel_str:
+            sel_id = int(sel_str.split("|")[0].replace("ID:", "").strip())
+            row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
+            
+            if action_type == "Delete Trade":
+                if st.button("Permanently Delete"):
+                    pf_df = pf_df[pf_df['ID'] != sel_id]
                     save_portfolio(pf_df)
-                    st.success("Record Updated")
+                    st.warning(f"Deleted ID {sel_id}")
                     st.rerun()
+            
+            elif action_type == "Edit Trade":
+                with st.form("edit_form"):
+                    st.subheader(f"Editing ID: {sel_id}")
+                    c1, c2 = st.columns(2)
+                    cur_status = pf_df.at[row_idx, 'Status']
+                    new_status = c1.selectbox("Status", ["OPEN", "CLOSED"], index=0 if cur_status=="OPEN" else 1)
+                    new_shares = c2.number_input("Shares", value=float(pf_df.at[row_idx, 'Shares']))
+                    
+                    c3, c4 = st.columns(2)
+                    new_cost = c3.number_input("Cost Basis", value=float(pf_df.at[row_idx, 'Cost_Basis']))
+                    cur_exit = pf_df.at[row_idx, 'Exit_Price']
+                    new_exit = c4.number_input("Exit Price (0 if Open)", value=float(cur_exit) if pd.notna(cur_exit) else 0.0)
+                    
+                    if st.form_submit_button("Update Record"):
+                        pf_df.at[row_idx, 'Status'] = new_status
+                        pf_df.at[row_idx, 'Shares'] = new_shares
+                        pf_df.at[row_idx, 'Cost_Basis'] = new_cost
+                        if new_status == "OPEN":
+                            pf_df.at[row_idx, 'Exit_Price'] = None
+                            pf_df.at[row_idx, 'Exit_Date'] = None
+                            pf_df.at[row_idx, 'Return'] = 0.0
+                            pf_df.at[row_idx, 'Realized_PL'] = 0.0
+                        else:
+                            pf_df.at[row_idx, 'Exit_Price'] = new_exit
+                            if new_exit > 0:
+                                ret = ((new_exit - new_cost)/new_cost)*100
+                                pl = (new_exit - new_cost) * new_shares
+                                pf_df.at[row_idx, 'Return'] = ret
+                                pf_df.at[row_idx, 'Realized_PL'] = pl
+                                
+                        save_portfolio(pf_df)
+                        st.success("Record Updated")
+                        st.rerun()
+
+    st.write("---")
+    st.subheader("⚠️ Danger Zone")
+    if st.button("FACTORY RESET (Delete All Data)"):
+        if os.path.exists(PORTFOLIO_FILE):
+            os.remove(PORTFOLIO_FILE)
+            st.success(f"Deleted {PORTFOLIO_FILE}. Please refresh the page.")
+            st.rerun()
+        else:
+            st.error("No data file found to delete.")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -687,17 +698,10 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        # HTML HEADER TO FORCE COLOR
-        st.markdown(f"""
-        <h3 style='color: white;'>Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD</h3>
-        """, unsafe_allow_html=True)
-        
-        pl_color = "green" if open_pl_val >= 0 else "red"
-        st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
-        
-        m1, m2 = st.columns(2)
-        m1.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        m2.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD", f"${open_pl_val:,.2f} Open P&L")
+        m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
+        m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
         if pf_rows:
             df_pf = pd.DataFrame(pf_rows)
