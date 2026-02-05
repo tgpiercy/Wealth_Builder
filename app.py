@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Unified Net Worth Display")
+st.title(f"🛡️ Titan Strategy v50.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Fixed Net Worth Coloring")
 
 RISK_UNIT = 2300  
 
@@ -173,7 +173,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# FIXED STYLER: Removed Position ($) from color map
+# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -633,6 +633,7 @@ if st.button("RUN ANALYSIS", type="primary"):
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
+        # AGGREGATE LOGIC
         agg_trades = {}
         for index, row in open_trades.iterrows():
             t = row['Ticker']
@@ -686,8 +687,10 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        # CLEAN HEADER FORMAT
-        st.markdown(f"### Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD")
+        # HTML HEADER TO FORCE COLOR
+        st.markdown(f"""
+        <h3 style='color: white;'>Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD</h3>
+        """, unsafe_allow_html=True)
         
         pl_color = "green" if open_pl_val >= 0 else "red"
         st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
