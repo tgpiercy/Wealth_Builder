@@ -5,12 +5,12 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.7")
-st.caption("Institutional Protocol: Master Command Center")
+st.title("🛡️ Titan Strategy v47.8")
+st.caption("Institutional Protocol: Deep History (10y) + Detailed Health Metrics")
 
 RISK_UNIT = 2300  
 
-# --- DATA MAP (Full Universe) ---
+# --- DATA MAP ---
 DATA_MAP = {
     # INDICES & CORE
     "SPY": ["BENCH", "SPY", "S&P 500"],
@@ -109,14 +109,14 @@ def style_market(styler):
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET HEALTH ---
-    with st.spinner('Checking Vitals...'):
+    # --- PHASE 1: MARKET HEALTH (Detailed) ---
+    with st.spinner('Checking Market Vitals (SPY, IEF, VIX)...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         for t in market_tickers:
             try:
                 tk = yf.Ticker(t)
-                df = tk.history(period="2y", interval="1d")
+                df = tk.history(period="2y", interval="1d") # 2y is plenty for market health logic
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: market_data[t] = df
             except: pass
@@ -125,50 +125,78 @@ if st.button("RUN ANALYSIS", type="primary"):
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
-            # SPY
-            spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
-            if spy_c > spy_sma18: status = "BULLISH"; total_exp += 40
+            # 1. SPY Trend
+            spy_c = spy.iloc[-1]['Close']
+            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            if spy_c > spy_sma18:
+                status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
-            exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Status": status})
+            exposure_rows.append({
+                "Metric": "Trend (SPY > SMA18)", 
+                "Value": f"${spy_c:.2f}",
+                "Status": status
+            })
 
-            # Ratio
+            # 2. Ratio
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            if ratio.iloc[-1] > calc_sma(ratio, 18).iloc[-1]: status = "RISK ON"; total_exp += 40
-            elif ratio.iloc[-1] >= calc_sma(ratio, 18).iloc[-1] * 0.99: status = "STABLE"; total_exp += 40
+            ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
+            
+            # Distance from SMA
+            dist_pct = ((ratio_c - ratio_sma18) / ratio_sma18) * 100
+            
+            if ratio_c > ratio_sma18:
+                status = "RISK ON"; total_exp += 40
+            elif ratio_c >= ratio_sma18 * 0.99:
+                status = "STABLE"; total_exp += 40
             else: status = "RISK OFF"
-            exposure_rows.append({"Metric": "Power (SPY:IEF)", "Status": status})
+            
+            exposure_rows.append({
+                "Metric": "Power (SPY:IEF)", 
+                "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)",
+                "Status": status
+            })
 
-            # VIX
+            # 3. VIX
             vix_c = vix.iloc[-1]['Close']
-            if vix_c < 20: status = "CALM"; total_exp += 20
+            if vix_c < 20:
+                status = "CALM"; total_exp += 20
             elif vix_c < 25: status = "CAUTION"
             else: status = "PANIC"
-            exposure_rows.append({"Metric": "VIX (<20)", "Status": status})
+            exposure_rows.append({
+                "Metric": "VIX (<20)", 
+                "Value": f"{vix_c:.2f}",
+                "Status": status
+            })
             
-            exposure_rows.append({"Metric": "EXPOSURE", "Status": f"{total_exp}%"})
+            exposure_rows.append({"Metric": "TOTAL EXPOSURE", "Value": "---", "Status": f"{total_exp}%"})
             
-            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
-            if total_exp == 0: risk_per_trade = 0
-            
+            # Display
             df_mkt = pd.DataFrame(exposure_rows)
             st.subheader(f"📊 Market Health: {total_exp}% Invested")
             st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
             st.write("---")
+            
+            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
+            if total_exp == 0: risk_per_trade = 0
+            
         else:
             risk_per_trade = 0
+            st.error("Market Data Failed to Load")
 
-    # --- PHASE 2: MASTER SCANNER ---
-    with st.spinner('Running Titan Protocol...'):
+    # --- PHASE 2: MASTER SCANNER (10-Year Depth) ---
+    with st.spinner('Running Titan Protocol (10-Year Deep Scan)...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {}
-        cache_d.update(market_data)
+        # We re-fetch market data with 10y depth for the scanner if needed, or just use separate calls.
+        # Ideally, we fetch everything with 10y now to be safe.
         
         for t in tickers:
             if t in cache_d: continue
             try:
                 tk = yf.Ticker(t)
-                df = tk.history(period="2y", interval="1d")
+                # CHANGE: Back to 10y for maximum precision on 200MA and Volatility
+                df = tk.history(period="10y", interval="1d") 
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
@@ -176,7 +204,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         results = []
         for t, meta in DATA_MAP.items():
             if t not in cache_d: continue
-            if meta[0] == "BENCH" and t not in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]: continue # Only show tradeable indices
+            if meta[0] == "BENCH" and t not in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]: continue 
             
             # DATA
             df_d = cache_d[t].copy()
@@ -296,6 +324,5 @@ if st.button("RUN ANALYSIS", type="primary"):
             results.append(row)
 
         df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
-        # Reorder columns to put Momentum next to Ticker
         cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
         st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
