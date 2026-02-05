@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # --- SECURITY CONFIGURATION ---
 CREDENTIALS = {
     "dad": "1234",
-    "son": "!@#L2s3s2-ON!@#"
+    "son": "1234"
 }
 
 # --- PAGE CONFIGURATION ---
@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.8 ({current_user.upper()})")
-st.caption("Institutional Protocol: Error Patch & Visual Polish")
+st.title(f"🛡️ Titan Strategy v50.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Gold Master (Fixed Formatting)")
 
 RISK_UNIT = 2300  
 
@@ -173,13 +173,12 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# FIXED STYLER: Removed "vs SPY" from map subset
+# --- FIXED PORTFOLIO STYLER (No coloring for Position) ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
     ]).map(color_pl, subset=["% Return"])\
-      .map(color_pl_dol, subset=["Position ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
 
@@ -617,8 +616,10 @@ if st.button("RUN ANALYSIS", type="primary"):
         total_acct_cad = total_acct * cad_rate
 
         st.subheader("💼 Active Holdings")
+        
+        # FIXED: Metric format string
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD")
+        m1.metric("Total Net Worth", f"{total_acct:,.2f} USD$ ({total_acct_cad:,.2f} CAD$)")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
