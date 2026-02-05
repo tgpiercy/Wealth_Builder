@@ -5,13 +5,22 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.6")
-st.caption("Institutional Protocol: Market Health + Sector Momentum Radar")
+st.title("🛡️ Titan Strategy v47.7")
+st.caption("Institutional Protocol: Master Command Center")
 
 RISK_UNIT = 2300  
 
-# --- DATA MAP (Expanded for Sector Radar) ---
+# --- DATA MAP (Full Universe) ---
 DATA_MAP = {
+    # INDICES & CORE
+    "SPY": ["BENCH", "SPY", "S&P 500"],
+    "DIA": ["BENCH", "SPY", "Dow Jones"],
+    "QQQ": ["BENCH", "SPY", "Nasdaq 100"],
+    "IWM": ["BENCH", "SPY", "Russell 2000"],
+    "IWC": ["BENCH", "SPY", "Micro-Cap"],
+    "HXT.TO": ["CANADA", "SPY", "TSX 60 Index"],
+    "IBB": ["THEME", "SPY", "Biotech Core"],
+
     # SECTORS
     "XLB": ["SECTOR", "SPY", "Materials"],
     "XLC": ["SECTOR", "SPY", "Comm Services"],
@@ -21,18 +30,9 @@ DATA_MAP = {
     "XLK": ["SECTOR", "SPY", "Technology"],
     "XLV": ["SECTOR", "SPY", "Health Care"],
     "XLY": ["SECTOR", "SPY", "Cons Discret"],
-    "XLP": ["SECTOR", "SPY", "Cons Staples"], # Added
-    "XLRE": ["SECTOR", "SPY", "Real Estate"],  # Added
-    "XLU": ["SECTOR", "SPY", "Utilities"],    # Added
-    
-    # INDICES & CORE
-    "SPY": ["BENCH", "SPY", "S&P 500"],
-    "DIA": ["BENCH", "SPY", "Dow Jones"],      # Added
-    "QQQ": ["BENCH", "SPY", "Nasdaq 100"],     # Added
-    "IWM": ["BENCH", "SPY", "Russell 2000"],   # Added
-    "IWC": ["BENCH", "SPY", "Micro-Cap"],      # Added
-    "HXT.TO": ["CANADA", "SPY", "TSX 60 Index"],
-    "IBB": ["THEME", "SPY", "Biotech Core"],   # Added
+    "XLP": ["SECTOR", "SPY", "Cons Staples"],
+    "XLRE": ["SECTOR", "SPY", "Real Estate"],
+    "XLU": ["SECTOR", "SPY", "Utilities"],
 
     # COMMODITIES
     "GLD": ["COMMODITY", "SPY", "Gold Bullion"],
@@ -78,8 +78,16 @@ def calc_atr(high, low, close, length=14):
 
 # --- STYLING ---
 def style_final(styler):
+    def color_pct(val):
+        if isinstance(val, str) and '%' in val:
+            try:
+                num = float(val.strip('%'))
+                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+            except: return ''
+        return ''
+
     return styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
+        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('white-space', 'normal')]},
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00' if "SOON" in v else 'color: white')), subset=["Action"])\
@@ -89,6 +97,7 @@ def style_final(styler):
       .map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly Impulse"])\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly Score (Max 5)", "Daily Score (Max 5)"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
+      .map(color_pct, subset=["4W %", "2W %"])\
       .hide(axis='index')
 
 def style_market(styler):
@@ -97,133 +106,77 @@ def style_market(styler):
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
     ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
 
-def style_sector(styler):
-    def color_val(val):
-        if isinstance(val, str) and '%' in val:
-            try:
-                num = float(val.strip('%'))
-                return 'color: #00ff00' if num >= 0 else 'color: #ff4444'
-            except: return ''
-        return ''
-    
-    return styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#333'), ('color', 'white'), ('font-size', '11px')]},
-        {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '12px'), ('padding', '5px')]}
-    ]).map(color_val, subset=["4W %", "2W %"]).hide(axis='index')
-
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: DATA HARVEST (Unified) ---
-    with st.spinner('Accessing Institutional Data Feeds...'):
-        tickers = list(DATA_MAP.keys())
-        cache_d = {}
-        
-        for t in tickers:
+    # --- PHASE 1: MARKET HEALTH ---
+    with st.spinner('Checking Vitals...'):
+        market_tickers = ["SPY", "IEF", "^VIX"]
+        market_data = {}
+        for t in market_tickers:
             try:
-                # Fetch 2 years is enough for all current calcs
                 tk = yf.Ticker(t)
                 df = tk.history(period="2y", interval="1d")
                 df.index = pd.to_datetime(df.index).tz_localize(None)
-                if not df.empty and 'Close' in df.columns:
-                     cache_d[t] = df
+                if not df.empty and 'Close' in df.columns: market_data[t] = df
             except: pass
-
-    # --- PHASE 2: DASHBOARDS ---
-    # We create two columns: Left (Health), Right (Sector Radar)
-    left_col, right_col = st.columns([1, 1])
-
-    # === LEFT: MARKET HEALTH ===
-    with left_col:
-        st.subheader("🏥 Market Health")
-        spy = cache_d.get("SPY"); ief = cache_d.get("IEF"); vix = cache_d.get("^VIX")
+        
+        spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
-            # 1. SPY Trend
-            spy_c = spy.iloc[-1]['Close']
-            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
-            if spy_c > spy_sma18:
-                status = "BULLISH"; total_exp += 40
+            # SPY
+            spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            if spy_c > spy_sma18: status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
             exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Status": status})
 
-            # 2. Ratio
+            # Ratio
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
-            if ratio_c > ratio_sma18:
-                status = "RISK ON"; total_exp += 40
-            elif ratio_c >= ratio_sma18 * 0.99:
-                status = "STABLE"; total_exp += 40
+            if ratio.iloc[-1] > calc_sma(ratio, 18).iloc[-1]: status = "RISK ON"; total_exp += 40
+            elif ratio.iloc[-1] >= calc_sma(ratio, 18).iloc[-1] * 0.99: status = "STABLE"; total_exp += 40
             else: status = "RISK OFF"
             exposure_rows.append({"Metric": "Power (SPY:IEF)", "Status": status})
 
-            # 3. VIX
+            # VIX
             vix_c = vix.iloc[-1]['Close']
-            if vix_c < 20:
-                status = "CALM"; total_exp += 20
+            if vix_c < 20: status = "CALM"; total_exp += 20
             elif vix_c < 25: status = "CAUTION"
             else: status = "PANIC"
             exposure_rows.append({"Metric": "VIX (<20)", "Status": status})
             
-            # Risk Sizing
-            risk_per_trade = RISK_UNIT
-            if total_exp == 0: risk_per_trade = 0
-            elif total_exp <= 40: risk_per_trade = RISK_UNIT * 0.5
-            
             exposure_rows.append({"Metric": "EXPOSURE", "Status": f"{total_exp}%"})
             
+            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
+            if total_exp == 0: risk_per_trade = 0
+            
             df_mkt = pd.DataFrame(exposure_rows)
+            st.subheader(f"📊 Market Health: {total_exp}% Invested")
             st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
+            st.write("---")
         else:
-            st.error("Market Data Failed")
             risk_per_trade = 0
 
-    # === RIGHT: SECTOR RADAR ===
-    with right_col:
-        st.subheader("📡 Sector Radar")
-        radar_list = [
-            ("CORE", ["SPY", "IBB"]),
-            ("INDEX", ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]),
-            ("METALS", ["GLD", "SLV"]),
-            ("SECTOR", ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"]),
-            ("THEME", ["BOTZ", "XBI", "REMX", "ICLN", "GDX"])
-        ]
-        
-        radar_rows = []
-        for section, syms in radar_list:
-            radar_rows.append({"Ticker": f"--- {section} ---", "4W %": "", "2W %": ""})
-            for s in syms:
-                if s in cache_d:
-                    df = cache_d[s]
-                    # Weekly Resample (Fri)
-                    df_w = df.resample('W-FRI').last()
-                    if len(df_w) >= 5:
-                        curr = df_w.iloc[-1]['Close']
-                        prev2 = df_w.iloc[-3]['Close'] # 2 weeks ago
-                        prev4 = df_w.iloc[-5]['Close'] # 4 weeks ago
-                        
-                        chg2 = ((curr / prev2) - 1) * 100
-                        chg4 = ((curr / prev4) - 1) * 100
-                        
-                        radar_rows.append({
-                            "Ticker": s,
-                            "4W %": f"{chg4:.1f}%",
-                            "2W %": f"{chg2:.1f}%"
-                        })
-        
-        df_radar = pd.DataFrame(radar_rows)
-        st.markdown(df_radar.style.pipe(style_sector).to_html(), unsafe_allow_html=True)
-
-    st.write("---")
-
-    # --- PHASE 3: ASSET SCANNER ---
+    # --- PHASE 2: MASTER SCANNER ---
     with st.spinner('Running Titan Protocol...'):
+        tickers = list(DATA_MAP.keys())
+        cache_d = {}
+        cache_d.update(market_data)
+        
+        for t in tickers:
+            if t in cache_d: continue
+            try:
+                tk = yf.Ticker(t)
+                df = tk.history(period="2y", interval="1d")
+                df.index = pd.to_datetime(df.index).tz_localize(None)
+                if not df.empty and 'Close' in df.columns: cache_d[t] = df
+            except: pass
+
         results = []
         for t, meta in DATA_MAP.items():
-            if meta[0] in ["BENCH"]: continue
             if t not in cache_d: continue
+            if meta[0] == "BENCH" and t not in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]: continue # Only show tradeable indices
             
             # DATA
             df_d = cache_d[t].copy()
@@ -245,11 +198,22 @@ if st.button("RUN ANALYSIS", type="primary"):
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
             df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
+            # MOMENTUM (4W & 2W)
+            mom_4w = ""; mom_2w = ""
+            if len(df_w) >= 5:
+                curr = df_w.iloc[-1]['Close']
+                prev2 = df_w.iloc[-3]['Close']
+                prev4 = df_w.iloc[-5]['Close']
+                chg2 = ((curr / prev2) - 1) * 100
+                chg4 = ((curr / prev4) - 1) * 100
+                mom_2w = f"{chg2:.1f}%"
+                mom_4w = f"{chg4:.1f}%"
+
             # POINTERS
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
             wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            # RS & AD & VOL
+            # RS
             bench_ticker = meta[1]
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
@@ -262,6 +226,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 pp_rs_sma = rs_sma18.iloc[-3]
                 rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
+            # AD & VOL
             ad_pass = False
             if not pd.isna(dc['AD_SMA18']):
                 ad_pass = (dc['AD'] >= dc['AD_SMA18'] * 0.995) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
@@ -272,12 +237,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
             elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
 
-            # IMPULSE
-            w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
-            d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
-            w_pulse = "NO"
-            if w_uptrend: w_pulse = "GOOD" if d_health_ok else "WEAK"
-            
             # SCORES
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
@@ -288,8 +247,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
             d_score = sum(d_chk.values())
+            
+            # IMPULSE & LOGIC
+            w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
+            d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
+            w_pulse = "NO"; w_pulse = "GOOD" if w_uptrend and d_health_ok else ("WEAK" if w_uptrend else "NO")
 
-            # DECISION
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
                 if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
@@ -321,6 +284,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
             row = {
                 "Sector": meta[0], "Industry": meta[2], "Ticker": t,
+                "4W %": mom_4w, "2W %": mom_2w,
                 "Weekly SMA8": "PASS" if w_sma8_pass else "FAIL", 
                 "Weekly Impulse": w_pulse, 
                 "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
@@ -332,4 +296,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             results.append(row)
 
         df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
-        st.markdown(df_final.style.pipe(style_final).to_html(), unsafe_allow_html=True)
+        # Reorder columns to put Momentum next to Ticker
+        cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
+        st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
