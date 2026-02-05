@@ -5,13 +5,14 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.5")
-st.caption("Institutional Protocol: Weighted Market Exposure Model")
+st.title("🛡️ Titan Strategy v47.6")
+st.caption("Institutional Protocol: Market Health + Sector Momentum Radar")
 
 RISK_UNIT = 2300  
 
-# --- DATA MAP ---
+# --- DATA MAP (Expanded for Sector Radar) ---
 DATA_MAP = {
+    # SECTORS
     "XLB": ["SECTOR", "SPY", "Materials"],
     "XLC": ["SECTOR", "SPY", "Comm Services"],
     "XLE": ["SECTOR", "SPY", "Energy"],
@@ -20,16 +21,32 @@ DATA_MAP = {
     "XLK": ["SECTOR", "SPY", "Technology"],
     "XLV": ["SECTOR", "SPY", "Health Care"],
     "XLY": ["SECTOR", "SPY", "Cons Discret"],
+    "XLP": ["SECTOR", "SPY", "Cons Staples"], # Added
+    "XLRE": ["SECTOR", "SPY", "Real Estate"],  # Added
+    "XLU": ["SECTOR", "SPY", "Utilities"],    # Added
+    
+    # INDICES & CORE
+    "SPY": ["BENCH", "SPY", "S&P 500"],
+    "DIA": ["BENCH", "SPY", "Dow Jones"],      # Added
+    "QQQ": ["BENCH", "SPY", "Nasdaq 100"],     # Added
+    "IWM": ["BENCH", "SPY", "Russell 2000"],   # Added
+    "IWC": ["BENCH", "SPY", "Micro-Cap"],      # Added
     "HXT.TO": ["CANADA", "SPY", "TSX 60 Index"],
+    "IBB": ["THEME", "SPY", "Biotech Core"],   # Added
+
+    # COMMODITIES
     "GLD": ["COMMODITY", "SPY", "Gold Bullion"],
     "SLV": ["COMMODITY", "SPY", "Silver Bullion"],
     "BTC-USD": ["COMMODITY", "SPY", "Bitcoin (USD)"],
+    
+    # THEMES
     "BOTZ": ["THEME", "SPY", "Robotics & AI"],
     "XBI":  ["THEME", "SPY", "Biotechnology"],
     "ICLN": ["THEME", "SPY", "Clean Energy"],
     "REMX": ["THEME", "SPY", "Rare Earth Metals"],
     "GDX":  ["THEME", "SPY", "Gold Miners"],
-    "SPY": ["BENCH", "SPY", "S&P 500"],
+    
+    # MACRO
     "IEF": ["BENCH", "SPY", "7-10 Year Treasuries"],
     "RSP": ["BENCH", "SPY", "S&P 500 Equal Weight"], 
     "^VIX": ["BENCH", "SPY", "VIX Volatility Index"]
@@ -80,108 +97,129 @@ def style_market(styler):
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
     ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
 
+def style_sector(styler):
+    def color_val(val):
+        if isinstance(val, str) and '%' in val:
+            try:
+                num = float(val.strip('%'))
+                return 'color: #00ff00' if num >= 0 else 'color: #ff4444'
+            except: return ''
+        return ''
+    
+    return styler.set_table_styles([
+        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#333'), ('color', 'white'), ('font-size', '11px')]},
+        {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '12px'), ('padding', '5px')]}
+    ]).map(color_val, subset=["4W %", "2W %"]).hide(axis='index')
+
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET HEALTH PROTOCOL ---
-    with st.spinner('Calculating Total Portfolio Exposure...'):
-        market_tickers = ["SPY", "IEF", "^VIX"]
-        market_data = {}
+    # --- PHASE 1: DATA HARVEST (Unified) ---
+    with st.spinner('Accessing Institutional Data Feeds...'):
+        tickers = list(DATA_MAP.keys())
+        cache_d = {}
         
-        for t in market_tickers:
+        for t in tickers:
             try:
-                df = yf.download(t, period="2y", interval="1d", progress=False, auto_adjust=True)
-                if isinstance(df.columns, pd.MultiIndex):
-                    if t in df.columns.get_level_values(0): df.columns = df.columns.droplevel(0)
-                    elif t in df.columns.get_level_values(1): df.columns = df.columns.droplevel(1)
+                # Fetch 2 years is enough for all current calcs
+                tk = yf.Ticker(t)
+                df = tk.history(period="2y", interval="1d")
                 df.index = pd.to_datetime(df.index).tz_localize(None)
-                if not df.empty and 'Close' in df.columns: market_data[t] = df
+                if not df.empty and 'Close' in df.columns:
+                     cache_d[t] = df
             except: pass
-        
-        spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
-        
-        # EXPOSURE LOGIC (The "Dad" Formula)
-        # 1. SPY Trend (40%)
-        # 2. Ratio Trend (40%) - With 1% Band Buffer
-        # 3. VIX Level (20%)
-        
-        exposure_rows = []
-        total_exp = 0
+
+    # --- PHASE 2: DASHBOARDS ---
+    # We create two columns: Left (Health), Right (Sector Radar)
+    left_col, right_col = st.columns([1, 1])
+
+    # === LEFT: MARKET HEALTH ===
+    with left_col:
+        st.subheader("🏥 Market Health")
+        spy = cache_d.get("SPY"); ief = cache_d.get("IEF"); vix = cache_d.get("^VIX")
+        mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
-            # CHECK 1: SPY TREND (40%)
+            # 1. SPY Trend
             spy_c = spy.iloc[-1]['Close']
             spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
             if spy_c > spy_sma18:
-                status = "BULLISH"; alloc = 40; total_exp += 40
-            else:
-                status = "BEARISH"; alloc = 0
-            exposure_rows.append({"Metric": "Primary Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status, "Exposure": f"{alloc}%"})
+                status = "BULLISH"; total_exp += 40
+            else: status = "BEARISH"
+            exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Status": status})
 
-            # CHECK 2: RATIO POWER (40%)
+            # 2. Ratio
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            ratio_c = ratio.iloc[-1]
-            ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
-            
-            # 1% Band Logic: We allow it to dip to 99% of SMA before failing
-            lower_band = ratio_sma18 * 0.99 
-            
+            ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
             if ratio_c > ratio_sma18:
-                status = "RISK ON"; alloc = 40; total_exp += 40
-            elif ratio_c >= lower_band:
-                status = "STABLE"; alloc = 40; total_exp += 40 # Still counts as "In"
-            else:
-                status = "RISK OFF"; alloc = 0
-            
-            dist_pct = ((ratio_c - ratio_sma18)/ratio_sma18)*100
-            exposure_rows.append({"Metric": "Internal Power (SPY:IEF)", "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)", "Status": status, "Exposure": f"{alloc}%"})
+                status = "RISK ON"; total_exp += 40
+            elif ratio_c >= ratio_sma18 * 0.99:
+                status = "STABLE"; total_exp += 40
+            else: status = "RISK OFF"
+            exposure_rows.append({"Metric": "Power (SPY:IEF)", "Status": status})
 
-            # CHECK 3: VIX (20%)
+            # 3. VIX
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 20:
-                status = "CALM"; alloc = 20; total_exp += 20
-            elif vix_c < 25:
-                status = "CAUTION"; alloc = 0 # No points for caution
-            else:
-                status = "PANIC"; alloc = 0
-            exposure_rows.append({"Metric": "Volatility (VIX < 20)", "Value": f"{vix_c:.2f}", "Status": status, "Exposure": f"{alloc}%"})
+                status = "CALM"; total_exp += 20
+            elif vix_c < 25: status = "CAUTION"
+            else: status = "PANIC"
+            exposure_rows.append({"Metric": "VIX (<20)", "Status": status})
             
-            # SUMMARY ROW
-            exposure_rows.append({"Metric": "TOTAL RECOMMENDED EXPOSURE", "Value": "---", "Status": "---", "Exposure": f"{total_exp}%"})
-            
-            # Set Global Risk Multiplier based on Total Exposure
-            # If Exposure is 80%, we take 80% risk, etc.
-            # Simplified: If Exp < 50%, we half size. If Exp = 0%, we lock.
+            # Risk Sizing
             risk_per_trade = RISK_UNIT
             if total_exp == 0: risk_per_trade = 0
             elif total_exp <= 40: risk_per_trade = RISK_UNIT * 0.5
             
+            exposure_rows.append({"Metric": "EXPOSURE", "Status": f"{total_exp}%"})
+            
+            df_mkt = pd.DataFrame(exposure_rows)
+            st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
         else:
-            st.error("Market Data Failed to Load")
+            st.error("Market Data Failed")
             risk_per_trade = 0
 
-    # DISPLAY MARKET TABLE
-    st.subheader(f"📊 Market Health: {total_exp}% Invested")
-    df_mkt = pd.DataFrame(exposure_rows)
-    st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
+    # === RIGHT: SECTOR RADAR ===
+    with right_col:
+        st.subheader("📡 Sector Radar")
+        radar_list = [
+            ("CORE", ["SPY", "IBB"]),
+            ("INDEX", ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]),
+            ("METALS", ["GLD", "SLV"]),
+            ("SECTOR", ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"]),
+            ("THEME", ["BOTZ", "XBI", "REMX", "ICLN", "GDX"])
+        ]
+        
+        radar_rows = []
+        for section, syms in radar_list:
+            radar_rows.append({"Ticker": f"--- {section} ---", "4W %": "", "2W %": ""})
+            for s in syms:
+                if s in cache_d:
+                    df = cache_d[s]
+                    # Weekly Resample (Fri)
+                    df_w = df.resample('W-FRI').last()
+                    if len(df_w) >= 5:
+                        curr = df_w.iloc[-1]['Close']
+                        prev2 = df_w.iloc[-3]['Close'] # 2 weeks ago
+                        prev4 = df_w.iloc[-5]['Close'] # 4 weeks ago
+                        
+                        chg2 = ((curr / prev2) - 1) * 100
+                        chg4 = ((curr / prev4) - 1) * 100
+                        
+                        radar_rows.append({
+                            "Ticker": s,
+                            "4W %": f"{chg4:.1f}%",
+                            "2W %": f"{chg2:.1f}%"
+                        })
+        
+        df_radar = pd.DataFrame(radar_rows)
+        st.markdown(df_radar.style.pipe(style_sector).to_html(), unsafe_allow_html=True)
+
     st.write("---")
 
-    # --- PHASE 2: ASSET SCANNER ---
-    with st.spinner('Scanning Assets...'):
-        tickers = list(DATA_MAP.keys())
-        cache_d = {} 
-        cache_d.update(market_data)
-        
-        for t in tickers:
-            if t in cache_d: continue
-            try:
-                tk = yf.Ticker(t)
-                df_d = tk.history(period="5y", interval="1d")
-                df_d.index = pd.to_datetime(df_d.index).tz_localize(None)
-                if not df_d.empty and 'Close' in df_d.columns: cache_d[t] = df_d
-            except: pass
-
+    # --- PHASE 3: ASSET SCANNER ---
+    with st.spinner('Running Titan Protocol...'):
         results = []
         for t, meta in DATA_MAP.items():
             if meta[0] in ["BENCH"]: continue
