@@ -7,8 +7,8 @@ from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v48.0")
-st.caption("Institutional Protocol: Portfolio Commander + Performance Attribution")
+st.title("🛡️ Titan Strategy v48.1")
+st.caption("Institutional Protocol: Full Portfolio Lifecycle Management")
 
 RISK_UNIT = 2300  
 PORTFOLIO_FILE = "portfolio.csv"
@@ -126,48 +126,117 @@ def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Gain/Loss", "vs SPY"])\
+    ]).map(color_pl, subset=["% Return", "vs SPY"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
 
-# --- PORTFOLIO FUNCTIONS ---
+# --- PORTFOLIO ENGINE ---
 def load_portfolio():
+    # Define standard columns
+    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "SPY_Return"]
+    
     if not os.path.exists(PORTFOLIO_FILE):
-        df = pd.DataFrame(columns=["Ticker", "Date", "Shares", "Cost_Basis", "Status"])
+        df = pd.DataFrame(columns=cols)
         df.to_csv(PORTFOLIO_FILE, index=False)
         return df
-    return pd.read_csv(PORTFOLIO_FILE)
+    
+    df = pd.read_csv(PORTFOLIO_FILE)
+    
+    # Migration: Add missing columns if old file format
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
+    
+    # Create IDs if missing
+    if "ID" not in df.columns or df["ID"].isnull().all():
+        df["ID"] = range(1, len(df) + 1)
+        
+    return df
 
 def save_portfolio(df):
     df.to_csv(PORTFOLIO_FILE, index=False)
 
-# --- SIDEBAR: PORTFOLIO MANAGER ---
+# --- SIDEBAR: MANAGER ---
 st.sidebar.header("💼 Portfolio Manager")
 pf_df = load_portfolio()
 
-with st.sidebar.form("add_trade"):
-    st.write("Add New Trade")
-    t_tick = st.selectbox("Ticker", list(DATA_MAP.keys()))
-    t_date = st.date_input("Buy Date")
-    t_shares = st.number_input("Shares", min_value=1, value=100)
-    t_price = st.number_input("Cost Per Share", min_value=0.01, value=100.00)
-    submitted = st.form_submit_button("Record Trade")
-    if submitted:
-        new_row = pd.DataFrame([{"Ticker": t_tick, "Date": t_date, "Shares": t_shares, "Cost_Basis": t_price, "Status": "OPEN"}])
-        pf_df = pd.concat([pf_df, new_row], ignore_index=True)
-        save_portfolio(pf_df)
-        st.success(f"Added {t_tick}")
+# Tabs for management
+tab1, tab2, tab3 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "🛠️ Fix"])
 
-if not pf_df.empty:
-    if st.sidebar.button("Clear Closed Positions"):
-        pf_df = pf_df[pf_df['Status'] == 'OPEN']
-        save_portfolio(pf_df)
+with tab1:
+    with st.form("buy_trade"):
+        st.caption("Record New Position")
+        b_tick = st.selectbox("Ticker", list(DATA_MAP.keys()))
+        b_date = st.date_input("Buy Date")
+        b_shares = st.number_input("Shares", min_value=1, value=100)
+        b_price = st.number_input("Buy Price", min_value=0.01, value=100.00)
+        
+        if st.form_submit_button("Execute Buy"):
+            new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
+            new_row = pd.DataFrame([{
+                "ID": new_id, "Ticker": b_tick, "Date": b_date, "Shares": b_shares, 
+                "Cost_Basis": b_price, "Status": "OPEN", "Exit_Date": None, 
+                "Exit_Price": None, "Return": 0.0, "SPY_Return": 0.0
+            }])
+            pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+            save_portfolio(pf_df)
+            st.success(f"Bought {b_tick}")
+            st.rerun()
+
+with tab2:
+    st.caption("Close Existing Position")
+    open_trades = pf_df[pf_df['Status'] == 'OPEN']
+    if not open_trades.empty:
+        # Create descriptive labels
+        trade_opts = open_trades.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} | {x['Date']}", axis=1).tolist()
+        selected_trade_str = st.selectbox("Select Trade to Sell", trade_opts)
+        
+        if selected_trade_str:
+            sel_id = int(selected_trade_str.split("|")[0].replace("ID:", "").strip())
+            
+            with st.form("sell_trade"):
+                s_date = st.date_input("Sell Date")
+                s_price = st.number_input("Sell Price", min_value=0.01, value=100.00)
+                
+                if st.form_submit_button("Execute Sell"):
+                    # Calculate Stats
+                    row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
+                    buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
+                    ret_pct = ((s_price - buy_price) / buy_price) * 100
+                    
+                    # Estimate SPY Return (Requires data fetch, done simply here or we fetch in main)
+                    # We will update SPY return in the main logic to keep sidebar fast
+                    
+                    pf_df.at[row_idx, 'Status'] = 'CLOSED'
+                    pf_df.at[row_idx, 'Exit_Date'] = s_date
+                    pf_df.at[row_idx, 'Exit_Price'] = s_price
+                    pf_df.at[row_idx, 'Return'] = ret_pct
+                    
+                    save_portfolio(pf_df)
+                    st.success(f"Sold {sel_id}. Return: {ret_pct:.2f}%")
+                    st.rerun()
+    else:
+        st.info("No Open Positions")
+
+with tab3:
+    st.caption("Remove Erroneous Entry")
+    # Show ALL trades
+    if not pf_df.empty:
+        del_opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
+        del_sel = st.selectbox("Select Entry to Delete", del_opts)
+        
+        if st.button("Permanently Delete"):
+            del_id = int(del_sel.split("|")[0].replace("ID:", "").strip())
+            pf_df = pf_df[pf_df['ID'] != del_id]
+            save_portfolio(pf_df)
+            st.warning(f"Deleted ID {del_id}")
+            st.rerun()
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
     # --- PHASE 1: MARKET HEALTH ---
-    with st.spinner('Checking Market Vitals...'):
+    with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         for t in market_tickers:
@@ -184,8 +253,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         if spy is not None and ief is not None and vix is not None:
             # 1. SPY
             spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
-            if spy_c > spy_sma18:
-                status = "BULLISH"; total_exp += 40
+            if spy_c > spy_sma18: status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
             exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status})
 
@@ -222,7 +290,6 @@ if st.button("RUN ANALYSIS", type="primary"):
     # --- PHASE 2: MASTER SCANNER & DATA LOAD ---
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
-        # Add Portfolio Tickers if not in list
         pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
         all_tickers = list(set(tickers + pf_tickers))
         
@@ -239,10 +306,10 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
 
-        # --- CALCULATE LOGIC FOR ALL TICKERS ---
-        analysis_db = {} # Store logic results for portfolio check
-        
+        # ANALYZE ALL
+        analysis_db = {}
         results = []
+        
         for t in all_tickers:
             if t not in cache_d: continue
             is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
@@ -273,7 +340,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]; wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            bench_ticker = "SPY" # Default bench
+            bench_ticker = "SPY"
             if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
             
             rs_score_pass = False; rs_breakdown = False
@@ -335,7 +402,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_dist = 2.618 * atr
             stop_price = dc['Close'] - stop_dist
             
-            # STORE DATA FOR PORTFOLIO AUDIT
             analysis_db[t] = {
                 "Price": dc['Close'],
                 "Stop": stop_price,
@@ -362,73 +428,72 @@ if st.button("RUN ANALYSIS", type="primary"):
                 }
                 results.append(row)
 
-    # --- PHASE 3: PORTFOLIO AUDIT ---
+    # --- PHASE 3: ACTIVE PORTFOLIO ---
     if not pf_df.empty:
-        st.subheader("💼 Active Portfolio Audit")
-        pf_rows = []
-        wins = 0; total = 0
-        
-        # Get SPY Performance for Comparison
-        spy_curr = cache_d['SPY'].iloc[-1]['Close']
-        
-        for index, row in pf_df.iterrows():
-            if row['Status'] != 'OPEN': continue
-            t = row['Ticker']
-            if t not in analysis_db: continue
+        open_trades = pf_df[pf_df['Status'] == 'OPEN']
+        if not open_trades.empty:
+            st.subheader("💼 Active Holdings")
+            pf_rows = []
+            spy_curr = cache_d['SPY'].iloc[-1]['Close']
             
-            data = analysis_db[t]
-            curr_price = data['Price']
-            cost = float(row['Cost_Basis'])
-            shares = int(row['Shares'])
-            
-            # Gain/Loss
-            pl_pct = ((curr_price - cost) / cost) * 100
-            
-            # SPY Comparison (Approximate from buy date)
-            # Find SPY close on Buy Date
-            try:
-                buy_date = pd.to_datetime(row['Date'])
-                # Find nearest trading day
-                spy_hist = cache_d['SPY']
-                spy_buy_price = spy_hist.asof(buy_date)['Close']
-                spy_return = ((spy_curr - spy_buy_price) / spy_buy_price) * 100
-                vs_spy = pl_pct - spy_return
-            except:
-                vs_spy = 0.0
-            
-            # Audit Logic
-            action = "HOLD"
-            decision = data['Decision']
-            if "AVOID" in decision: action = "EXIT (Signal Break)"
-            elif curr_price < data['Stop']: action = "EXIT (Stop Hit)"
-            elif "WATCH" in decision: action = "CAUTION / HOLD"
-            
-            # Stats
-            total += 1
-            if pl_pct > 0: wins += 1
-            
-            pf_rows.append({
-                "Ticker": t,
-                "Shares": shares,
-                "Buy Price": f"${cost:.2f}",
-                "Current": f"${curr_price:.2f}",
-                "% Gain/Loss": f"{pl_pct:+.2f}%",
-                "vs SPY": f"{vs_spy:+.2f}%",
-                "Titan Status": decision,
-                "Dynamic Stop": f"${data['Stop']:.2f}",
-                "Audit Action": action
-            })
-            
-        if total > 0:
-            col1, col2 = st.columns(2)
-            win_rate = (wins/total)*100
-            col1.metric("Win Rate", f"{win_rate:.0f}%", f"{wins}/{total} Trades")
+            for index, row in open_trades.iterrows():
+                t = row['Ticker']
+                if t not in analysis_db: continue
+                data = analysis_db[t]
+                curr_price = data['Price']; cost = float(row['Cost_Basis'])
+                pl_pct = ((curr_price - cost) / cost) * 100
+                
+                # SPY Comp (Simple Close-to-Close from Buy Date)
+                try:
+                    buy_date = pd.to_datetime(row['Date'])
+                    spy_hist = cache_d['SPY']
+                    spy_buy = spy_hist.loc[spy_hist.index >= buy_date].iloc[0]['Close']
+                    spy_ret = ((spy_curr - spy_buy) / spy_buy) * 100
+                    vs_spy = pl_pct - spy_ret
+                except: vs_spy = 0.0
+
+                action = "HOLD"
+                if "AVOID" in data['Decision']: action = "EXIT (Signal Break)"
+                elif curr_price < data['Stop']: action = "EXIT (Stop Hit)"
+                elif "WATCH" in data['Decision']: action = "CAUTION / HOLD"
+                
+                pf_rows.append({
+                    "Ticker": t, "Shares": row['Shares'], 
+                    "Buy Price": f"${cost:.2f}", "Current": f"${curr_price:.2f}", 
+                    "% Return": f"{pl_pct:+.2f}%", "vs SPY": f"{vs_spy:+.2f}%",
+                    "Titan Status": data['Decision'], "Audit Action": action
+                })
             
             df_pf = pd.DataFrame(pf_rows)
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
 
-    # --- PHASE 4: DISPLAY SCANNER ---
+    # --- PHASE 4: PERFORMANCE METRICS (HISTORY) ---
+    closed_trades = pf_df[pf_df['Status'] == 'CLOSED']
+    if not closed_trades.empty:
+        st.subheader("📜 Closed Performance")
+        
+        # Calculate Aggregates
+        wins = closed_trades[closed_trades['Return'] > 0]
+        win_rate = (len(wins) / len(closed_trades)) * 100
+        avg_ret = closed_trades['Return'].mean()
+        
+        # Compare vs SPY for closed trades
+        # (This would ideally use the SPY return captured at sell time. 
+        # For new trades it will be there. For old/manual ones, might be 0)
+        # We can implement a backfill logic if needed, but for now we display what we have.
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Win Rate", f"{win_rate:.1f}%", f"{len(wins)}/{len(closed_trades)} Trades")
+        c2.metric("Avg Return", f"{avg_ret:+.2f}%")
+        
+        # Display History Table
+        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return"]].copy()
+        hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+        st.dataframe(hist_view)
+        st.write("---")
+
+    # --- PHASE 5: DISPLAY SCANNER ---
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
