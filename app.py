@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Canadian Partition")
+st.title(f"🛡️ Titan Strategy v51.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Thematic Separation")
 
 RISK_UNIT = 2300  
 
@@ -66,93 +66,81 @@ RISK_UNIT = 2300
 # Format: Ticker: [Category, Benchmark, Description]
 
 DATA_MAP = {
-    # --- 00. INDICES (US) ---
+    # --- 00. INDICES ---
     "DIA": ["00. INDICES", "SPY", "Dow Jones"],
     "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
     "IWM": ["00. INDICES", "SPY", "Russell 2000"],
     "IWC": ["00. INDICES", "SPY", "Micro-Cap"],
     "^VIX": ["00. INDICES", "SPY", "VIX Volatility"],
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
+    "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], # Also appears in Canada via logic
 
-    # --- 01. MATERIALS (XLB) ---
-    "XLB": ["01. MATERIALS (XLB)", "SPY", "Materials Sector"],
-    "GLD": ["01. MATERIALS (XLB)", "SPY", "Gold Bullion"],
-    "SLV": ["01. MATERIALS (XLB)", "SPY", "Silver Bullion"],
-    "GDX": ["01. MATERIALS (XLB)", "SPY", "Gold Miners"],
-    "SILJ": ["01. MATERIALS (XLB)", "SPY", "Junior Silver"], 
-    "COPX": ["01. MATERIALS (XLB)", "SPY", "Copper Miners"],
-    "REMX": ["01. MATERIALS (XLB)", "SPY", "Rare Earths"],
+    # --- 01. MATERIALS ---
+    "XLB": ["01. MATERIALS", "SPY", "Materials Sector"],
+    "GLD": ["01. MATERIALS", "SPY", "Gold Bullion"],
+    "SLV": ["01. MATERIALS", "SPY", "Silver Bullion"],
 
-    # --- 02. ENERGY (XLE) ---
-    "XLE": ["02. ENERGY (XLE)", "SPY", "Energy Sector"],
-    "XOP": ["02. ENERGY (XLE)", "SPY", "Oil & Gas Exp"],
-    "OIH": ["02. ENERGY (XLE)", "SPY", "Oil Services"],
-    "MLPX": ["02. ENERGY (XLE)", "SPY", "MLP Infra"],
-    "URA": ["02. ENERGY (XLE)", "SPY", "Uranium"],
-    "NLR": ["02. ENERGY (XLE)", "SPY", "Nuclear"],
-    "ICLN": ["02. ENERGY (XLE)", "SPY", "Clean Energy"],
-    "TAN": ["02. ENERGY (XLE)", "SPY", "Solar Energy"],
+    # --- 02. ENERGY ---
+    "XLE": ["02. ENERGY", "SPY", "Energy Sector"],
+    "XOP": ["02. ENERGY", "SPY", "Oil & Gas Exp"],
+    "OIH": ["02. ENERGY", "SPY", "Oil Services"],
+    "MLPX": ["02. ENERGY", "SPY", "MLP Infra"],
 
-    # --- 03. FINANCIALS (XLF) ---
-    "XLF": ["03. FINANCIALS (XLF)", "SPY", "Financials Sector"],
-    "KBE": ["03. FINANCIALS (XLF)", "SPY", "Bank ETF"],
-    "KRE": ["03. FINANCIALS (XLF)", "SPY", "Regional Banks"],
-    "IAK": ["03. FINANCIALS (XLF)", "SPY", "Insurance"],
+    # --- 03. FINANCIALS ---
+    "XLF": ["03. FINANCIALS", "SPY", "Financials Sector"],
+    "KBE": ["03. FINANCIALS", "SPY", "Bank ETF"],
+    "KRE": ["03. FINANCIALS", "SPY", "Regional Banks"],
+    "IAK": ["03. FINANCIALS", "SPY", "Insurance"],
 
-    # --- 04. INDUSTRIALS (XLI) ---
-    "XLI": ["04. INDUSTRIALS (XLI)", "SPY", "Industrials Sector"],
-    "ITA": ["04. INDUSTRIALS (XLI)", "SPY", "Aerospace & Def"],
-    "IYT": ["04. INDUSTRIALS (XLI)", "SPY", "Transport"],
-    "PAVE": ["04. INDUSTRIALS (XLI)", "SPY", "Infrastructure"],
-    "BOTZ": ["04. INDUSTRIALS (XLI)", "SPY", "Robotics & AI"],
+    # --- 04. INDUSTRIALS ---
+    "XLI": ["04. INDUSTRIALS", "SPY", "Industrials Sector"],
+    "ITA": ["04. INDUSTRIALS", "SPY", "Aerospace & Def"],
+    "IYT": ["04. INDUSTRIALS", "SPY", "Transport"],
 
-    # --- 05. TECHNOLOGY (XLK) ---
-    "XLK": ["05. TECHNOLOGY (XLK)", "SPY", "Technology Sector"],
-    "AAPL": ["05. TECHNOLOGY (XLK)", "QQQ", "Apple Inc"], 
-    "MSFT": ["05. TECHNOLOGY (XLK)", "QQQ", "Microsoft"],
-    "NVDA": ["05. TECHNOLOGY (XLK)", "QQQ", "Nvidia"],
-    "SMH": ["05. TECHNOLOGY (XLK)", "SPY", "Semiconductors"],
-    "XSD": ["05. TECHNOLOGY (XLK)", "SPY", "Semi SPDR"], 
-    "AIQ": ["05. TECHNOLOGY (XLK)", "SPY", "Artificial Intel"],
-    "IGV": ["05. TECHNOLOGY (XLK)", "SPY", "Tech Software"],
-    "SMCI": ["05. TECHNOLOGY (XLK)", "QQQ", "Super Micro"],
-    "DELL": ["05. TECHNOLOGY (XLK)", "QQQ", "Dell Tech"],
-    "WDC": ["05. TECHNOLOGY (XLK)", "QQQ", "Western Digital"],
-    "PSTG": ["05. TECHNOLOGY (XLK)", "QQQ", "Pure Storage"],
-    "ANET": ["05. TECHNOLOGY (XLK)", "QQQ", "Arista Networks"],
+    # --- 05. TECHNOLOGY ---
+    "XLK": ["05. TECHNOLOGY", "SPY", "Technology Sector"],
+    "AAPL": ["05. TECHNOLOGY", "QQQ", "Apple Inc"], 
+    "MSFT": ["05. TECHNOLOGY", "QQQ", "Microsoft"],
+    "NVDA": ["05. TECHNOLOGY", "QQQ", "Nvidia"],
+    "SMH": ["05. TECHNOLOGY", "SPY", "Semiconductors"],
+    "XSD": ["05. TECHNOLOGY", "SPY", "Semi SPDR"], 
+    "IGV": ["05. TECHNOLOGY", "SPY", "Tech Software"],
+    "SMCI": ["05. TECHNOLOGY", "QQQ", "Super Micro"],
+    "DELL": ["05. TECHNOLOGY", "QQQ", "Dell Tech"],
+    "WDC": ["05. TECHNOLOGY", "QQQ", "Western Digital"],
+    "PSTG": ["05. TECHNOLOGY", "QQQ", "Pure Storage"],
+    "ANET": ["05. TECHNOLOGY", "QQQ", "Arista Networks"],
 
-    # --- 06. COMM SERVICES (XLC) ---
-    "XLC": ["06. COMM SVC (XLC)", "SPY", "Comm Services"],
-    "META": ["06. COMM SVC (XLC)", "QQQ", "Meta Platforms"],
-    "GOOGL": ["06. COMM SVC (XLC)", "QQQ", "Alphabet Inc"],
+    # --- 06. COMM SERVICES ---
+    "XLC": ["06. COMM SERVICES", "SPY", "Comm Services"],
+    "META": ["06. COMM SERVICES", "QQQ", "Meta Platforms"],
+    "GOOGL": ["06. COMM SERVICES", "QQQ", "Alphabet Inc"],
 
-    # --- 07. HEALTH CARE (XLV) ---
-    "XLV": ["07. HEALTH CARE (XLV)", "SPY", "Health Care Sector"],
-    "IBB": ["07. HEALTH CARE (XLV)", "SPY", "Biotech Core"],
-    "XBI": ["07. HEALTH CARE (XLV)", "SPY", "Biotech SPDR"],
-    "ARKG": ["07. HEALTH CARE (XLV)", "SPY", "Genomics"],
-    "PPH": ["07. HEALTH CARE (XLV)", "SPY", "Pharma"],
-    "IHI": ["07. HEALTH CARE (XLV)", "SPY", "Med Devices"],
+    # --- 07. HEALTH CARE ---
+    "XLV": ["07. HEALTH CARE", "SPY", "Health Care Sector"],
+    "IBB": ["07. HEALTH CARE", "SPY", "Biotech Core"],
+    "XBI": ["07. HEALTH CARE", "SPY", "Biotech SPDR"],
+    "PPH": ["07. HEALTH CARE", "SPY", "Pharma"],
+    "IHI": ["07. HEALTH CARE", "SPY", "Med Devices"],
 
-    # --- 08. CONS DISCRET (XLY) ---
-    "XLY": ["08. CONS DISCRET (XLY)", "SPY", "Cons Discret Sector"],
-    "AMZN": ["08. CONS DISCRET (XLY)", "QQQ", "Amazon"],
-    "ITB": ["08. CONS DISCRET (XLY)", "SPY", "Home Construction"],
+    # --- 08. CONS DISCRET ---
+    "XLY": ["08. CONS DISCRET", "SPY", "Cons Discret Sector"],
+    "AMZN": ["08. CONS DISCRET", "QQQ", "Amazon"],
+    "ITB": ["08. CONS DISCRET", "SPY", "Home Construction"],
 
-    # --- 09. CONS STAPLES (XLP) ---
-    "XLP": ["09. CONS STAPLES (XLP)", "SPY", "Cons Staples Sector"],
-    "MOO": ["09. CONS STAPLES (XLP)", "SPY", "Agribusiness"],
+    # --- 09. CONS STAPLES ---
+    "XLP": ["09. CONS STAPLES", "SPY", "Cons Staples Sector"],
 
-    # --- 10. UTILITIES / REAL ESTATE ---
-    "XLU": ["10. UTIL / RE (XLU)", "SPY", "Utilities Sector"],
-    "XLRE": ["10. UTIL / RE (XLU)", "SPY", "Real Estate Sector"],
+    # --- 10. UTILITIES / RE ---
+    "XLU": ["10. UTIL / RE", "SPY", "Utilities Sector"],
+    "XLRE": ["10. UTIL / RE", "SPY", "Real Estate Sector"],
 
-    # --- 11. TREASURY / CURRENCY ---
+    # --- 11. BONDS/FX ---
     "IEF": ["11. BONDS/FX", "SPY", "7-10 Year Treasuries"],
     "DLR.TO": ["11. BONDS/FX", None, "USD/CAD Currency"],
     
     # --- 12. CANADA (HXT) ---
-    "HXT.TO": ["12. CANADA (HXT)", "SPY", "TSX 60 Index"], # Parent Index
+    # HXT.TO is inserted here via logic in the loop below
     "CNQ.TO": ["12. CANADA (HXT)", "HXT.TO", "Cdn Natural Res"],
     "CP.TO": ["12. CANADA (HXT)", "HXT.TO", "CP KC Rail"],
     "WSP.TO": ["12. CANADA (HXT)", "HXT.TO", "WSP Global"],
@@ -160,6 +148,22 @@ DATA_MAP = {
     "CSU.TO": ["12. CANADA (HXT)", "HXT.TO", "Constellation Soft"],
     "NTR.TO": ["12. CANADA (HXT)", "HXT.TO", "Nutrien"],
     "TECK-B.TO": ["12. CANADA (HXT)", "HXT.TO", "Teck Resources"],
+
+    # --- 13. THEMES (Standalone) ---
+    # Moved thematic/growth ETFs here. Benchmarked to SPY.
+    "BOTZ": ["13. THEMES", "SPY", "Robotics & AI"],
+    "AIQ": ["13. THEMES", "SPY", "Artificial Intel"],
+    "ARKG": ["13. THEMES", "SPY", "Genomics"],
+    "ICLN": ["13. THEMES", "SPY", "Clean Energy"],
+    "TAN": ["13. THEMES", "SPY", "Solar Energy"],
+    "NLR": ["13. THEMES", "SPY", "Nuclear"],
+    "URA": ["13. THEMES", "SPY", "Uranium"],
+    "GDX": ["13. THEMES", "SPY", "Gold Miners"],
+    "SILJ": ["13. THEMES", "SPY", "Junior Silver"], 
+    "COPX": ["13. THEMES", "SPY", "Copper Miners"],
+    "REMX": ["13. THEMES", "SPY", "Rare Earths"],
+    "PAVE": ["13. THEMES", "SPY", "Infrastructure"],
+    "MOO": ["13. THEMES", "SPY", "Agribusiness"],
 
     # --- MANUAL ---
     "MANL": ["99. MANUAL", "SPY", "Manual / Spy Proxy"]
@@ -627,9 +631,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             rs_score_pass = False; rs_breakdown = False
             
-            # --- UPDATED RS LOGIC (Handles DLR.TO Exception) ---
             if bench_ticker is None:
-                rs_score_pass = True # Automatic Pass for Non-Benchmarked Assets
+                rs_score_pass = True 
             elif bench_ticker in cache_d:
                 bench_df = cache_d[bench_ticker]
                 aligned = pd.concat([df_d['Close'], bench_df['Close']], axis=1, join='inner')
@@ -702,7 +705,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
                 
-                # --- SORT RANKING LOGIC ---
+                # --- SORT RANKING LOGIC (UPDATED) ---
                 sort_rank = 1
                 cat_name = DATA_MAP[t][0]
                 if "00. INDICES" in cat_name: 
@@ -724,6 +727,13 @@ if st.button("RUN ANALYSIS", type="primary"):
                     "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
                 }
                 results.append(row)
+                
+                # --- HXT.TO DUPLICATION LOGIC ---
+                if t == "HXT.TO":
+                    row_cad = row.copy()
+                    row_cad["Sector"] = "12. CANADA (HXT)"
+                    row_cad["Rank"] = 0 # Ensure it stays at top of Canada section
+                    results.append(row_cad)
 
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
