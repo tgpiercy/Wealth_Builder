@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Unrealized Gain/Loss Tracking")
+st.title(f"🛡️ Titan Strategy v51.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Corrected P&L Color Logic")
 
 RISK_UNIT = 2300  
 
@@ -163,7 +163,7 @@ def color_pl_dol(val):
     if isinstance(val, str) and '$' in val:
         try:
             num = float(val.strip('$').replace('+','').replace(',',''))
-            if val.startswith('-'): num = -num # Handle negative strings like "-$50"
+            if val.startswith('-'): num = -num 
             return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
     return ''
@@ -173,7 +173,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- ACTIVE PORTFOLIO STYLER (Added Gain/Loss coloring) ---
+# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -674,7 +674,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             
-            # Unrealized Gain/Loss for this ticker
+            # Unrealized Gain/Loss
             gl_val = pos_val - data['TotalCost']
             
             decision = analysis_db[t]['Decision']
@@ -702,12 +702,16 @@ if st.button("RUN ANALYSIS", type="primary"):
         open_pl_val = equity_val - total_active_cost
         open_pl_cad = open_pl_val * cad_rate
 
+        # Format Deltas to ensure negative sign is FIRST
+        def fmt_delta(val):
+            return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
+
         st.subheader("💼 Active Holdings")
         
-        # CLEAN SPLIT METRICS (REORDERED)
+        # SPLIT INTO 4 COLUMNS
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f}")
-        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f}")
+        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", fmt_delta(open_pl_cad))
+        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", fmt_delta(open_pl_val))
         c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
