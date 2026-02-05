@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # --- SECURITY CONFIGURATION ---
 CREDENTIALS = {
     "dad": "1234",
-    "son": "1234"
+    "son": "!@#L2s3s2-ON!@#"
 }
 
 # --- PAGE CONFIGURATION ---
