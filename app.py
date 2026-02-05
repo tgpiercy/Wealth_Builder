@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Factory Reset + Native UI")
+st.title(f"🛡️ Titan Strategy v50.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Explicit White Net Worth")
 
 RISK_UNIT = 2300  
 
@@ -173,6 +173,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -698,10 +699,17 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD", f"${open_pl_val:,.2f} Open P&L")
-        m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
+        # EXPLICIT HTML HEADER to override Streamlit Theme Color
+        st.markdown(f"""
+        <h3 style='color: white;'>Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD</h3>
+        """, unsafe_allow_html=True)
+        
+        pl_color = "green" if open_pl_val >= 0 else "red"
+        st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
+        m2.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
         if pf_rows:
             df_pf = pd.DataFrame(pf_rows)
