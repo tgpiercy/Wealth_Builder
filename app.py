@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.8")
-st.caption("Institutional Protocol: Deep History (10y) + Detailed Health Metrics")
+st.title("🛡️ Titan Strategy v47.9")
+st.caption("Institutional Protocol: Strict Logic Gates")
 
 RISK_UNIT = 2300  
 
@@ -109,14 +109,14 @@ def style_market(styler):
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET HEALTH (Detailed) ---
-    with st.spinner('Checking Market Vitals (SPY, IEF, VIX)...'):
+    # --- PHASE 1: MARKET HEALTH ---
+    with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         for t in market_tickers:
             try:
                 tk = yf.Ticker(t)
-                df = tk.history(period="2y", interval="1d") # 2y is plenty for market health logic
+                df = tk.history(period="2y", interval="1d")
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: market_data[t] = df
             except: pass
@@ -125,9 +125,8 @@ if st.button("RUN ANALYSIS", type="primary"):
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
         if spy is not None and ief is not None and vix is not None:
-            # 1. SPY Trend
-            spy_c = spy.iloc[-1]['Close']
-            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            # 1. SPY
+            spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
             if spy_c > spy_sma18:
                 status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
@@ -142,7 +141,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
             ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
             
-            # Distance from SMA
             dist_pct = ((ratio_c - ratio_sma18) / ratio_sma18) * 100
             
             if ratio_c > ratio_sma18:
@@ -171,32 +169,27 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             exposure_rows.append({"Metric": "TOTAL EXPOSURE", "Value": "---", "Status": f"{total_exp}%"})
             
-            # Display
+            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
+            if total_exp == 0: risk_per_trade = 0
+            
             df_mkt = pd.DataFrame(exposure_rows)
             st.subheader(f"📊 Market Health: {total_exp}% Invested")
             st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
             st.write("---")
-            
-            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
-            if total_exp == 0: risk_per_trade = 0
-            
         else:
             risk_per_trade = 0
             st.error("Market Data Failed to Load")
 
-    # --- PHASE 2: MASTER SCANNER (10-Year Depth) ---
+    # --- PHASE 2: MASTER SCANNER ---
     with st.spinner('Running Titan Protocol (10-Year Deep Scan)...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {}
-        # We re-fetch market data with 10y depth for the scanner if needed, or just use separate calls.
-        # Ideally, we fetch everything with 10y now to be safe.
-        
+        # Re-using market data if applicable, but fetch deeply for scanner
         for t in tickers:
             if t in cache_d: continue
             try:
                 tk = yf.Ticker(t)
-                # CHANGE: Back to 10y for maximum precision on 200MA and Volatility
-                df = tk.history(period="10y", interval="1d") 
+                df = tk.history(period="10y", interval="1d") # 10y for precision
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
@@ -281,26 +274,41 @@ if st.button("RUN ANALYSIS", type="primary"):
             d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
             w_pulse = "NO"; w_pulse = "GOOD" if w_uptrend and d_health_ok else ("WEAK" if w_uptrend else "NO")
 
+            # --- DECISION LOGIC (STRICT) ---
             decision = "AVOID"; reason = "Low Score"
+            
+            # 1. Base Score Check
             if w_score >= 4:
                 if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
                 elif d_score == 4: decision = "SOON" if w_score==5 else "SCOUT"; reason = "D-Score 4"
                 elif d_score == 3: decision = "SCOUT"; reason = "Dip Buy"
                 else: decision = "WATCH"; reason = "Daily Weak"
-            else: decision = "AVOID"; reason = "Weekly Weak"
+            else:
+                decision = "AVOID"; reason = "Weekly Weak" # Hard Fail
 
-            # Filters
+            # 2. Filters (The Kill Switches)
             w_sma8_pass = wc['Close'] > wc['SMA8']
             w_cloud_pass = wc['Close'] > wc['Cloud_Top']
             
-            if not w_sma8_pass: decision = "WATCH"; reason = "BELOW\nW-SMA8"
-            elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak"
-            elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
-            elif "BUY" in decision and not (dc['Close'] > dc['SMA200']): decision = "SCOUT"; reason = "Below 200MA"
-            elif not w_cloud_pass and "BUY" in decision: decision = "WATCH"; reason = "Cloud Fail"
-            elif "SCOUT" in decision and not d_chk['Price']: decision = "WATCH"; reason = "Price Low"
-            elif rs_breakdown: decision = "WATCH"; reason = "RS BREAK"
-            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): decision = "WATCH"; reason = "VIX Lock"
+            # KILL SWITCH 1: Trend Fail (SMA8 or Impulse)
+            if not w_sma8_pass: 
+                decision = "AVOID"; reason = "BELOW W-SMA8" # Was WATCH, now AVOID
+            elif "NO" in w_pulse: 
+                decision = "AVOID"; reason = "Impulse NO" # Was WATCH, now AVOID
+
+            # DOWNGRADES (Valid "WATCH" reasons)
+            elif "SCOUT" in decision and "WEAK" in w_pulse: 
+                decision = "WATCH"; reason = "Impulse Weak"
+            elif "BUY" in decision and not (dc['Close'] > dc['SMA200']): 
+                decision = "SCOUT"; reason = "Below 200MA"
+            elif not w_cloud_pass and "BUY" in decision: 
+                decision = "WATCH"; reason = "Cloud Fail"
+            elif "SCOUT" in decision and not d_chk['Price']: 
+                decision = "WATCH"; reason = "Price Low"
+            elif rs_breakdown: 
+                decision = "WATCH"; reason = "RS BREAK"
+            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): 
+                decision = "WATCH"; reason = "VIX Lock"
 
             # Stops
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
