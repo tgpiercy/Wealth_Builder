@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Streamlined Audit & Alpha Tracking")
+st.title(f"🛡️ Titan Strategy v49.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Dual-Currency Net Worth Display")
 
 RISK_UNIT = 2300  
 
@@ -173,7 +173,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# Removed "vs SPY" from styling subset
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -576,7 +575,9 @@ if st.button("RUN ANALYSIS", type="primary"):
             s = row['Shares']
             c = row['Cost_Basis']
             
-            if t not in agg_trades: agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
+            if t not in agg_trades:
+                agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
+            
             agg_trades[t]['Shares'] += s
             agg_trades[t]['TotalCost'] += (s * c)
             
@@ -618,7 +619,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD", f"(${total_acct_cad:,.2f} CAD)")
+        m1.metric("Total Net Worth", f"${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
