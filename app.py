@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- SECURITY CONFIGURATION ---
 CREDENTIALS = {
@@ -57,15 +57,15 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Multi-User Portfolio Intelligence")
+st.title(f"🛡️ Titan Strategy v49.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Position Sizing & Alpha Tracking")
 
 RISK_UNIT = 2300  
 
 # --- DATA MAP ---
 DATA_MAP = {
     "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"],
-    "VOO": ["BENCH", "SPY", "Vanguard S&P 500"], # Added
+    "VOO": ["BENCH", "SPY", "Vanguard S&P 500"],
     "SPY": ["BENCH", "SPY", "S&P 500"],
     "DIA": ["BENCH", "SPY", "Dow Jones"],
     "QQQ": ["BENCH", "SPY", "Nasdaq 100"],
@@ -178,6 +178,7 @@ def style_portfolio(styler):
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
     ]).map(color_pl, subset=["% Return", "vs SPY"])\
+      .map(color_pl_dol, subset=["Position ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
 
@@ -185,7 +186,7 @@ def style_history(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return"])\
+    ]).map(color_pl, subset=["% Return", "% Delta vs SPY"])\
       .map(color_pl_dol, subset=["$ P&L"])\
       .hide(axis='index')
 
@@ -199,17 +200,17 @@ def load_portfolio():
         return df
     
     df = pd.read_csv(PORTFOLIO_FILE)
-    
     for c in cols:
-        if c not in df.columns:
-            df[c] = None
+        if c not in df.columns: df[c] = None
     
+    # Backfill math
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
                  pl = (float(row['Exit_Price']) - float(row['Cost_Basis'])) * float(row['Shares'])
                  df.at[idx, 'Realized_PL'] = pl
              except: df.at[idx, 'Realized_PL'] = 0.0
+        if pd.isna(row['SPY_Return']): df.at[idx, 'SPY_Return'] = 0.0
 
     if "ID" not in df.columns or df["ID"].isnull().all():
         df["ID"] = range(1, len(df) + 1)
@@ -233,7 +234,6 @@ tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", 
 with tab1:
     with st.form("buy_trade"):
         st.caption("Record New Position")
-        # Ensure VOO is in the list
         all_options = list(DATA_MAP.keys())
         b_tick = st.selectbox("Ticker", all_options)
         b_date = st.date_input("Buy Date")
@@ -280,15 +280,37 @@ with tab2:
                     row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
                     buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
                     shares = float(pf_df.at[row_idx, 'Shares'])
+                    buy_date_str = pf_df.at[row_idx, 'Date']
                     
+                    # Logic
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * shares
                     
+                    # SPY Comparison Fetch
+                    spy_ret_val = 0.0
+                    try:
+                        # Fetch SPY specifically for this date range
+                        spy_tk = yf.Ticker("SPY")
+                        # Add buffer days to ensure we catch trading days
+                        b_dt = pd.to_datetime(buy_date_str)
+                        s_dt = pd.to_datetime(s_date)
+                        hist = spy_tk.history(start=b_dt, end=s_dt + timedelta(days=5))
+                        
+                        # Find nearest valid trading days
+                        spy_buy = hist.asof(b_dt)['Close']
+                        spy_sell = hist.asof(s_dt)['Close']
+                        
+                        if not pd.isna(spy_buy) and not pd.isna(spy_sell):
+                            spy_ret_val = ((spy_sell - spy_buy) / spy_buy) * 100
+                    except:
+                        pass # Fail silently if network issue, defaults to 0.0
+
                     pf_df.at[row_idx, 'Status'] = 'CLOSED'
                     pf_df.at[row_idx, 'Exit_Date'] = s_date
                     pf_df.at[row_idx, 'Exit_Price'] = s_price
                     pf_df.at[row_idx, 'Return'] = ret_pct
                     pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
+                    pf_df.at[row_idx, 'SPY_Return'] = spy_ret_val
                     
                     cash_id = pf_df["ID"].max() + 1
                     cash_row = pd.DataFrame([{
@@ -299,7 +321,7 @@ with tab2:
                     pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
                     save_portfolio(pf_df)
-                    st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f}")
+                    st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f} | SPY: {spy_ret_val:.1f}%")
                     st.rerun()
     else:
         st.info("No Open Positions")
@@ -339,7 +361,6 @@ with tab4:
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # --- PHASE 1: MARKET HEALTH ---
     with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
@@ -388,7 +409,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             risk_per_trade = 0
             st.error("Market Data Failed to Load")
 
-    # --- PHASE 2: MASTER SCANNER ---
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
         pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
@@ -512,7 +532,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "ATR": atr
             }
 
-            if is_scanner and t not in ["MANL", "VOO"]: # VOO also hidden from scanner
+            if is_scanner and t not in ["MANL", "VOO"]:
                 final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
@@ -562,6 +582,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 
                 curr_price = data['Price']; cost = float(row['Cost_Basis'])
                 pl_pct = ((curr_price - cost) / cost) * 100
+                pos_val = curr_price * float(row['Shares']) # New metric
                 
                 try:
                     buy_date = pd.to_datetime(row['Date'])
@@ -578,7 +599,8 @@ if st.button("RUN ANALYSIS", type="primary"):
                 
                 pf_rows.append({
                     "Ticker": t, "Shares": row['Shares'], 
-                    "Buy Price": f"${cost:.2f}", "Current": f"${curr_price:.2f}", 
+                    "Buy Price": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
+                    "Position ($)": f"${pos_val:,.2f}",
                     "% Return": f"{pl_pct:+.2f}%", "vs SPY": f"{vs_spy:+.2f}%",
                     "Titan Status": data['Decision'], "Audit Action": action
                 })
@@ -601,7 +623,13 @@ if st.button("RUN ANALYSIS", type="primary"):
         c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
         c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
         
-        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL"]].copy()
+        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]].copy()
+        
+        # Calculate Delta
+        hist_view["% Delta vs SPY"] = hist_view["Return"] - hist_view["SPY_Return"]
+        
+        # Format
+        hist_view["% Delta vs SPY"] = hist_view["% Delta vs SPY"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
         
@@ -611,6 +639,9 @@ if st.button("RUN ANALYSIS", type="primary"):
             "Cost_Basis": "Buy Price", 
             "Exit_Price": "Sell Price"
         }, inplace=True)
+        
+        # Drop SPY_Return column from view as it's now in Delta
+        hist_view = hist_view.drop(columns=["SPY_Return"])
         
         st.dataframe(hist_view.style.pipe(style_history))
         st.write("---")
