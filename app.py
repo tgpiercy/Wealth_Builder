@@ -57,22 +57,20 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: DLR.TO Exception Logic")
+st.title(f"🛡️ Titan Strategy v51.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Canadian Partition")
 
 RISK_UNIT = 2300  
 
 # --- DATA MAP ---
 # Format: Ticker: [Category, Benchmark, Description]
-# DLR.TO Benchmark is set to None to skip Ratio calculations.
 
 DATA_MAP = {
-    # --- 00. INDICES (LOCKED TOP) ---
+    # --- 00. INDICES (US) ---
     "DIA": ["00. INDICES", "SPY", "Dow Jones"],
     "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
     "IWM": ["00. INDICES", "SPY", "Russell 2000"],
     "IWC": ["00. INDICES", "SPY", "Micro-Cap"],
-    "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     "^VIX": ["00. INDICES", "SPY", "VIX Volatility"],
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
 
@@ -84,8 +82,6 @@ DATA_MAP = {
     "SILJ": ["01. MATERIALS (XLB)", "SPY", "Junior Silver"], 
     "COPX": ["01. MATERIALS (XLB)", "SPY", "Copper Miners"],
     "REMX": ["01. MATERIALS (XLB)", "SPY", "Rare Earths"],
-    "NTR.TO": ["01. MATERIALS (XLB)", "HXT.TO", "Nutrien"],
-    "TECK-B.TO": ["01. MATERIALS (XLB)", "HXT.TO", "Teck Resources"],
 
     # --- 02. ENERGY (XLE) ---
     "XLE": ["02. ENERGY (XLE)", "SPY", "Energy Sector"],
@@ -96,7 +92,6 @@ DATA_MAP = {
     "NLR": ["02. ENERGY (XLE)", "SPY", "Nuclear"],
     "ICLN": ["02. ENERGY (XLE)", "SPY", "Clean Energy"],
     "TAN": ["02. ENERGY (XLE)", "SPY", "Solar Energy"],
-    "CNQ.TO": ["02. ENERGY (XLE)", "HXT.TO", "Cdn Natural Res"],
 
     # --- 03. FINANCIALS (XLF) ---
     "XLF": ["03. FINANCIALS (XLF)", "SPY", "Financials Sector"],
@@ -110,9 +105,6 @@ DATA_MAP = {
     "IYT": ["04. INDUSTRIALS (XLI)", "SPY", "Transport"],
     "PAVE": ["04. INDUSTRIALS (XLI)", "SPY", "Infrastructure"],
     "BOTZ": ["04. INDUSTRIALS (XLI)", "SPY", "Robotics & AI"],
-    "CP.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "CP KC Rail"],
-    "WSP.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "WSP Global"],
-    "CSU.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "Constellation Soft"], 
 
     # --- 05. TECHNOLOGY (XLK) ---
     "XLK": ["05. TECHNOLOGY (XLK)", "SPY", "Technology Sector"],
@@ -128,7 +120,6 @@ DATA_MAP = {
     "WDC": ["05. TECHNOLOGY (XLK)", "QQQ", "Western Digital"],
     "PSTG": ["05. TECHNOLOGY (XLK)", "QQQ", "Pure Storage"],
     "ANET": ["05. TECHNOLOGY (XLK)", "QQQ", "Arista Networks"],
-    "SHOP.TO": ["05. TECHNOLOGY (XLK)", "HXT.TO", "Shopify"],
 
     # --- 06. COMM SERVICES (XLC) ---
     "XLC": ["06. COMM SVC (XLC)", "SPY", "Comm Services"],
@@ -158,8 +149,18 @@ DATA_MAP = {
 
     # --- 11. TREASURY / CURRENCY ---
     "IEF": ["11. BONDS/FX", "SPY", "7-10 Year Treasuries"],
-    "DLR.TO": ["11. BONDS/FX", None, "USD/CAD Currency"], # EXCEPTION: No Benchmark
+    "DLR.TO": ["11. BONDS/FX", None, "USD/CAD Currency"],
     
+    # --- 12. CANADA (HXT) ---
+    "HXT.TO": ["12. CANADA (HXT)", "SPY", "TSX 60 Index"], # Parent Index
+    "CNQ.TO": ["12. CANADA (HXT)", "HXT.TO", "Cdn Natural Res"],
+    "CP.TO": ["12. CANADA (HXT)", "HXT.TO", "CP KC Rail"],
+    "WSP.TO": ["12. CANADA (HXT)", "HXT.TO", "WSP Global"],
+    "SHOP.TO": ["12. CANADA (HXT)", "HXT.TO", "Shopify"],
+    "CSU.TO": ["12. CANADA (HXT)", "HXT.TO", "Constellation Soft"],
+    "NTR.TO": ["12. CANADA (HXT)", "HXT.TO", "Nutrien"],
+    "TECK-B.TO": ["12. CANADA (HXT)", "HXT.TO", "Teck Resources"],
+
     # --- MANUAL ---
     "MANL": ["99. MANUAL", "SPY", "Manual / Spy Proxy"]
 }
@@ -706,7 +707,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 cat_name = DATA_MAP[t][0]
                 if "00. INDICES" in cat_name: 
                     sort_rank = 0 
-                elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE"]:
+                elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]:
                     sort_rank = 0 
 
                 row = {
