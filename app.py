@@ -6,7 +6,6 @@ import os
 from datetime import datetime
 
 # --- SECURITY CONFIGURATION ---
-# CHANGE THESE PASSWORDS!
 CREDENTIALS = {
     "dad": "1234",
     "son": "1234"
@@ -45,14 +44,12 @@ if not st.session_state.authenticated:
         st.text_input("Password", type="password", key="password_input")
         st.form_submit_button("Login", on_click=check_login)
     
-    st.stop() # STOP EXECUTION HERE IF NOT LOGGED IN
+    st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (ONLY RUNS IF LOGGED IN)
+#  TITAN STRATEGY APP
 # ==============================================================================
 
-# --- DYNAMIC FILE HANDLING ---
-# This creates separate files: 'portfolio_dad.csv' and 'portfolio_son.csv'
 current_user = st.session_state.user
 PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
 
@@ -60,7 +57,7 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.0 ({current_user.upper()})")
+st.title(f"🛡️ Titan Strategy v49.1 ({current_user.upper()})")
 st.caption("Institutional Protocol: Multi-User Portfolio Intelligence")
 
 RISK_UNIT = 2300  
@@ -68,6 +65,7 @@ RISK_UNIT = 2300
 # --- DATA MAP ---
 DATA_MAP = {
     "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"],
+    "VOO": ["BENCH", "SPY", "Vanguard S&P 500"], # Added
     "SPY": ["BENCH", "SPY", "S&P 500"],
     "DIA": ["BENCH", "SPY", "Dow Jones"],
     "QQQ": ["BENCH", "SPY", "Nasdaq 100"],
@@ -235,7 +233,9 @@ tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", 
 with tab1:
     with st.form("buy_trade"):
         st.caption("Record New Position")
-        b_tick = st.selectbox("Ticker", list(DATA_MAP.keys()))
+        # Ensure VOO is in the list
+        all_options = list(DATA_MAP.keys())
+        b_tick = st.selectbox("Ticker", all_options)
         b_date = st.date_input("Buy Date")
         b_shares = st.number_input("Shares", min_value=1, value=100)
         b_price = st.number_input("Buy Price", min_value=0.01, value=100.00)
@@ -339,6 +339,7 @@ with tab4:
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
+    # --- PHASE 1: MARKET HEALTH ---
     with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
@@ -387,6 +388,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             risk_per_trade = 0
             st.error("Market Data Failed to Load")
 
+    # --- PHASE 2: MASTER SCANNER ---
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
         pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
@@ -510,7 +512,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "ATR": atr
             }
 
-            if is_scanner and t != "MANL":
+            if is_scanner and t not in ["MANL", "VOO"]: # VOO also hidden from scanner
                 final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
