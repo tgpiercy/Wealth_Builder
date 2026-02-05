@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Consolidated Positions + CAD Conversion")
+st.title(f"🛡️ Titan Strategy v49.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Streamlined Audit & Alpha Tracking")
 
 RISK_UNIT = 2300  
 
@@ -173,11 +173,12 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# Removed "vs SPY" from styling subset
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return", "vs SPY"])\
+    ]).map(color_pl, subset=["% Return"])\
       .map(color_pl_dol, subset=["Position ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
@@ -203,7 +204,6 @@ def load_portfolio():
     for c in cols:
         if c not in df.columns: df[c] = None
     
-    # Ensure numeric types
     df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce')
     df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
@@ -387,7 +387,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         
         spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
         cad = market_data.get("CAD=X")
-        cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 # Fallback 1.40
+        cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 
         
         mkt_score = 0; total_exp = 0; exposure_rows = []
         
@@ -570,25 +570,18 @@ if st.button("RUN ANALYSIS", type="primary"):
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
         # AGGREGATE LOGIC
-        # 1. Group by Ticker
-        # 2. Sum Shares, Calc Weighted Avg Cost
         agg_trades = {}
-        
         for index, row in open_trades.iterrows():
             t = row['Ticker']
             s = row['Shares']
             c = row['Cost_Basis']
             
-            if t not in agg_trades:
-                agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
-            
+            if t not in agg_trades: agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
             agg_trades[t]['Shares'] += s
             agg_trades[t]['TotalCost'] += (s * c)
             
-        # DISPLAY LOGIC
         equity_val = 0.0
         pf_rows = []
-        spy_curr = cache_d['SPY'].iloc[-1]['Close']
         
         for t, data in agg_trades.items():
             if t not in analysis_db: continue
@@ -602,10 +595,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             
-            # Simple Spy Comp (hard to do accurate w/ multiple buys, so we blank it or use last buy?)
-            # For aggregated view, VS SPY is complex. We will set to 0.0 or omit for now to avoid confusion.
-            vs_spy = 0.0 
-            
             decision = analysis_db[t]['Decision']
             stop_price = analysis_db[t]['Stop']
             
@@ -618,19 +607,16 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Ticker": t, "Shares": int(total_shares), 
                 "Avg Cost": f"${avg_cost:.2f}", "Current": f"${curr_price:.2f}",
                 "Position ($)": f"${pos_val:,.2f}",
-                "% Return": f"{pl_pct:+.2f}%", "vs SPY": "---", # Aggregated view limits this
+                "% Return": f"{pl_pct:+.2f}%", 
                 "Titan Status": decision, "Audit Action": action
             })
 
         total_acct = current_cash + equity_val
         cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
         invested_pct = 100 - cash_pct
-        
-        # FX Conversion
         total_acct_cad = total_acct * cad_rate
 
         st.subheader("💼 Active Holdings")
-        
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Net Worth", f"${total_acct:,.2f} USD", f"(${total_acct_cad:,.2f} CAD)")
         m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
