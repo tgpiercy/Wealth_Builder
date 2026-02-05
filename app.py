@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fractional Exits & Scaling Out")
+st.title(f"🛡️ Titan Strategy v50.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Edit & Audit Control")
 
 RISK_UNIT = 2300  
 
@@ -249,7 +249,7 @@ current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
 
 st.sidebar.metric("Cash Available", f"${current_cash:,.2f}")
 
-tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix"])
+tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix/Edit"])
 
 with tab1:
     with st.form("buy_trade"):
@@ -286,7 +286,6 @@ with tab2:
     st.caption("Close Position")
     open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
     if not open_trades.empty:
-        # Create dictionary to map display string back to ID and Max Shares
         trade_map = {}
         opts = []
         for idx, row in open_trades.iterrows():
@@ -309,14 +308,11 @@ with tab2:
                 if st.form_submit_button("Execute Sell"):
                     row_idx = sel_data['idx']
                     buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
-                    # Original Buy Date for SPY Calc
                     buy_date_str = pf_df.at[row_idx, 'Date']
                     
-                    # Logic
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * s_shares
                     
-                    # SPY Fetch
                     spy_ret_val = 0.0
                     try:
                         spy_tk = yf.Ticker("SPY")
@@ -329,17 +325,13 @@ with tab2:
                             spy_ret_val = ((spy_sell - spy_buy) / spy_buy) * 100
                     except: pass
 
-                    # PARTIAL VS FULL SELL
                     if s_shares < max_qty:
-                        # 1. Reduce current row shares
                         pf_df.at[row_idx, 'Shares'] -= s_shares
-                        
-                        # 2. Create NEW Closed Row
                         new_id = pf_df["ID"].max() + 1
                         new_closed_row = pd.DataFrame([{
                             "ID": new_id, 
                             "Ticker": pf_df.at[row_idx, 'Ticker'], 
-                            "Date": buy_date_str, # Same buy date
+                            "Date": buy_date_str, 
                             "Shares": s_shares, 
                             "Cost_Basis": buy_price, 
                             "Status": "CLOSED", 
@@ -350,9 +342,7 @@ with tab2:
                             "SPY_Return": spy_ret_val
                         }])
                         pf_df = pd.concat([pf_df, new_closed_row], ignore_index=True)
-                        
                     else:
-                        # FULL SELL - Just close the row
                         pf_df.at[row_idx, 'Status'] = 'CLOSED'
                         pf_df.at[row_idx, 'Exit_Date'] = s_date
                         pf_df.at[row_idx, 'Exit_Price'] = s_price
@@ -360,7 +350,6 @@ with tab2:
                         pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
                         pf_df.at[row_idx, 'SPY_Return'] = spy_ret_val
                     
-                    # CASH PROCEEDS
                     cash_id = pf_df["ID"].max() + 1
                     cash_row = pd.DataFrame([{
                         "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
@@ -396,16 +385,55 @@ with tab3:
             st.rerun()
 
 with tab4:
-    st.caption("Delete Entry")
+    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade"])
+    
     if not pf_df.empty:
-        del_opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
-        del_sel = st.selectbox("Select Entry to Delete", del_opts)
-        if st.button("Permanently Delete"):
-            del_id = int(del_sel.split("|")[0].replace("ID:", "").strip())
-            pf_df = pf_df[pf_df['ID'] != del_id]
-            save_portfolio(pf_df)
-            st.warning(f"Deleted ID {del_id}")
-            st.rerun()
+        opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
+        sel_str = st.selectbox("Select Trade", opts)
+        sel_id = int(sel_str.split("|")[0].replace("ID:", "").strip())
+        row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
+        
+        if action_type == "Delete Trade":
+            if st.button("Permanently Delete"):
+                pf_df = pf_df[pf_df['ID'] != sel_id]
+                save_portfolio(pf_df)
+                st.warning(f"Deleted ID {sel_id}")
+                st.rerun()
+        
+        elif action_type == "Edit Trade":
+            with st.form("edit_form"):
+                st.subheader(f"Editing ID: {sel_id}")
+                c1, c2 = st.columns(2)
+                cur_status = pf_df.at[row_idx, 'Status']
+                new_status = c1.selectbox("Status", ["OPEN", "CLOSED"], index=0 if cur_status=="OPEN" else 1)
+                new_shares = c2.number_input("Shares", value=float(pf_df.at[row_idx, 'Shares']))
+                
+                c3, c4 = st.columns(2)
+                new_cost = c3.number_input("Cost Basis", value=float(pf_df.at[row_idx, 'Cost_Basis']))
+                cur_exit = pf_df.at[row_idx, 'Exit_Price']
+                new_exit = c4.number_input("Exit Price (0 if Open)", value=float(cur_exit) if pd.notna(cur_exit) else 0.0)
+                
+                if st.form_submit_button("Update Record"):
+                    pf_df.at[row_idx, 'Status'] = new_status
+                    pf_df.at[row_idx, 'Shares'] = new_shares
+                    pf_df.at[row_idx, 'Cost_Basis'] = new_cost
+                    if new_status == "OPEN":
+                        pf_df.at[row_idx, 'Exit_Price'] = None
+                        pf_df.at[row_idx, 'Exit_Date'] = None
+                        pf_df.at[row_idx, 'Return'] = 0.0
+                        pf_df.at[row_idx, 'Realized_PL'] = 0.0
+                    else:
+                        pf_df.at[row_idx, 'Exit_Price'] = new_exit
+                        # Recalc P&L if closing
+                        if new_exit > 0:
+                            ret = ((new_exit - new_cost)/new_cost)*100
+                            pl = (new_exit - new_cost) * new_shares
+                            pf_df.at[row_idx, 'Return'] = ret
+                            pf_df.at[row_idx, 'Realized_PL'] = pl
+                            
+                    save_portfolio(pf_df)
+                    st.success("Record Updated")
+                    st.rerun()
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -660,12 +688,10 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        # NET WORTH HEADER
         st.markdown(f"""
         ### Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD
         """)
         
-        # P&L LINE
         pl_color = "green" if open_pl_val >= 0 else "red"
         st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
         
