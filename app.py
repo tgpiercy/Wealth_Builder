@@ -2,13 +2,16 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import os
+from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.9")
-st.caption("Institutional Protocol: Strict Logic Gates")
+st.title("🛡️ Titan Strategy v48.0")
+st.caption("Institutional Protocol: Portfolio Commander + Performance Attribution")
 
 RISK_UNIT = 2300  
+PORTFOLIO_FILE = "portfolio.csv"
 
 # --- DATA MAP ---
 DATA_MAP = {
@@ -106,11 +109,65 @@ def style_market(styler):
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
     ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
 
-# --- EXECUTION ---
+def style_portfolio(styler):
+    def color_pl(val):
+        if isinstance(val, str) and '%' in val:
+            try:
+                num = float(val.strip('%').replace('+',''))
+                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+            except: return ''
+        return ''
+    
+    def color_action(val):
+        if "EXIT" in val: return 'color: #ff0000; font-weight: bold; background-color: #220000'
+        if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
+        return 'color: #ffffff'
+
+    return styler.set_table_styles([
+         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
+         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
+    ]).map(color_pl, subset=["% Gain/Loss", "vs SPY"])\
+      .map(color_action, subset=["Audit Action"])\
+      .hide(axis='index')
+
+# --- PORTFOLIO FUNCTIONS ---
+def load_portfolio():
+    if not os.path.exists(PORTFOLIO_FILE):
+        df = pd.DataFrame(columns=["Ticker", "Date", "Shares", "Cost_Basis", "Status"])
+        df.to_csv(PORTFOLIO_FILE, index=False)
+        return df
+    return pd.read_csv(PORTFOLIO_FILE)
+
+def save_portfolio(df):
+    df.to_csv(PORTFOLIO_FILE, index=False)
+
+# --- SIDEBAR: PORTFOLIO MANAGER ---
+st.sidebar.header("💼 Portfolio Manager")
+pf_df = load_portfolio()
+
+with st.sidebar.form("add_trade"):
+    st.write("Add New Trade")
+    t_tick = st.selectbox("Ticker", list(DATA_MAP.keys()))
+    t_date = st.date_input("Buy Date")
+    t_shares = st.number_input("Shares", min_value=1, value=100)
+    t_price = st.number_input("Cost Per Share", min_value=0.01, value=100.00)
+    submitted = st.form_submit_button("Record Trade")
+    if submitted:
+        new_row = pd.DataFrame([{"Ticker": t_tick, "Date": t_date, "Shares": t_shares, "Cost_Basis": t_price, "Status": "OPEN"}])
+        pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+        save_portfolio(pf_df)
+        st.success(f"Added {t_tick}")
+
+if not pf_df.empty:
+    if st.sidebar.button("Clear Closed Positions"):
+        pf_df = pf_df[pf_df['Status'] == 'OPEN']
+        save_portfolio(pf_df)
+
+# --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
     # --- PHASE 1: MARKET HEALTH ---
-    with st.spinner('Checking Vitals...'):
+    with st.spinner('Checking Market Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         for t in market_tickers:
@@ -130,42 +187,24 @@ if st.button("RUN ANALYSIS", type="primary"):
             if spy_c > spy_sma18:
                 status = "BULLISH"; total_exp += 40
             else: status = "BEARISH"
-            exposure_rows.append({
-                "Metric": "Trend (SPY > SMA18)", 
-                "Value": f"${spy_c:.2f}",
-                "Status": status
-            })
+            exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status})
 
             # 2. Ratio
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
             ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
-            
             dist_pct = ((ratio_c - ratio_sma18) / ratio_sma18) * 100
-            
-            if ratio_c > ratio_sma18:
-                status = "RISK ON"; total_exp += 40
-            elif ratio_c >= ratio_sma18 * 0.99:
-                status = "STABLE"; total_exp += 40
+            if ratio_c > ratio_sma18: status = "RISK ON"; total_exp += 40
+            elif ratio_c >= ratio_sma18 * 0.99: status = "STABLE"; total_exp += 40
             else: status = "RISK OFF"
-            
-            exposure_rows.append({
-                "Metric": "Power (SPY:IEF)", 
-                "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)",
-                "Status": status
-            })
+            exposure_rows.append({"Metric": "Power (SPY:IEF)", "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)", "Status": status})
 
             # 3. VIX
             vix_c = vix.iloc[-1]['Close']
-            if vix_c < 20:
-                status = "CALM"; total_exp += 20
+            if vix_c < 20: status = "CALM"; total_exp += 20
             elif vix_c < 25: status = "CAUTION"
             else: status = "PANIC"
-            exposure_rows.append({
-                "Metric": "VIX (<20)", 
-                "Value": f"{vix_c:.2f}",
-                "Status": status
-            })
+            exposure_rows.append({"Metric": "VIX (<20)", "Value": f"{vix_c:.2f}", "Status": status})
             
             exposure_rows.append({"Metric": "TOTAL EXPOSURE", "Value": "---", "Status": f"{total_exp}%"})
             
@@ -180,26 +219,34 @@ if st.button("RUN ANALYSIS", type="primary"):
             risk_per_trade = 0
             st.error("Market Data Failed to Load")
 
-    # --- PHASE 2: MASTER SCANNER ---
-    with st.spinner('Running Titan Protocol (10-Year Deep Scan)...'):
+    # --- PHASE 2: MASTER SCANNER & DATA LOAD ---
+    with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
+        # Add Portfolio Tickers if not in list
+        pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
+        all_tickers = list(set(tickers + pf_tickers))
+        
         cache_d = {}
-        # Re-using market data if applicable, but fetch deeply for scanner
-        for t in tickers:
+        cache_d.update(market_data)
+        
+        # Fetch Data
+        for t in all_tickers:
             if t in cache_d: continue
             try:
                 tk = yf.Ticker(t)
-                df = tk.history(period="10y", interval="1d") # 10y for precision
+                df = tk.history(period="10y", interval="1d") 
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
 
+        # --- CALCULATE LOGIC FOR ALL TICKERS ---
+        analysis_db = {} # Store logic results for portfolio check
+        
         results = []
-        for t, meta in DATA_MAP.items():
+        for t in all_tickers:
             if t not in cache_d: continue
-            if meta[0] == "BENCH" and t not in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"]: continue 
+            is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             
-            # DATA
             df_d = cache_d[t].copy()
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -209,7 +256,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # WEEKLY RESAMPLE
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
             df_w.dropna(subset=['Close'], inplace=True)
@@ -219,23 +265,17 @@ if st.button("RUN ANALYSIS", type="primary"):
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
             df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
-            # MOMENTUM (4W & 2W)
             mom_4w = ""; mom_2w = ""
             if len(df_w) >= 5:
-                curr = df_w.iloc[-1]['Close']
-                prev2 = df_w.iloc[-3]['Close']
-                prev4 = df_w.iloc[-5]['Close']
-                chg2 = ((curr / prev2) - 1) * 100
-                chg4 = ((curr / prev4) - 1) * 100
-                mom_2w = f"{chg2:.1f}%"
-                mom_4w = f"{chg4:.1f}%"
+                curr = df_w.iloc[-1]['Close']; prev2 = df_w.iloc[-3]['Close']; prev4 = df_w.iloc[-5]['Close']
+                mom_2w = f"{((curr/prev2)-1)*100:.1f}%"
+                mom_4w = f"{((curr/prev4)-1)*100:.1f}%"
 
-            # POINTERS
-            dc = df_d.iloc[-1]; dp = df_d.iloc[-2]
-            wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
+            dc = df_d.iloc[-1]; dp = df_d.iloc[-2]; wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
 
-            # RS
-            bench_ticker = meta[1]
+            bench_ticker = "SPY" # Default bench
+            if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
+            
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
                 bench_df = cache_d[bench_ticker]
@@ -247,7 +287,6 @@ if st.button("RUN ANALYSIS", type="primary"):
                 pp_rs_sma = rs_sma18.iloc[-3]
                 rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
 
-            # AD & VOL
             ad_pass = False
             if not pd.isna(dc['AD_SMA18']):
                 ad_pass = (dc['AD'] >= dc['AD_SMA18'] * 0.995) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
@@ -258,7 +297,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
             elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
 
-            # SCORES
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
             if wc['SMA18'] > wp['SMA18']: w_score += 1
@@ -269,68 +307,129 @@ if st.button("RUN ANALYSIS", type="primary"):
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
             d_score = sum(d_chk.values())
             
-            # IMPULSE & LOGIC
             w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
             d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
             w_pulse = "NO"; w_pulse = "GOOD" if w_uptrend and d_health_ok else ("WEAK" if w_uptrend else "NO")
 
-            # --- DECISION LOGIC (STRICT) ---
             decision = "AVOID"; reason = "Low Score"
-            
-            # 1. Base Score Check
             if w_score >= 4:
                 if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
                 elif d_score == 4: decision = "SOON" if w_score==5 else "SCOUT"; reason = "D-Score 4"
                 elif d_score == 3: decision = "SCOUT"; reason = "Dip Buy"
                 else: decision = "WATCH"; reason = "Daily Weak"
-            else:
-                decision = "AVOID"; reason = "Weekly Weak" # Hard Fail
+            else: decision = "AVOID"; reason = "Weekly Weak"
 
-            # 2. Filters (The Kill Switches)
             w_sma8_pass = wc['Close'] > wc['SMA8']
             w_cloud_pass = wc['Close'] > wc['Cloud_Top']
             
-            # KILL SWITCH 1: Trend Fail (SMA8 or Impulse)
-            if not w_sma8_pass: 
-                decision = "AVOID"; reason = "BELOW W-SMA8" # Was WATCH, now AVOID
-            elif "NO" in w_pulse: 
-                decision = "AVOID"; reason = "Impulse NO" # Was WATCH, now AVOID
+            if not w_sma8_pass: decision = "AVOID"; reason = "BELOW W-SMA8"
+            elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
+            elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak"
+            elif "BUY" in decision and not (dc['Close'] > dc['SMA200']): decision = "SCOUT"; reason = "Below 200MA"
+            elif not w_cloud_pass and "BUY" in decision: decision = "WATCH"; reason = "Cloud Fail"
+            elif "SCOUT" in decision and not d_chk['Price']: decision = "WATCH"; reason = "Price Low"
+            elif rs_breakdown: decision = "WATCH"; reason = "RS BREAK"
+            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): decision = "WATCH"; reason = "VIX Lock"
 
-            # DOWNGRADES (Valid "WATCH" reasons)
-            elif "SCOUT" in decision and "WEAK" in w_pulse: 
-                decision = "WATCH"; reason = "Impulse Weak"
-            elif "BUY" in decision and not (dc['Close'] > dc['SMA200']): 
-                decision = "SCOUT"; reason = "Below 200MA"
-            elif not w_cloud_pass and "BUY" in decision: 
-                decision = "WATCH"; reason = "Cloud Fail"
-            elif "SCOUT" in decision and not d_chk['Price']: 
-                decision = "WATCH"; reason = "Price Low"
-            elif rs_breakdown: 
-                decision = "WATCH"; reason = "RS BREAK"
-            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): 
-                decision = "WATCH"; reason = "VIX Lock"
-
-            # Stops
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
             stop_dist = 2.618 * atr
-            final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
-            shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
             stop_price = dc['Close'] - stop_dist
-            stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
-
-            row = {
-                "Sector": meta[0], "Industry": meta[2], "Ticker": t,
-                "4W %": mom_4w, "2W %": mom_2w,
-                "Weekly SMA8": "PASS" if w_sma8_pass else "FAIL", 
-                "Weekly Impulse": w_pulse, 
-                "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
-                "Structure": "Above 18" if d_chk['Price'] else "BELOW 18",
-                "Ichimoku Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
-                "Volume": vol_msg, "Action": decision, "Reasoning": reason,
-                "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
+            
+            # STORE DATA FOR PORTFOLIO AUDIT
+            analysis_db[t] = {
+                "Price": dc['Close'],
+                "Stop": stop_price,
+                "Decision": decision,
+                "Reason": reason,
+                "ATR": atr
             }
-            results.append(row)
 
-        df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
-        cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
-        st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
+            if is_scanner:
+                final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
+                shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
+                stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
+                
+                row = {
+                    "Sector": DATA_MAP[t][0] if t in DATA_MAP else "OTHER", "Ticker": t,
+                    "4W %": mom_4w, "2W %": mom_2w,
+                    "Weekly SMA8": "PASS" if w_sma8_pass else "FAIL", 
+                    "Weekly Impulse": w_pulse, 
+                    "Weekly Score (Max 5)": w_score, "Daily Score (Max 5)": d_score,
+                    "Structure": "Above 18" if d_chk['Price'] else "BELOW 18",
+                    "Ichimoku Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
+                    "Volume": vol_msg, "Action": decision, "Reasoning": reason,
+                    "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
+                }
+                results.append(row)
+
+    # --- PHASE 3: PORTFOLIO AUDIT ---
+    if not pf_df.empty:
+        st.subheader("💼 Active Portfolio Audit")
+        pf_rows = []
+        wins = 0; total = 0
+        
+        # Get SPY Performance for Comparison
+        spy_curr = cache_d['SPY'].iloc[-1]['Close']
+        
+        for index, row in pf_df.iterrows():
+            if row['Status'] != 'OPEN': continue
+            t = row['Ticker']
+            if t not in analysis_db: continue
+            
+            data = analysis_db[t]
+            curr_price = data['Price']
+            cost = float(row['Cost_Basis'])
+            shares = int(row['Shares'])
+            
+            # Gain/Loss
+            pl_pct = ((curr_price - cost) / cost) * 100
+            
+            # SPY Comparison (Approximate from buy date)
+            # Find SPY close on Buy Date
+            try:
+                buy_date = pd.to_datetime(row['Date'])
+                # Find nearest trading day
+                spy_hist = cache_d['SPY']
+                spy_buy_price = spy_hist.asof(buy_date)['Close']
+                spy_return = ((spy_curr - spy_buy_price) / spy_buy_price) * 100
+                vs_spy = pl_pct - spy_return
+            except:
+                vs_spy = 0.0
+            
+            # Audit Logic
+            action = "HOLD"
+            decision = data['Decision']
+            if "AVOID" in decision: action = "EXIT (Signal Break)"
+            elif curr_price < data['Stop']: action = "EXIT (Stop Hit)"
+            elif "WATCH" in decision: action = "CAUTION / HOLD"
+            
+            # Stats
+            total += 1
+            if pl_pct > 0: wins += 1
+            
+            pf_rows.append({
+                "Ticker": t,
+                "Shares": shares,
+                "Buy Price": f"${cost:.2f}",
+                "Current": f"${curr_price:.2f}",
+                "% Gain/Loss": f"{pl_pct:+.2f}%",
+                "vs SPY": f"{vs_spy:+.2f}%",
+                "Titan Status": decision,
+                "Dynamic Stop": f"${data['Stop']:.2f}",
+                "Audit Action": action
+            })
+            
+        if total > 0:
+            col1, col2 = st.columns(2)
+            win_rate = (wins/total)*100
+            col1.metric("Win Rate", f"{win_rate:.0f}%", f"{wins}/{total} Trades")
+            
+            df_pf = pd.DataFrame(pf_rows)
+            st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
+            st.write("---")
+
+    # --- PHASE 4: DISPLAY SCANNER ---
+    st.subheader("🔍 Master Scanner")
+    df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
+    cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly SMA8", "Weekly Impulse", "Weekly Score (Max 5)", "Daily Score (Max 5)", "Structure", "Ichimoku Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
+    st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
