@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Position Sizing & Alpha Tracking")
+st.title(f"🛡️ Titan Strategy v49.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Precision Accounting (Int Shares / 2-Decimal Dollars)")
 
 RISK_UNIT = 2300  
 
@@ -190,7 +190,7 @@ def style_history(styler):
       .map(color_pl_dol, subset=["$ P&L"])\
       .hide(axis='index')
 
-# --- PORTFOLIO ENGINE ---
+# --- PORTFOLIO ENGINE (PRECISION MODE) ---
 def load_portfolio():
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]
     
@@ -203,7 +203,13 @@ def load_portfolio():
     for c in cols:
         if c not in df.columns: df[c] = None
     
-    # Backfill math
+    # Ensure numeric types for calculation
+    df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce')
+    df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
+    df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
+    df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
+    
+    # Backfill math if missing
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
@@ -218,6 +224,29 @@ def load_portfolio():
     return df
 
 def save_portfolio(df):
+    # Enforce Precision Rules before saving
+    # 1. Round Dollar Columns to 2 decimals
+    dollar_cols = ['Cost_Basis', 'Exit_Price', 'Realized_PL', 'Return', 'SPY_Return']
+    for col in dollar_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
+            
+    # 2. Shares formatting (Stock=Int, Cash=2 Decimals)
+    # We apply a formatting function but keep the dtype as is for pandas compatibility.
+    # The trick is that to_csv will check if it's float.
+    # We will round stocks to 0 decimals (making them effectively ints like 100.0)
+    
+    def clean_shares(row):
+        val = row['Shares']
+        if pd.isna(val): return 0
+        if row['Ticker'] == 'CASH':
+            return round(val, 2)
+        else:
+            return int(val) # Truncate to int for stocks
+            
+    if not df.empty:
+        df['Shares'] = df.apply(clean_shares, axis=1)
+
     df.to_csv(PORTFOLIO_FILE, index=False)
 
 # --- SIDEBAR: MANAGER ---
@@ -237,8 +266,10 @@ with tab1:
         all_options = list(DATA_MAP.keys())
         b_tick = st.selectbox("Ticker", all_options)
         b_date = st.date_input("Buy Date")
-        b_shares = st.number_input("Shares", min_value=1, value=100)
-        b_price = st.number_input("Buy Price", min_value=0.01, value=100.00)
+        # FORCE INT for Shares (step=1)
+        b_shares = st.number_input("Shares", min_value=1, value=100, step=1)
+        # FORCE 2 DECIMALS for Price
+        b_price = st.number_input("Buy Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
         
         if st.form_submit_button("Execute Buy"):
             new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
@@ -274,7 +305,7 @@ with tab2:
             
             with st.form("sell_trade"):
                 s_date = st.date_input("Sell Date")
-                s_price = st.number_input("Sell Price", min_value=0.01, value=100.00)
+                s_price = st.number_input("Sell Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
                 
                 if st.form_submit_button("Execute Sell"):
                     row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
@@ -286,24 +317,18 @@ with tab2:
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * shares
                     
-                    # SPY Comparison Fetch
+                    # SPY Comparison
                     spy_ret_val = 0.0
                     try:
-                        # Fetch SPY specifically for this date range
                         spy_tk = yf.Ticker("SPY")
-                        # Add buffer days to ensure we catch trading days
                         b_dt = pd.to_datetime(buy_date_str)
                         s_dt = pd.to_datetime(s_date)
                         hist = spy_tk.history(start=b_dt, end=s_dt + timedelta(days=5))
-                        
-                        # Find nearest valid trading days
                         spy_buy = hist.asof(b_dt)['Close']
                         spy_sell = hist.asof(s_dt)['Close']
-                        
                         if not pd.isna(spy_buy) and not pd.isna(spy_sell):
                             spy_ret_val = ((spy_sell - spy_buy) / spy_buy) * 100
-                    except:
-                        pass # Fail silently if network issue, defaults to 0.0
+                    except: pass
 
                     pf_df.at[row_idx, 'Status'] = 'CLOSED'
                     pf_df.at[row_idx, 'Exit_Date'] = s_date
@@ -321,7 +346,7 @@ with tab2:
                     pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
                     save_portfolio(pf_df)
-                    st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f} | SPY: {spy_ret_val:.1f}%")
+                    st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f}")
                     st.rerun()
     else:
         st.info("No Open Positions")
@@ -330,7 +355,7 @@ with tab3:
     st.caption("Deposit / Withdraw")
     with st.form("cash_ops"):
         op_type = st.radio("Operation", ["Deposit", "Withdraw"])
-        amount = st.number_input("Amount", min_value=0.01, value=1000.00)
+        amount = st.number_input("Amount", min_value=0.01, value=1000.00, step=0.01, format="%.2f")
         c_date = st.date_input("Date")
         
         if st.form_submit_button("Execute"):
@@ -582,7 +607,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 
                 curr_price = data['Price']; cost = float(row['Cost_Basis'])
                 pl_pct = ((curr_price - cost) / cost) * 100
-                pos_val = curr_price * float(row['Shares']) # New metric
+                pos_val = curr_price * float(row['Shares'])
                 
                 try:
                     buy_date = pd.to_datetime(row['Date'])
@@ -625,10 +650,8 @@ if st.button("RUN ANALYSIS", type="primary"):
         
         hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]].copy()
         
-        # Calculate Delta
         hist_view["% Delta vs SPY"] = hist_view["Return"] - hist_view["SPY_Return"]
         
-        # Format
         hist_view["% Delta vs SPY"] = hist_view["% Delta vs SPY"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
@@ -640,7 +663,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             "Exit_Price": "Sell Price"
         }, inplace=True)
         
-        # Drop SPY_Return column from view as it's now in Delta
         hist_view = hist_view.drop(columns=["SPY_Return"])
         
         st.dataframe(hist_view.style.pipe(style_history))
