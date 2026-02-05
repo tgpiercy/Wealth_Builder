@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: CAD Primary View")
+st.title(f"🛡️ Titan Strategy v51.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Unrealized Gain/Loss Tracking")
 
 RISK_UNIT = 2300  
 
@@ -163,7 +163,7 @@ def color_pl_dol(val):
     if isinstance(val, str) and '$' in val:
         try:
             num = float(val.strip('$').replace('+','').replace(',',''))
-            if val.startswith('-'): num = -num 
+            if val.startswith('-'): num = -num # Handle negative strings like "-$50"
             return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
     return ''
@@ -173,12 +173,13 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- PORTFOLIO STYLER ---
+# --- ACTIVE PORTFOLIO STYLER (Added Gain/Loss coloring) ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
     ]).map(color_pl, subset=["% Return"])\
+      .map(color_pl_dol, subset=["Gain/Loss ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
 
@@ -673,6 +674,9 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             
+            # Unrealized Gain/Loss for this ticker
+            gl_val = pos_val - data['TotalCost']
+            
             decision = analysis_db[t]['Decision']
             stop_price = analysis_db[t]['Stop']
             
@@ -685,7 +689,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             pf_rows.append({
                 "Ticker": t, "Shares": int(total_shares), 
                 "Avg Cost": f"${avg_cost:.2f}", "Current": f"${curr_price:.2f}",
-                "Position ($)": f"${pos_val:,.2f}",
+                "Gain/Loss ($)": f"${gl_val:+,.2f}",
                 "% Return": f"{pl_pct:+.2f}%", 
                 "Titan Status": decision, "Audit Action": action
             })
@@ -700,10 +704,10 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        # SPLIT INTO 4 COLUMNS
+        # CLEAN SPLIT METRICS (REORDERED)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f} Open P&L")
-        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f} Open P&L")
+        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f}")
+        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f}")
         c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
         c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
