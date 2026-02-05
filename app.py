@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Full Edit & Audit Control")
+st.title(f"🛡️ Titan Strategy v50.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Unified Net Worth Display")
 
 RISK_UNIT = 2300  
 
@@ -173,7 +173,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- FIXED PORTFOLIO STYLER ---
+# FIXED STYLER: Removed Position ($) from color map
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -424,7 +424,6 @@ with tab4:
                         pf_df.at[row_idx, 'Realized_PL'] = 0.0
                     else:
                         pf_df.at[row_idx, 'Exit_Price'] = new_exit
-                        # Recalc P&L if closing
                         if new_exit > 0:
                             ret = ((new_exit - new_cost)/new_cost)*100
                             pl = (new_exit - new_cost) * new_shares
@@ -634,7 +633,6 @@ if st.button("RUN ANALYSIS", type="primary"):
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
-        # AGGREGATE LOGIC
         agg_trades = {}
         for index, row in open_trades.iterrows():
             t = row['Ticker']
@@ -688,9 +686,8 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         st.subheader("💼 Active Holdings")
         
-        st.markdown(f"""
-        ### Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD
-        """)
+        # CLEAN HEADER FORMAT
+        st.markdown(f"### Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD")
         
         pl_color = "green" if open_pl_val >= 0 else "red"
         st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
