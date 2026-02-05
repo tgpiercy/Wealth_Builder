@@ -57,22 +57,27 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Corrected P&L Color Logic")
+st.title(f"🛡️ Titan Strategy v51.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Expanded Universe")
 
 RISK_UNIT = 2300  
 
-# --- DATA MAP ---
+# --- DATA MAP (Expanded & Ordered) ---
 DATA_MAP = {
+    # 1. Benchmarks & Manual
     "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"],
     "VOO": ["BENCH", "SPY", "Vanguard S&P 500"],
     "SPY": ["BENCH", "SPY", "S&P 500"],
-    "DIA": ["BENCH", "SPY", "Dow Jones"],
-    "QQQ": ["BENCH", "SPY", "Nasdaq 100"],
-    "IWM": ["BENCH", "SPY", "Russell 2000"],
-    "IWC": ["BENCH", "SPY", "Micro-Cap"],
-    "HXT.TO": ["CANADA", "SPY", "TSX 60 Index"],
-    "IBB": ["THEME", "SPY", "Biotech Core"],
+    "IEF": ["BENCH", "SPY", "7-10 Year Treasuries"],
+    "RSP": ["BENCH", "SPY", "S&P 500 Equal Weight"], 
+    "^VIX": ["BENCH", "SPY", "VIX Volatility Index"],
+
+    # 2. Indices & Sectors (User Group 1)
+    "DIA": ["INDEX", "SPY", "Dow Jones"],
+    "QQQ": ["INDEX", "SPY", "Nasdaq 100"],
+    "IWM": ["INDEX", "SPY", "Russell 2000"],
+    "IWC": ["INDEX", "SPY", "Micro-Cap"],
+    "HXT.TO": ["INDEX", "SPY", "TSX 60 Index"],
     "XLB": ["SECTOR", "SPY", "Materials"],
     "XLC": ["SECTOR", "SPY", "Comm Services"],
     "XLE": ["SECTOR", "SPY", "Energy"],
@@ -81,20 +86,64 @@ DATA_MAP = {
     "XLK": ["SECTOR", "SPY", "Technology"],
     "XLV": ["SECTOR", "SPY", "Health Care"],
     "XLY": ["SECTOR", "SPY", "Cons Discret"],
-    "XLP": ["SECTOR", "SPY", "Cons Staples"],
-    "XLRE": ["SECTOR", "SPY", "Real Estate"],
-    "XLU": ["SECTOR", "SPY", "Utilities"],
-    "GLD": ["COMMODITY", "SPY", "Gold Bullion"],
-    "SLV": ["COMMODITY", "SPY", "Silver Bullion"],
-    "BTC-USD": ["COMMODITY", "SPY", "Bitcoin (USD)"],
+    "DLR.TO": ["CURRENCY", "SPY", "USD/CAD Currency"],
+
+    # 3. Themes (User Group 2)
     "BOTZ": ["THEME", "SPY", "Robotics & AI"],
-    "XBI":  ["THEME", "SPY", "Biotechnology"],
-    "ICLN": ["THEME", "SPY", "Clean Energy"],
+    "XBI": ["THEME", "SPY", "Biotechnology"],
     "REMX": ["THEME", "SPY", "Rare Earth Metals"],
-    "GDX":  ["THEME", "SPY", "Gold Miners"],
-    "IEF": ["BENCH", "SPY", "7-10 Year Treasuries"],
-    "RSP": ["BENCH", "SPY", "S&P 500 Equal Weight"], 
-    "^VIX": ["BENCH", "SPY", "VIX Volatility Index"]
+    "ICLN": ["THEME", "SPY", "Clean Energy"],
+    "GDX": ["THEME", "SPY", "Gold Miners"],
+
+    # 4. Precious Metals (User Group 3)
+    "GLD": ["METAL", "SPY", "Gold Bullion"],
+    "SLV": ["METAL", "SPY", "Silver Bullion"],
+
+    # 5. Industries & Stocks (User Group 4)
+    "AIQ": ["INDUSTRY", "SPY", "Artificial Intel"],
+    "IBB": ["INDUSTRY", "SPY", "Biotech Core"],
+    "ARKG": ["INDUSTRY", "SPY", "Genomics"],
+    "TAN": ["INDUSTRY", "SPY", "Solar Energy"],
+    "NLR": ["INDUSTRY", "SPY", "Nuclear"],
+    "URA": ["INDUSTRY", "SPY", "Uranium"],
+    "SILJ": ["INDUSTRY", "SPY", "Junior Silver"], # Corrected JSIL
+    "COPX": ["INDUSTRY", "SPY", "Copper Miners"],
+    "AAPL": ["US STOCK", "QQQ", "Apple Inc"], # Corrected AASL
+    "XSD": ["INDUSTRY", "SPY", "Semiconductors"], # Corrected XDD
+    "MOO": ["INDUSTRY", "SPY", "Agribusiness"],
+    "META": ["US STOCK", "QQQ", "Meta Platforms"],
+    "GOOGL": ["US STOCK", "QQQ", "Alphabet Inc"],
+    "XOP": ["INDUSTRY", "SPY", "Oil & Gas Exp"],
+    "OIH": ["INDUSTRY", "SPY", "Oil Services"],
+    "MLPX": ["INDUSTRY", "SPY", "MLP Infrastructure"],
+    "KBE": ["INDUSTRY", "SPY", "Bank ETF"],
+    "KRE": ["INDUSTRY", "SPY", "Regional Banks"],
+    "IAK": ["INDUSTRY", "SPY", "Insurance"],
+    "ITA": ["INDUSTRY", "SPY", "Aerospace & Def"],
+    "IYT": ["INDUSTRY", "SPY", "Transport"],
+    "PAVE": ["INDUSTRY", "SPY", "Infrastructure"],
+    "SMCI": ["US STOCK", "QQQ", "Super Micro"],
+    "DELL": ["US STOCK", "QQQ", "Dell Tech"],
+    "WDC": ["US STOCK", "QQQ", "Western Digital"],
+    "PSTG": ["US STOCK", "QQQ", "Pure Storage"],
+    "ANET": ["US STOCK", "QQQ", "Arista Networks"],
+    "IGV": ["INDUSTRY", "SPY", "Tech Software"],
+    "MSFT": ["US STOCK", "QQQ", "Microsoft"],
+    "SMH": ["INDUSTRY", "SPY", "Semi Conductors"],
+    "NVDA": ["US STOCK", "QQQ", "Nvidia"],
+    "PPH": ["INDUSTRY", "SPY", "Pharma"],
+    "IHI": ["INDUSTRY", "SPY", "Med Devices"],
+    "ITB": ["INDUSTRY", "SPY", "Home Construction"],
+    "AMZN": ["US STOCK", "QQQ", "Amazon"],
+    
+    # Canadian Stocks (Added .TO)
+    "CNQ.TO": ["CDN STOCK", "HXT.TO", "Cdn Natural Res"],
+    "CP.TO": ["CDN STOCK", "HXT.TO", "CP KC Rail"],
+    "WSP.TO": ["CDN STOCK", "HXT.TO", "WSP Global"],
+    "SHOP.TO": ["CDN STOCK", "HXT.TO", "Shopify"],
+    "CSU.TO": ["CDN STOCK", "HXT.TO", "Constellation"],
+    "NTR.TO": ["CDN STOCK", "HXT.TO", "Nutrien"],
+    "TECK-B.TO": ["CDN STOCK", "HXT.TO", "Teck Resources"]
 }
 
 # --- CALCULATIONS ---
