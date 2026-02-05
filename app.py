@@ -57,93 +57,111 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Expanded Universe")
+st.title(f"🛡️ Titan Strategy v51.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Architecture & Index Lock")
 
 RISK_UNIT = 2300  
 
-# --- DATA MAP (Expanded & Ordered) ---
+# --- DATA MAP (Structured for Sorting) ---
+# Format: Ticker: [Category_Name, Benchmark, Description]
+# Categories are numbered 00-99 to force sort order in the Scanner.
+
 DATA_MAP = {
-    # 1. Benchmarks & Manual
-    "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"],
-    "VOO": ["BENCH", "SPY", "Vanguard S&P 500"],
-    "SPY": ["BENCH", "SPY", "S&P 500"],
-    "IEF": ["BENCH", "SPY", "7-10 Year Treasuries"],
-    "RSP": ["BENCH", "SPY", "S&P 500 Equal Weight"], 
-    "^VIX": ["BENCH", "SPY", "VIX Volatility Index"],
+    # --- 00. INDICES (LOCKED TOP) ---
+    "DIA": ["00. INDICES", "SPY", "Dow Jones"],
+    "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
+    "IWM": ["00. INDICES", "SPY", "Russell 2000"],
+    "IWC": ["00. INDICES", "SPY", "Micro-Cap"],
+    "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"],
+    "^VIX": ["00. INDICES", "SPY", "VIX Volatility"],
+    "SPY": ["00. INDICES", "SPY", "S&P 500 Base"], # Added SPY to scanner visibility
 
-    # 2. Indices & Sectors (User Group 1)
-    "DIA": ["INDEX", "SPY", "Dow Jones"],
-    "QQQ": ["INDEX", "SPY", "Nasdaq 100"],
-    "IWM": ["INDEX", "SPY", "Russell 2000"],
-    "IWC": ["INDEX", "SPY", "Micro-Cap"],
-    "HXT.TO": ["INDEX", "SPY", "TSX 60 Index"],
-    "XLB": ["SECTOR", "SPY", "Materials"],
-    "XLC": ["SECTOR", "SPY", "Comm Services"],
-    "XLE": ["SECTOR", "SPY", "Energy"],
-    "XLF": ["SECTOR", "SPY", "Financials"],
-    "XLI": ["SECTOR", "SPY", "Industrials"],
-    "XLK": ["SECTOR", "SPY", "Technology"],
-    "XLV": ["SECTOR", "SPY", "Health Care"],
-    "XLY": ["SECTOR", "SPY", "Cons Discret"],
-    "DLR.TO": ["CURRENCY", "SPY", "USD/CAD Currency"],
+    # --- 01. MATERIALS (XLB) ---
+    "XLB": ["01. MATERIALS (XLB)", "SPY", "Materials Sector"],
+    "GLD": ["01. MATERIALS (XLB)", "SPY", "Gold Bullion"],
+    "SLV": ["01. MATERIALS (XLB)", "SPY", "Silver Bullion"],
+    "GDX": ["01. MATERIALS (XLB)", "SPY", "Gold Miners"],
+    "SILJ": ["01. MATERIALS (XLB)", "SPY", "Junior Silver"], # JSIL fixed
+    "COPX": ["01. MATERIALS (XLB)", "SPY", "Copper Miners"],
+    "REMX": ["01. MATERIALS (XLB)", "SPY", "Rare Earths"],
+    "NTR.TO": ["01. MATERIALS (XLB)", "HXT.TO", "Nutrien"],
+    "TECK-B.TO": ["01. MATERIALS (XLB)", "HXT.TO", "Teck Resources"],
 
-    # 3. Themes (User Group 2)
-    "BOTZ": ["THEME", "SPY", "Robotics & AI"],
-    "XBI": ["THEME", "SPY", "Biotechnology"],
-    "REMX": ["THEME", "SPY", "Rare Earth Metals"],
-    "ICLN": ["THEME", "SPY", "Clean Energy"],
-    "GDX": ["THEME", "SPY", "Gold Miners"],
+    # --- 02. ENERGY (XLE) ---
+    "XLE": ["02. ENERGY (XLE)", "SPY", "Energy Sector"],
+    "XOP": ["02. ENERGY (XLE)", "SPY", "Oil & Gas Exp"],
+    "OIH": ["02. ENERGY (XLE)", "SPY", "Oil Services"],
+    "MLPX": ["02. ENERGY (XLE)", "SPY", "MLP Infra"],
+    "URA": ["02. ENERGY (XLE)", "SPY", "Uranium"],
+    "NLR": ["02. ENERGY (XLE)", "SPY", "Nuclear"],
+    "ICLN": ["02. ENERGY (XLE)", "SPY", "Clean Energy"],
+    "TAN": ["02. ENERGY (XLE)", "SPY", "Solar Energy"],
+    "CNQ.TO": ["02. ENERGY (XLE)", "HXT.TO", "Cdn Natural Res"],
 
-    # 4. Precious Metals (User Group 3)
-    "GLD": ["METAL", "SPY", "Gold Bullion"],
-    "SLV": ["METAL", "SPY", "Silver Bullion"],
+    # --- 03. FINANCIALS (XLF) ---
+    "XLF": ["03. FINANCIALS (XLF)", "SPY", "Financials Sector"],
+    "KBE": ["03. FINANCIALS (XLF)", "SPY", "Bank ETF"],
+    "KRE": ["03. FINANCIALS (XLF)", "SPY", "Regional Banks"],
+    "IAK": ["03. FINANCIALS (XLF)", "SPY", "Insurance"],
 
-    # 5. Industries & Stocks (User Group 4)
-    "AIQ": ["INDUSTRY", "SPY", "Artificial Intel"],
-    "IBB": ["INDUSTRY", "SPY", "Biotech Core"],
-    "ARKG": ["INDUSTRY", "SPY", "Genomics"],
-    "TAN": ["INDUSTRY", "SPY", "Solar Energy"],
-    "NLR": ["INDUSTRY", "SPY", "Nuclear"],
-    "URA": ["INDUSTRY", "SPY", "Uranium"],
-    "SILJ": ["INDUSTRY", "SPY", "Junior Silver"], # Corrected JSIL
-    "COPX": ["INDUSTRY", "SPY", "Copper Miners"],
-    "AAPL": ["US STOCK", "QQQ", "Apple Inc"], # Corrected AASL
-    "XSD": ["INDUSTRY", "SPY", "Semiconductors"], # Corrected XDD
-    "MOO": ["INDUSTRY", "SPY", "Agribusiness"],
-    "META": ["US STOCK", "QQQ", "Meta Platforms"],
-    "GOOGL": ["US STOCK", "QQQ", "Alphabet Inc"],
-    "XOP": ["INDUSTRY", "SPY", "Oil & Gas Exp"],
-    "OIH": ["INDUSTRY", "SPY", "Oil Services"],
-    "MLPX": ["INDUSTRY", "SPY", "MLP Infrastructure"],
-    "KBE": ["INDUSTRY", "SPY", "Bank ETF"],
-    "KRE": ["INDUSTRY", "SPY", "Regional Banks"],
-    "IAK": ["INDUSTRY", "SPY", "Insurance"],
-    "ITA": ["INDUSTRY", "SPY", "Aerospace & Def"],
-    "IYT": ["INDUSTRY", "SPY", "Transport"],
-    "PAVE": ["INDUSTRY", "SPY", "Infrastructure"],
-    "SMCI": ["US STOCK", "QQQ", "Super Micro"],
-    "DELL": ["US STOCK", "QQQ", "Dell Tech"],
-    "WDC": ["US STOCK", "QQQ", "Western Digital"],
-    "PSTG": ["US STOCK", "QQQ", "Pure Storage"],
-    "ANET": ["US STOCK", "QQQ", "Arista Networks"],
-    "IGV": ["INDUSTRY", "SPY", "Tech Software"],
-    "MSFT": ["US STOCK", "QQQ", "Microsoft"],
-    "SMH": ["INDUSTRY", "SPY", "Semi Conductors"],
-    "NVDA": ["US STOCK", "QQQ", "Nvidia"],
-    "PPH": ["INDUSTRY", "SPY", "Pharma"],
-    "IHI": ["INDUSTRY", "SPY", "Med Devices"],
-    "ITB": ["INDUSTRY", "SPY", "Home Construction"],
-    "AMZN": ["US STOCK", "QQQ", "Amazon"],
+    # --- 04. INDUSTRIALS (XLI) ---
+    "XLI": ["04. INDUSTRIALS (XLI)", "SPY", "Industrials Sector"],
+    "ITA": ["04. INDUSTRIALS (XLI)", "SPY", "Aerospace & Def"],
+    "IYT": ["04. INDUSTRIALS (XLI)", "SPY", "Transport"],
+    "PAVE": ["04. INDUSTRIALS (XLI)", "SPY", "Infrastructure"],
+    "BOTZ": ["04. INDUSTRIALS (XLI)", "SPY", "Robotics & AI"],
+    "CP.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "CP KC Rail"],
+    "WSP.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "WSP Global"],
+    "CSU.TO": ["04. INDUSTRIALS (XLI)", "HXT.TO", "Constellation Soft"], # Often Tech, can swap
+
+    # --- 05. TECHNOLOGY (XLK) ---
+    "XLK": ["05. TECHNOLOGY (XLK)", "SPY", "Technology Sector"],
+    "AAPL": ["05. TECHNOLOGY (XLK)", "QQQ", "Apple Inc"], # AASL fixed
+    "MSFT": ["05. TECHNOLOGY (XLK)", "QQQ", "Microsoft"],
+    "NVDA": ["05. TECHNOLOGY (XLK)", "QQQ", "Nvidia"],
+    "SMH": ["05. TECHNOLOGY (XLK)", "SPY", "Semiconductors"],
+    "XSD": ["05. TECHNOLOGY (XLK)", "SPY", "Semi SPDR"], # XDD fixed
+    "AIQ": ["05. TECHNOLOGY (XLK)", "SPY", "Artificial Intel"],
+    "IGV": ["05. TECHNOLOGY (XLK)", "SPY", "Tech Software"],
+    "SMCI": ["05. TECHNOLOGY (XLK)", "QQQ", "Super Micro"],
+    "DELL": ["05. TECHNOLOGY (XLK)", "QQQ", "Dell Tech"],
+    "WDC": ["05. TECHNOLOGY (XLK)", "QQQ", "Western Digital"],
+    "PSTG": ["05. TECHNOLOGY (XLK)", "QQQ", "Pure Storage"],
+    "ANET": ["05. TECHNOLOGY (XLK)", "QQQ", "Arista Networks"],
+    "SHOP.TO": ["05. TECHNOLOGY (XLK)", "HXT.TO", "Shopify"],
+
+    # --- 06. COMM SERVICES (XLC) ---
+    "XLC": ["06. COMM SVC (XLC)", "SPY", "Comm Services"],
+    "META": ["06. COMM SVC (XLC)", "QQQ", "Meta Platforms"],
+    "GOOGL": ["06. COMM SVC (XLC)", "QQQ", "Alphabet Inc"],
+
+    # --- 07. HEALTH CARE (XLV) ---
+    "XLV": ["07. HEALTH CARE (XLV)", "SPY", "Health Care Sector"],
+    "IBB": ["07. HEALTH CARE (XLV)", "SPY", "Biotech Core"],
+    "XBI": ["07. HEALTH CARE (XLV)", "SPY", "Biotech SPDR"],
+    "ARKG": ["07. HEALTH CARE (XLV)", "SPY", "Genomics"],
+    "PPH": ["07. HEALTH CARE (XLV)", "SPY", "Pharma"],
+    "IHI": ["07. HEALTH CARE (XLV)", "SPY", "Med Devices"],
+
+    # --- 08. CONS DISCRET (XLY) ---
+    "XLY": ["08. CONS DISCRET (XLY)", "SPY", "Cons Discret Sector"],
+    "AMZN": ["08. CONS DISCRET (XLY)", "QQQ", "Amazon"],
+    "ITB": ["08. CONS DISCRET (XLY)", "SPY", "Home Construction"],
+
+    # --- 09. CONS STAPLES (XLP) ---
+    "XLP": ["09. CONS STAPLES (XLP)", "SPY", "Cons Staples Sector"],
+    "MOO": ["09. CONS STAPLES (XLP)", "SPY", "Agribusiness"],
+
+    # --- 10. UTILITIES / REAL ESTATE ---
+    "XLU": ["10. UTIL / RE (XLU)", "SPY", "Utilities Sector"],
+    "XLRE": ["10. UTIL / RE (XLU)", "SPY", "Real Estate Sector"],
+
+    # --- 11. TREASURY / CURRENCY ---
+    "IEF": ["11. BONDS/FX", "SPY", "7-10 Year Treasuries"],
+    "DLR.TO": ["11. BONDS/FX", "SPY", "USD/CAD Currency"],
     
-    # Canadian Stocks (Added .TO)
-    "CNQ.TO": ["CDN STOCK", "HXT.TO", "Cdn Natural Res"],
-    "CP.TO": ["CDN STOCK", "HXT.TO", "CP KC Rail"],
-    "WSP.TO": ["CDN STOCK", "HXT.TO", "WSP Global"],
-    "SHOP.TO": ["CDN STOCK", "HXT.TO", "Shopify"],
-    "CSU.TO": ["CDN STOCK", "HXT.TO", "Constellation"],
-    "NTR.TO": ["CDN STOCK", "HXT.TO", "Nutrien"],
-    "TECK-B.TO": ["CDN STOCK", "HXT.TO", "Teck Resources"]
+    # --- MANUAL ---
+    "MANL": ["99. MANUAL", "SPY", "Manual / Spy Proxy"]
 }
 
 # --- CALCULATIONS ---
@@ -222,7 +240,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -679,8 +696,22 @@ if st.button("RUN ANALYSIS", type="primary"):
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
                 
+                # --- SORT RANKING LOGIC ---
+                # Default rank is 1 (Stocks/Themes)
+                sort_rank = 1
+                
+                # If ticker matches the sector benchmark (e.g. XLK in Tech sector), rank is 0 (Top)
+                # We check if Ticker is the first 3 letters of the Category Name OR explicitly "XL"
+                cat_name = DATA_MAP[t][0]
+                if "00. INDICES" in cat_name: 
+                    sort_rank = 0 # Indices always top
+                elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE"]:
+                    sort_rank = 0 # Sector ETFs top of their section
+
                 row = {
-                    "Sector": DATA_MAP[t][0] if t in DATA_MAP else "OTHER", "Ticker": t,
+                    "Sector": cat_name, 
+                    "Ticker": t,
+                    "Rank": sort_rank, # Hidden sort column
                     "4W %": mom_4w, "2W %": mom_2w,
                     "Weekly<br>SMA8": "PASS" if w_sma8_pass else "FAIL", 
                     "Weekly<br>Impulse": w_pulse, 
@@ -695,7 +726,6 @@ if st.button("RUN ANALYSIS", type="primary"):
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         
-        # AGGREGATE LOGIC
         agg_trades = {}
         for index, row in open_trades.iterrows():
             t = row['Ticker']
@@ -723,7 +753,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             
-            # Unrealized Gain/Loss
             gl_val = pos_val - data['TotalCost']
             
             decision = analysis_db[t]['Decision']
@@ -751,13 +780,11 @@ if st.button("RUN ANALYSIS", type="primary"):
         open_pl_val = equity_val - total_active_cost
         open_pl_cad = open_pl_val * cad_rate
 
-        # Format Deltas to ensure negative sign is FIRST
         def fmt_delta(val):
             return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 
         st.subheader("💼 Active Holdings")
         
-        # SPLIT INTO 4 COLUMNS
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", fmt_delta(open_pl_cad))
         c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", fmt_delta(open_pl_val))
@@ -804,6 +831,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         st.write("---")
 
     st.subheader("🔍 Master Scanner")
-    df_final = pd.DataFrame(results).sort_values(["Sector", "Action"], ascending=[True, True])
+    # UPDATED SORTING: Sector -> Rank (0=ETF, 1=Stock) -> Ticker (Alpha)
+    df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
     st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
