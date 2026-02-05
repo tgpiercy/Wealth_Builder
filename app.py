@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v50.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Explicit White Net Worth")
+st.title(f"🛡️ Titan Strategy v50.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Split Metrics")
 
 RISK_UNIT = 2300  
 
@@ -696,20 +696,16 @@ if st.button("RUN ANALYSIS", type="primary"):
         total_acct_cad = total_acct * cad_rate
         
         open_pl_val = equity_val - total_active_cost
+        open_pl_cad = open_pl_val * cad_rate
 
         st.subheader("💼 Active Holdings")
         
-        # EXPLICIT HTML HEADER to override Streamlit Theme Color
-        st.markdown(f"""
-        <h3 style='color: white;'>Total Net Worth: ${total_acct:,.2f} USD | ${total_acct_cad:,.2f} CAD</h3>
-        """, unsafe_allow_html=True)
-        
-        pl_color = "green" if open_pl_val >= 0 else "red"
-        st.markdown(f"**Open P&L:** <span style='color:{pl_color}'>${open_pl_val:,.2f}</span>", unsafe_allow_html=True)
-        
-        m1, m2 = st.columns(2)
-        m1.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        m2.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
+        # SPLIT INTO 4 COLUMNS
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Net Worth (USD)", f"${total_acct:,.2f}", f"${open_pl_val:,.2f}")
+        c2.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", f"${open_pl_cad:,.2f}")
+        c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
+        c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
 
         if pf_rows:
             df_pf = pd.DataFrame(pf_rows)
