@@ -7,14 +7,17 @@ from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v48.2 (Patched)")
-st.caption("Institutional Protocol: P&L Tracking + Cumulative Returns")
+st.title("🛡️ Titan Strategy v48.3")
+st.caption("Institutional Protocol: Total Portfolio Intelligence (Cash + MANL)")
 
 RISK_UNIT = 2300  
 PORTFOLIO_FILE = "portfolio.csv"
 
 # --- DATA MAP ---
 DATA_MAP = {
+    # SPECIAL
+    "MANL": ["BENCH", "SPY", "Manual / Spy Proxy"], # Added
+
     # INDICES & CORE
     "SPY": ["BENCH", "SPY", "S&P 500"],
     "DIA": ["BENCH", "SPY", "Dow Jones"],
@@ -109,7 +112,6 @@ def style_market(styler):
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
     ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
 
-# Helper Functions for Portfolio Styling
 def color_pl(val):
     if isinstance(val, str) and '%' in val:
         try:
@@ -122,7 +124,7 @@ def color_pl_dol(val):
     if isinstance(val, str) and '$' in val:
         try:
             num = float(val.strip('$').replace('+','').replace(',',''))
-            if val.startswith('-'): num = -num # Handle negative signs
+            if val.startswith('-'): num = -num 
             return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
     return ''
@@ -132,7 +134,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# ACTIVE PORTFOLIO STYLER
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -141,7 +142,6 @@ def style_portfolio(styler):
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
 
-# HISTORY STYLER (Added to fix KeyError)
 def style_history(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -152,7 +152,6 @@ def style_history(styler):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    # Added Realized_PL column
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]
     
     if not os.path.exists(PORTFOLIO_FILE):
@@ -162,12 +161,10 @@ def load_portfolio():
     
     df = pd.read_csv(PORTFOLIO_FILE)
     
-    # Auto-Migrate Old Files
     for c in cols:
         if c not in df.columns:
             df[c] = None
     
-    # Backfill Realized P&L if missing for closed trades
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
@@ -187,7 +184,13 @@ def save_portfolio(df):
 st.sidebar.header("💼 Portfolio Manager")
 pf_df = load_portfolio()
 
-tab1, tab2, tab3 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "🛠️ Fix"])
+# Get Current Cash (Sum of 'CASH' ticker shares)
+cash_rows = pf_df[(pf_df['Ticker'] == 'CASH') & (pf_df['Status'] == 'OPEN')]
+current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
+
+st.sidebar.metric("Cash Available", f"${current_cash:,.2f}")
+
+tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix"])
 
 with tab1:
     with st.form("buy_trade"):
@@ -205,13 +208,25 @@ with tab1:
                 "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+            
+            # Deduct from Cash if available
+            if current_cash >= (b_shares * b_price):
+                 # Add a negative cash entry to balance
+                 cash_id = pf_df["ID"].max() + 1
+                 cash_row = pd.DataFrame([{
+                    "ID": cash_id, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), 
+                    "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
+                    "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                }])
+                 pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
+
             save_portfolio(pf_df)
             st.success(f"Bought {b_tick}")
             st.rerun()
 
 with tab2:
-    st.caption("Close Position & Realize P&L")
-    open_trades = pf_df[pf_df['Status'] == 'OPEN']
+    st.caption("Close Position")
+    open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
     if not open_trades.empty:
         trade_opts = open_trades.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} | {x['Date']}", axis=1).tolist()
         selected_trade_str = st.selectbox("Select Trade to Sell", trade_opts)
@@ -228,7 +243,6 @@ with tab2:
                     buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
                     shares = float(pf_df.at[row_idx, 'Shares'])
                     
-                    # Logic
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * shares
                     
@@ -238,6 +252,15 @@ with tab2:
                     pf_df.at[row_idx, 'Return'] = ret_pct
                     pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
                     
+                    # Add Cash Proceeds
+                    cash_id = pf_df["ID"].max() + 1
+                    cash_row = pd.DataFrame([{
+                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * shares), 
+                        "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
+                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                    }])
+                    pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
+
                     save_portfolio(pf_df)
                     st.success(f"Sold {sel_id}. P&L: ${pl_dollars:+.2f}")
                     st.rerun()
@@ -245,11 +268,30 @@ with tab2:
         st.info("No Open Positions")
 
 with tab3:
+    st.caption("Deposit / Withdraw")
+    with st.form("cash_ops"):
+        op_type = st.radio("Operation", ["Deposit", "Withdraw"])
+        amount = st.number_input("Amount", min_value=0.01, value=1000.00)
+        c_date = st.date_input("Date")
+        
+        if st.form_submit_button("Execute"):
+            final_amt = amount if op_type == "Deposit" else -amount
+            new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
+            new_row = pd.DataFrame([{
+                "ID": new_id, "Ticker": "CASH", "Date": c_date, "Shares": final_amt, 
+                "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
+                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+            }])
+            pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+            save_portfolio(pf_df)
+            st.success(f"{op_type} ${amount}")
+            st.rerun()
+
+with tab4:
     st.caption("Delete Entry")
     if not pf_df.empty:
         del_opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
         del_sel = st.selectbox("Select Entry to Delete", del_opts)
-        
         if st.button("Permanently Delete"):
             del_id = int(del_sel.split("|")[0].replace("ID:", "").strip())
             pf_df = pf_df[pf_df['ID'] != del_id]
@@ -316,6 +358,8 @@ if st.button("RUN ANALYSIS", type="primary"):
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
         pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
+        # Filter out CASH from scanner logic
+        pf_tickers = [x for x in pf_tickers if x != "CASH"]
         all_tickers = list(set(tickers + pf_tickers))
         
         cache_d = {}
@@ -325,7 +369,9 @@ if st.button("RUN ANALYSIS", type="primary"):
         for t in all_tickers:
             if t in cache_d: continue
             try:
-                tk = yf.Ticker(t)
+                # MANL LOGIC: Fetch SPY instead
+                fetch_sym = "SPY" if t == "MANL" else t
+                tk = yf.Ticker(fetch_sym)
                 df = tk.history(period="10y", interval="1d") 
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
@@ -367,6 +413,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
             bench_ticker = "SPY"
             if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
+            if t == "MANL": bench_ticker = "SPY"
             
             rs_score_pass = False; rs_breakdown = False
             if bench_ticker in cache_d:
@@ -435,7 +482,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "ATR": atr
             }
 
-            if is_scanner:
+            if is_scanner and t != "MANL": # Don't show MANL in scanner
                 final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
                 shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
                 stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
@@ -455,9 +502,29 @@ if st.button("RUN ANALYSIS", type="primary"):
 
     # --- PHASE 3: ACTIVE PORTFOLIO ---
     if not pf_df.empty:
-        open_trades = pf_df[pf_df['Status'] == 'OPEN']
+        open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
+        
+        # Calculate Total Portfolio Value
+        equity_val = 0.0
         if not open_trades.empty:
-            st.subheader("💼 Active Holdings")
+            for i, row in open_trades.iterrows():
+                t = row['Ticker']
+                if t in analysis_db:
+                    equity_val += analysis_db[t]['Price'] * float(row['Shares'])
+        
+        total_acct = current_cash + equity_val
+        cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
+        invested_pct = 100 - cash_pct
+
+        st.subheader("💼 Active Holdings")
+        
+        # Breakdown Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Net Worth", f"${total_acct:,.2f}")
+        m2.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
+        m3.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
+
+        if not open_trades.empty:
             pf_rows = []
             spy_curr = cache_d['SPY'].iloc[-1]['Close']
             
@@ -465,6 +532,9 @@ if st.button("RUN ANALYSIS", type="primary"):
                 t = row['Ticker']
                 if t not in analysis_db: continue
                 data = analysis_db[t]
+                
+                # For MANL, we calculate value but don't show "Price" as SPY price in the table unless we want to confusion
+                # Actually, displaying SPY price for MANL is correct behavior as it's the proxy
                 curr_price = data['Price']; cost = float(row['Cost_Basis'])
                 pl_pct = ((curr_price - cost) / cost) * 100
                 
@@ -494,7 +564,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             st.write("---")
 
     # --- PHASE 4: PERFORMANCE METRICS (HISTORY) ---
-    closed_trades = pf_df[pf_df['Status'] == 'CLOSED']
+    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
     if not closed_trades.empty:
         st.subheader("📜 Closed Performance")
         
@@ -514,7 +584,6 @@ if st.button("RUN ANALYSIS", type="primary"):
         hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
         
-        # Rename columns to match the styling subset
         hist_view.rename(columns={
             "Realized_PL": "$ P&L", 
             "Return": "% Return",
@@ -522,7 +591,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             "Exit_Price": "Sell Price"
         }, inplace=True)
         
-        # USE THE NEW DEDICATED STYLER
         st.dataframe(hist_view.style.pipe(style_history))
         st.write("---")
 
