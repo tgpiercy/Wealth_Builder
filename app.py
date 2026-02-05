@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v49.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Visual Polish & Header Wrapping")
+st.title(f"🛡️ Titan Strategy v49.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Error Patch & Visual Polish")
 
 RISK_UNIT = 2300  
 
@@ -127,12 +127,10 @@ def style_final(styler):
         if isinstance(val, str) and '%' in val:
             try:
                 num = float(val.strip('%'))
-                # CHANGED to pure red (#ff0000) for consistency
                 return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff0000; font-weight: bold'
             except: return ''
         return ''
 
-    # Headers wrapper included in props
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
@@ -175,11 +173,12 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# FIXED STYLER: Removed "vs SPY" from map subset
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return", "vs SPY"])\
+    ]).map(color_pl, subset=["% Return"])\
       .map(color_pl_dol, subset=["Position ($)"])\
       .map(color_action, subset=["Audit Action"])\
       .hide(axis='index')
