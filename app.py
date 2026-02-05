@@ -7,7 +7,7 @@ from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v48.2")
+st.title("🛡️ Titan Strategy v48.2 (Patched)")
 st.caption("Institutional Protocol: P&L Tracking + Cumulative Returns")
 
 RISK_UNIT = 2300  
@@ -109,35 +109,45 @@ def style_market(styler):
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
     ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
 
-def style_portfolio(styler):
-    def color_pl(val):
-        if isinstance(val, str) and '%' in val:
-            try:
-                num = float(val.strip('%').replace('+',''))
-                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
-            except: return ''
-        return ''
-    
-    def color_pl_dol(val):
-        if isinstance(val, str) and '$' in val:
-            try:
-                num = float(val.strip('$').replace('+','').replace(',',''))
-                if val.startswith('-'): num = -num # Handle negative signs
-                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
-            except: return ''
-        return ''
-    
-    def color_action(val):
-        if "EXIT" in val: return 'color: #ff0000; font-weight: bold; background-color: #220000'
-        if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
-        return 'color: #ffffff'
+# Helper Functions for Portfolio Styling
+def color_pl(val):
+    if isinstance(val, str) and '%' in val:
+        try:
+            num = float(val.strip('%').replace('+',''))
+            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        except: return ''
+    return ''
 
+def color_pl_dol(val):
+    if isinstance(val, str) and '$' in val:
+        try:
+            num = float(val.strip('$').replace('+','').replace(',',''))
+            if val.startswith('-'): num = -num # Handle negative signs
+            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        except: return ''
+    return ''
+
+def color_action(val):
+    if "EXIT" in val: return 'color: #ff0000; font-weight: bold; background-color: #220000'
+    if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
+    return 'color: #ffffff'
+
+# ACTIVE PORTFOLIO STYLER
+def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
     ]).map(color_pl, subset=["% Return", "vs SPY"])\
-      .map(color_pl_dol, subset=["Realized P&L", "$ P&L"])\
       .map(color_action, subset=["Audit Action"])\
+      .hide(axis='index')
+
+# HISTORY STYLER (Added to fix KeyError)
+def style_history(styler):
+    return styler.set_table_styles([
+         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
+         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
+    ]).map(color_pl, subset=["% Return"])\
+      .map(color_pl_dol, subset=["$ P&L"])\
       .hide(axis='index')
 
 # --- PORTFOLIO ENGINE ---
@@ -311,6 +321,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         cache_d = {}
         cache_d.update(market_data)
         
+        # Fetch Data
         for t in all_tickers:
             if t in cache_d: continue
             try:
@@ -502,9 +513,17 @@ if st.button("RUN ANALYSIS", type="primary"):
         hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL"]].copy()
         hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
-        hist_view.rename(columns={"Realized_PL": "$ P&L", "Cost_Basis": "Buy Price", "Exit_Price": "Sell Price"}, inplace=True)
         
-        st.dataframe(hist_view.style.pipe(style_portfolio))
+        # Rename columns to match the styling subset
+        hist_view.rename(columns={
+            "Realized_PL": "$ P&L", 
+            "Return": "% Return",
+            "Cost_Basis": "Buy Price", 
+            "Exit_Price": "Sell Price"
+        }, inplace=True)
+        
+        # USE THE NEW DEDICATED STYLER
+        st.dataframe(hist_view.style.pipe(style_history))
         st.write("---")
 
     # --- PHASE 5: DISPLAY SCANNER ---
