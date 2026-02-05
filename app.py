@@ -5,8 +5,8 @@ import numpy as np
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
-st.title("🛡️ Titan Strategy v47.4")
-st.caption("Institutional Protocol: Strict Logic Match")
+st.title("🛡️ Titan Strategy v47.5")
+st.caption("Institutional Protocol: Weighted Market Exposure Model")
 
 RISK_UNIT = 2300  
 
@@ -74,11 +74,17 @@ def style_final(styler):
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .hide(axis='index')
 
+def style_market(styler):
+    return styler.set_table_styles([
+         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#333'), ('color', 'white')]},
+         {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
+    ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
+
 # --- EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # PHASE 1: MARKET DIAGNOSTIC
-    with st.spinner('Checking Market Vitals...'):
+    # --- PHASE 1: MARKET HEALTH PROTOCOL ---
+    with st.spinner('Calculating Total Portfolio Exposure...'):
         market_tickers = ["SPY", "IEF", "^VIX"]
         market_data = {}
         
@@ -93,30 +99,75 @@ if st.button("RUN ANALYSIS", type="primary"):
             except: pass
         
         spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
-        mkt_score = 0; vix_val = 0; vix_msg = "Error"
+        
+        # EXPOSURE LOGIC (The "Dad" Formula)
+        # 1. SPY Trend (40%)
+        # 2. Ratio Trend (40%) - With 1% Band Buffer
+        # 3. VIX Level (20%)
+        
+        exposure_rows = []
+        total_exp = 0
         
         if spy is not None and ief is not None and vix is not None:
-            if spy.iloc[-1]['Close'] > calc_sma(spy['Close'], 18).iloc[-1]: mkt_score += 1
-            
+            # CHECK 1: SPY TREND (40%)
+            spy_c = spy.iloc[-1]['Close']
+            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            if spy_c > spy_sma18:
+                status = "BULLISH"; alloc = 40; total_exp += 40
+            else:
+                status = "BEARISH"; alloc = 0
+            exposure_rows.append({"Metric": "Primary Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status, "Exposure": f"{alloc}%"})
+
+            # CHECK 2: RATIO POWER (40%)
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            if ratio.iloc[-1] > calc_sma(ratio, 18).iloc[-1]: mkt_score += 1
+            ratio_c = ratio.iloc[-1]
+            ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
+            
+            # 1% Band Logic: We allow it to dip to 99% of SMA before failing
+            lower_band = ratio_sma18 * 0.99 
+            
+            if ratio_c > ratio_sma18:
+                status = "RISK ON"; alloc = 40; total_exp += 40
+            elif ratio_c >= lower_band:
+                status = "STABLE"; alloc = 40; total_exp += 40 # Still counts as "In"
+            else:
+                status = "RISK OFF"; alloc = 0
+            
+            dist_pct = ((ratio_c - ratio_sma18)/ratio_sma18)*100
+            exposure_rows.append({"Metric": "Internal Power (SPY:IEF)", "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)", "Status": status, "Exposure": f"{alloc}%"})
 
-            vix_val = vix.iloc[-1]['Close']
-            if vix_val < 20: mkt_score += 1
-
-            if vix_val > 25: risk_per_trade = 0; vix_msg = "⛔ MARKET LOCK (>25)"
-            elif vix_val > 20: risk_per_trade = RISK_UNIT / 2; vix_msg = "⚠️ HALF SIZE (>20)"
-            else: risk_per_trade = RISK_UNIT; vix_msg = "✅ FULL SIZE"
+            # CHECK 3: VIX (20%)
+            vix_c = vix.iloc[-1]['Close']
+            if vix_c < 20:
+                status = "CALM"; alloc = 20; total_exp += 20
+            elif vix_c < 25:
+                status = "CAUTION"; alloc = 0 # No points for caution
+            else:
+                status = "PANIC"; alloc = 0
+            exposure_rows.append({"Metric": "Volatility (VIX < 20)", "Value": f"{vix_c:.2f}", "Status": status, "Exposure": f"{alloc}%"})
+            
+            # SUMMARY ROW
+            exposure_rows.append({"Metric": "TOTAL RECOMMENDED EXPOSURE", "Value": "---", "Status": "---", "Exposure": f"{total_exp}%"})
+            
+            # Set Global Risk Multiplier based on Total Exposure
+            # If Exposure is 80%, we take 80% risk, etc.
+            # Simplified: If Exp < 50%, we half size. If Exp = 0%, we lock.
+            risk_per_trade = RISK_UNIT
+            if total_exp == 0: risk_per_trade = 0
+            elif total_exp <= 40: risk_per_trade = RISK_UNIT * 0.5
+            
         else:
+            st.error("Market Data Failed to Load")
             risk_per_trade = 0
 
-    col1, col2 = st.columns(2)
-    score_color = "Bullish" if mkt_score==3 else ("Caution" if mkt_score > 0 else "Bearish")
-    col1.metric("Market Score", f"{mkt_score}/3", delta=score_color)
-    col2.metric("VIX", f"{vix_val:.2f}", delta=vix_msg, delta_color="inverse")
+    # DISPLAY MARKET TABLE
+    st.subheader(f"📊 Market Health: {total_exp}% Invested")
+    df_mkt = pd.DataFrame(exposure_rows)
+    st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
+    st.write("---")
 
-    # PHASE 2: SCANNER
+    # --- PHASE 2: ASSET SCANNER ---
     with st.spinner('Scanning Assets...'):
         tickers = list(DATA_MAP.keys())
         cache_d = {} 
@@ -146,7 +197,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
             
-            # WEEKLY RESAMPLE (Fixed)
+            # WEEKLY RESAMPLE
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
             df_w.dropna(subset=['Close'], inplace=True)
@@ -189,13 +240,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             w_pulse = "NO"
             if w_uptrend: w_pulse = "GOOD" if d_health_ok else "WEAK"
             
-            # --- SCORES (CORRECTED) ---
+            # SCORES
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
             if wc['SMA18'] > wp['SMA18']: w_score += 1
             if wc['SMA18'] > wc['SMA40']: w_score += 1
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
-            # BUG FIX: Was checking SMA8 > 0. Now checks Price > SMA8
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
             d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
