@@ -1,4 +1,4 @@
-import streamlit as st
+\import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -57,10 +57,13 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Logic Restoration Hotfix")
+st.title(f"🛡️ Titan Strategy v53.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Integrated Risk Calculator")
 
-RISK_UNIT = 2300  
+# --- GLOBAL SETTINGS ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Global Settings")
+RISK_UNIT = st.sidebar.number_input("Risk Per Trade ($)", min_value=100, value=2300, step=100)
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -394,7 +397,7 @@ current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
 
 st.sidebar.metric("Cash Available", f"${current_cash:,.2f}")
 
-tab1, tab2, tab3, tab4 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix/Edit"])
+tab1, tab2, tab3, tab4, tab5 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix", "🧮 Calc"])
 
 with tab1:
     with st.form("buy_trade"):
@@ -581,15 +584,28 @@ with tab4:
                         st.success("Record Updated")
                         st.rerun()
 
-    st.write("---")
-    st.subheader("⚠️ Danger Zone")
-    if st.button("FACTORY RESET (Delete All Data)"):
-        if os.path.exists(PORTFOLIO_FILE):
-            os.remove(PORTFOLIO_FILE)
-            st.success(f"Deleted {PORTFOLIO_FILE}. Please refresh the page.")
-            st.rerun()
+with tab5:
+    st.subheader("🧮 Position Size Calculator")
+    
+    col_a, col_b = st.columns(2)
+    entry_p = col_a.number_input("Entry Price ($)", value=100.0, step=0.1)
+    stop_p = col_b.number_input("Stop Price ($)", value=90.0, step=0.1)
+    
+    if entry_p > stop_p:
+        risk_per_share = entry_p - stop_p
+        shares_calc = int(RISK_UNIT / risk_per_share)
+        total_cost = shares_calc * entry_p
+        
+        st.write("---")
+        st.metric("Shares to Buy", f"{shares_calc}")
+        st.metric("Total Capital Required", f"${total_cost:,.2f}")
+        
+        if total_cost > current_cash:
+            st.error(f"❌ Insufficient Cash (Short by ${total_cost - current_cash:,.2f})")
         else:
-            st.error("No data file found to delete.")
+            st.success("✅ Trade is Within Budget")
+    else:
+        st.warning("Entry must be higher than Stop for a Long position.")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -630,7 +646,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 20: total_exp += 20
             
-            # CALC RISK
+            # USE GLOBAL SETTING FOR RISK
             risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
             if total_exp == 0: risk_per_trade = 0
         else:
@@ -898,8 +914,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
-            
-            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -910,12 +924,10 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
-            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             stop_dist_value = db['Price'] - db['Stop']
             
@@ -947,14 +959,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
-            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
-            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
