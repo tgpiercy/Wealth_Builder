@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.13 ({current_user.upper()})")
-st.caption("Institutional Protocol: Calc Tab Reorder & White UI")
+st.title(f"🛡️ Titan Strategy v55.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Zig Zag Structure & Volume Analysis")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -216,6 +216,93 @@ def calc_rsi(series, length):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+# --- ZIG ZAG STRUCTURE ENGINE ---
+def calc_structure(df, deviation_pct=0.05):
+    """
+    Identifies market structure (HH, LH, LL, HL) based on ZigZag pivots.
+    Returns: A string indicating the structure detected on the latest bar, or 'None'.
+    """
+    if len(df) < 30: return "None"
+
+    pivots = [] # List of (Index, Price, Type) where Type is 1 (High) or -1 (Low)
+    
+    # Simple Python ZigZag implementation
+    # 1. Init
+    trend = 1 # 1 for up, -1 for down
+    last_pivot_idx = 0
+    last_pivot_val = df['Close'].iloc[0]
+    pivots.append((0, last_pivot_val, 1 if df['Close'].iloc[1] < last_pivot_val else -1)) # Rough start
+    
+    # 2. Iterate
+    for i in range(1, len(df)):
+        price = df['Close'].iloc[i]
+        
+        if trend == 1: # Uptrend
+            if price > last_pivot_val:
+                # Update High
+                last_pivot_val = price
+                last_pivot_idx = i
+                # Update last pivot in list if it was a High
+                if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
+            elif price < last_pivot_val * (1 - deviation_pct):
+                # Valid Swing Low found, change trend
+                trend = -1
+                last_pivot_val = price
+                last_pivot_idx = i
+                pivots.append((i, price, -1))
+                
+        else: # Downtrend
+            if price < last_pivot_val:
+                # Update Low
+                last_pivot_val = price
+                last_pivot_idx = i
+                if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
+            elif price > last_pivot_val * (1 + deviation_pct):
+                # Valid Swing High found
+                trend = 1
+                last_pivot_val = price
+                last_pivot_idx = i
+                pivots.append((i, price, 1))
+
+    # 3. Analyze Structure relative to Current Price (Latest Bar)
+    current_price = df['Close'].iloc[-1]
+    
+    # We need at least a few pivots to establish structure
+    if len(pivots) < 4: return "None"
+    
+    # Get last confirmed High and Low
+    last_high_val = -1.0
+    last_low_val = 999999.0
+    
+    # Iterate backwards to find most recent high and low
+    for p in reversed(pivots):
+        if p[2] == 1 and last_high_val == -1.0: last_high_val = p[1]
+        if p[2] == -1 and last_low_val == 999999.0: last_low_val = p[1]
+        if last_high_val != -1.0 and last_low_val != 999999.0: break
+    
+    # Determine Logic
+    # We are looking for the 'Inst Activity' context
+    
+    # If Price is making a Higher High
+    if current_price > last_high_val: return "HH"
+    
+    # If Price is making a Lower Low
+    if current_price < last_low_val: return "LL"
+    
+    # If we are in between, check the last trend leg
+    # If last pivot was a Low, and we are rising (but < last high) -> Potential LH forming
+    # If last pivot was a High, and we are falling (but > last low) -> Potential HL forming
+    
+    last_pivot_type = pivots[-1][2]
+    
+    if last_pivot_type == -1: # Last pivot was a Low, we are moving up
+        if current_price < last_high_val: return "LH" # Potential Lower High zone
+    
+    if last_pivot_type == 1: # Last pivot was a High, we are moving down
+        if current_price > last_low_val: return "HL" # Potential Higher Low zone
+        
+    return "None"
+
 # --- SMART STOP HELPER ---
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
@@ -264,6 +351,13 @@ def style_final(styler):
                 return 'color: #FF4444; font-weight: bold' 
         except:
             return ''
+            
+    def color_inst(val):
+        if "ACCUMULATION" in val: return 'color: #00FF00; font-weight: bold' # Green
+        if "BUYING" in val: return 'color: #00BFFF; font-weight: bold'       # Blue
+        if "DISTRIBUTION" in val: return 'color: #FF4444; font-weight: bold' # Red
+        if "SELLING" in val: return 'color: #FFA500; font-weight: bold'      # Orange
+        return 'color: #888888' # Grey for boring structure
 
     # ROW-WISE TICKER HIGHLIGHTING
     def highlight_ticker_row(row):
@@ -304,6 +398,7 @@ def style_final(styler):
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .map(color_pct, subset=["4W %", "2W %"])\
       .map(color_rsi, subset=["Dual RSI"])\
+      .map(color_inst, subset=["Inst.<br>Activity"])\
       .hide(axis='index')
 
 def style_daily_health(styler):
@@ -440,7 +535,6 @@ current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
 
 st.sidebar.metric("Cash Available", f"${current_cash:,.2f}")
 
-# SWAPPED TABS: Calc is now 4, Fix is now 5
 tab1, tab2, tab3, tab4, tab5 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🧮 Calc", "🛠️ Fix"])
 
 with tab1:
@@ -862,18 +956,23 @@ if st.button("RUN ANALYSIS", type="primary"):
         closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
         if not closed_trades.empty:
             st.subheader("📜 Closed Performance")
+            
+            # KPI
             wins = closed_trades[closed_trades['Return'] > 0]
             win_rate = (len(wins) / len(closed_trades)) * 100
             total_pl = closed_trades['Realized_PL'].sum()
+            
             c1, c2 = st.columns(2)
             c1.metric("Win Rate", f"{win_rate:.0f}%")
             c2.metric("Total P&L", f"${total_pl:,.2f}")
             
+            # Table
             hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
             hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
             hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
             hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
             hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+            
             st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
             st.write("---")
 
@@ -899,6 +998,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 4. MARKET HEALTH
         # ----------------------------------------
         if spy is not None and ief is not None and vix is not None and rsp is not None:
+            # 1. VIX Score
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
             elif vix_c < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
@@ -907,26 +1007,34 @@ if st.button("RUN ANALYSIS", type="primary"):
             mkt_score += v_pts
             health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
             
+            # 2. SPY
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
+            
             cond1 = s_c > s_18c; cond2 = s_18c >= s_18p; cond3 = s_8c > s_8p
             if cond1 and cond2 and cond3: mkt_score += 1
+            
             s_p = "<span style='color:#00ff00'>PASS</span>"; s_f = "<span style='color:#ff4444'>FAIL</span>"
             s_r = "<span style='color:#00ff00'>RISING</span>"; s_d = "<span style='color:#ff4444'>FALLING</span>"
+            
             health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_p if cond1 else s_f})
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
             
+            # 3. RSP
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
+            
             r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
             if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
+            
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
             
+            # TOTAL
             if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
@@ -998,6 +1106,9 @@ if st.button("RUN ANALYSIS", type="primary"):
                 mom_4w = f"{((curr/prev4)-1)*100:.1f}%"
 
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]; wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
+            
+            # --- ZIG ZAG / INST ACTIVITY ---
+            inst_activity = calc_structure(df_d) # Use daily data for swing points
 
             bench_ticker = "SPY"
             if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
@@ -1026,6 +1137,15 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
             elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
             elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
+            
+            # COMBINE STRUCTURE + VOLUME
+            # If Volume is SPIKE and Structure is significant, create composite alert
+            final_inst_msg = inst_activity
+            if "SPIKE" in vol_msg:
+                if inst_activity == "HL": final_inst_msg = "ACCUMULATION (HL)"
+                if inst_activity == "LL": final_inst_msg = "BUYING (LL)"
+                if inst_activity == "HH": final_inst_msg = "DISTRIBUTION (HH)"
+                if inst_activity == "LH": final_inst_msg = "SELLING (LH)"
 
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
@@ -1109,11 +1229,11 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "W_Cloud": w_cloud_pass,
                 "AD_Pass": ad_pass,
                 "Vol_Msg": vol_msg,
-                "RSI_Msg": rsi_msg
+                "RSI_Msg": rsi_msg,
+                "Inst_Act": final_inst_msg
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
-        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
@@ -1168,6 +1288,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "A/D Breadth": "STRONG" if db['AD_Pass'] else "WEAK",
                 "Volume": db['Vol_Msg'], 
                 "Dual RSI": db['RSI_Msg'],
+                "Inst.<br>Activity": db['Inst_Act'],
                 "Action": final_decision, 
                 "Reasoning": final_reason,
                 "Stop Price": disp_stop, 
@@ -1197,7 +1318,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
         df_final["Sector"] = df_final["Sector"].apply(clean_sector_name)
 
-        cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Action", "Reasoning", "Stop Price", "Position Size"]
+        cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Inst.<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
         
         st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
     else:
