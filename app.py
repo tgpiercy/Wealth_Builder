@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.11 ({current_user.upper()})")
-st.caption("Institutional Protocol: Multi-Tiered Risk Calculator")
+st.title(f"🛡️ Titan Strategy v54.12 ({current_user.upper()})")
+st.caption("Institutional Protocol: Calculator UI Polish")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -699,7 +699,9 @@ with tab4:
 with tab5:
     st.subheader("🧮 Smart Risk Calculator")
     
+    # Global setting inside Tab 5
     RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
+    
     calc_ticker = st.text_input("Ticker", "").upper()
     
     if calc_ticker:
@@ -717,8 +719,6 @@ with tab5:
                 raw_stop = curr_p - (2.618 * atr_val)
                 smart_stop = round_to_03_07(raw_stop)
                 
-                st.write("---")
-                
                 if curr_p > smart_stop:
                     risk_per_share = curr_p - smart_stop
                     
@@ -730,39 +730,34 @@ with tab5:
                     shares_50 = int((RISK_UNIT_BASE * 0.5) / risk_per_share)
                     cap_50 = shares_50 * curr_p
                     
-                    st.markdown(f"**Price:** ${curr_p:.2f} | **Stop:** ${smart_stop:.2f}")
-                    
-                    st.markdown("""
-                    <style>
-                    .metric-box {
-                        background-color: #262730;
-                        border: 1px solid #444;
-                        border-radius: 5px;
-                        padding: 10px;
-                        margin-bottom: 10px;
-                    }
-                    .metric-label { font-size: 12px; color: #aaa; }
-                    .metric-value { font-size: 18px; font-weight: bold; color: #fff; }
-                    .defensive { color: #FFA500; }
-                    .standard { color: #00FF00; }
-                    </style>
-                    """, unsafe_allow_html=True)
-
+                    # HTML CARD
                     st.markdown(f"""
-                    <div class="metric-box">
-                        <div class="metric-label standard">STANDARD (100% Risk)</div>
-                        <div class="metric-value">{shares_100} Shares</div>
-                        <div class="metric-label">Capital: ${cap_100:,.0f}</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label defensive">DEFENSIVE (50% Risk)</div>
-                        <div class="metric-value">{shares_50} Shares</div>
-                        <div class="metric-label">Capital: ${cap_50:,.0f}</div>
+                    <div style="background-color: #1E1E1E; border-radius: 10px; padding: 15px; border: 1px solid #333;">
+                        <h3 style="margin: 0; color: #4F8BF9;">{calc_ticker}</h3>
+                        <div style="display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px; font-size: 14px;">
+                            <span>Entry: <b style="color: #FFF;">${curr_p:.2f}</b></span>
+                            <span>Stop: <b style="color: #FF4B4B;">${smart_stop:.2f}</b></span>
+                        </div>
+                        <hr style="margin: 5px 0; border-color: #444;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <span style="color: #00FF00; font-weight: bold; font-size: 14px;">STANDARD (100%)</span>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_100}</div>
+                                <div style="font-size: 12px; color: #AAA;">${cap_100:,.0f}</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <span style="color: #FFA500; font-weight: bold; font-size: 14px;">DEFENSIVE (50%)</span>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_50}</div>
+                                <div style="font-size: 12px; color: #AAA;">${cap_50:,.0f}</div>
+                            </div>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
                     if cap_100 > current_cash:
-                         st.caption(f"⚠️ Cash Short (100%): -${cap_100 - current_cash:,.0f}")
+                         st.markdown(f"<div style='color: #FF4444; font-weight: bold; font-size: 14px; margin-top: 10px;'>⚠️ Cash Short (100%): -${cap_100 - current_cash:,.0f}</div>", unsafe_allow_html=True)
                 else:
                     st.error("Stop Price calculated above Entry.")
             else:
@@ -808,7 +803,9 @@ if st.button("RUN ANALYSIS", type="primary"):
         pf_rows = []
         
         if not open_pos.empty:
+            # Need live prices for holdings
             holding_tickers = open_pos['Ticker'].unique().tolist()
+            # Add to cache if missing
             for t in holding_tickers:
                 if t not in market_data:
                     try:
