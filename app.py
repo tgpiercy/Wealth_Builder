@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sector Lock Logic Enforced")
+st.title(f"🛡️ Titan Strategy v51.9.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Lock & Syntax Fix")
 
 RISK_UNIT = 2300  
 
@@ -259,6 +259,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -752,7 +753,7 @@ if st.button("RUN ANALYSIS", type="primary"):
 
             # SHARES CALC
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
-            stop_dist_ value = db['Price'] - db['Stop']
+            stop_dist_value = db['Price'] - db['Stop']
             shares = int(final_risk / stop_dist_value) if stop_dist_value > 0 and ("BUY" in final_decision or "SCOUT" in final_decision) else 0
 
             row = {
@@ -812,18 +813,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
             gl_val = pos_val - data['TotalCost']
             
-            # Use Analysis DB decision (includes Sector Lock if applicable)
-            # But wait, Pass 2 did the locking in the loop. 
-            # We need to re-apply lock logic here or just display the raw analysis?
-            # Ideally, the "Status" in Active Holdings should match the Scanner.
-            # Let's quickly re-check lock for consistency.
-            
             decision = analysis_db[t]['Decision']
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if cat_name in SECTOR_PARENTS:
                 parent = SECTOR_PARENTS[cat_name]
                 if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
-                    if t != parent: decision = "AVOID" # Lock it here too
+                    if t != parent: decision = "AVOID"
 
             stop_price = analysis_db[t]['Stop']
             
