@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Titan Market Score (TMS)")
+st.title(f"🛡️ Titan Strategy v53.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Unified Formatting")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -292,11 +292,14 @@ def style_final(styler):
       .map(color_rsi, subset=["Dual RSI"])\
       .hide(axis='index')
 
+# --- UNIFIED HEALTH TABLE STYLE (Matches Master Scanner) ---
 def style_daily_health(styler):
     return styler.set_table_styles([
-         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#333'), ('color', 'white')]},
-         {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
-    ]).map(lambda v: 'color: #00ff00' if "PASS" in v or "RISING" in v or "BULLISH" in v else 'color: #ff0000')
+         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
+         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
+    ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
+      .map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "RISING" in v or "BULLISH" in v or ("(PASS)" in v) else ('color: #ff4444; font-weight: bold' if "FAIL" in v or "FALLING" in v or "BEARISH" in v else 'color: white'))\
+      .hide(axis='index')
 
 def color_pl(val):
     if isinstance(val, str) and '%' in val:
@@ -629,16 +632,16 @@ if st.button("RUN ANALYSIS", type="primary"):
         cad = market_data.get("CAD=X")
         cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 
         
-        market_score = 0 
-        risk_per_trade = 0
+        mkt_score = 0; total_exp = 0;
         health_rows = []
         
+        # --- CALCULATE TOTAL_EXP & RISK_PER_TRADE FIRST ---
         if spy is not None and ief is not None and vix is not None and rsp is not None:
             # 1. SPY Price > SMA18 (20 pts)
             spy_c = spy.iloc[-1]['Close']
             spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
             check_spy_trend = spy_c > spy_sma18
-            if check_spy_trend: market_score += 20
+            if check_spy_trend: mkt_score += 20
             health_rows.append({"Indicator": "SPY Price > SMA18", "Value": f"{spy_c:.2f}", "Status": "PASS" if check_spy_trend else "FAIL"})
             
             # 2. SPY RS > SMA18 (20 pts)
@@ -650,13 +653,13 @@ if st.button("RUN ANALYSIS", type="primary"):
             rs_c = rs_series.iloc[-1]
             rs_ma18_c = rs_sma18.iloc[-1]
             check_rs_trend = rs_c > rs_ma18_c
-            if check_rs_trend: market_score += 20
+            if check_rs_trend: mkt_score += 20
             health_rows.append({"Indicator": "SPY RS > SMA18", "Value": f"{rs_c:.3f}", "Status": "PASS" if check_rs_trend else "FAIL"})
             
             # 3. VIX < 20 (20 pts)
             vix_c = vix.iloc[-1]['Close']
             check_vix = vix_c < 20
-            if check_vix: market_score += 20
+            if check_vix: mkt_score += 20
             health_rows.append({"Indicator": "VIX < 20", "Value": "", "Status": f"{vix_c:.2f} (PASS)" if check_vix else f"{vix_c:.2f} (FAIL)"})
             
             # 4. RSP Price > SMA18 (10 pts)
@@ -664,47 +667,47 @@ if st.button("RUN ANALYSIS", type="primary"):
             rsp_sma18 = calc_sma(rsp['Close'], 18)
             rsp_ma18_c = rsp_sma18.iloc[-1]
             check_rsp_trend = rsp_c > rsp_ma18_c
-            if check_rsp_trend: market_score += 10
+            if check_rsp_trend: mkt_score += 10
             health_rows.append({"Indicator": "RSP Price > SMA18", "Value": f"{rsp_c:.2f}", "Status": "PASS" if check_rsp_trend else "FAIL"})
             
             # 5. RS SMA18 Rising (10 pts)
             rs_ma18_p = rs_sma18.iloc[-2]
             check_rs18_rise = rs_ma18_c > rs_ma18_p
-            if check_rs18_rise: market_score += 10
+            if check_rs18_rise: mkt_score += 10
             health_rows.append({"Indicator": "RS SMA18 Rising", "Value": "Slope", "Status": "RISING" if check_rs18_rise else "FALLING"})
             
             # 6. RS SMA8 Rising (10 pts)
             rs_ma8_c = rs_sma8.iloc[-1]
             rs_ma8_p = rs_sma8.iloc[-2]
             check_rs8_rise = rs_ma8_c > rs_ma8_p
-            if check_rs8_rise: market_score += 10
+            if check_rs8_rise: mkt_score += 10
             health_rows.append({"Indicator": "RS SMA8 Rising", "Value": "Slope", "Status": "RISING" if check_rs8_rise else "FALLING"})
             
             # 7. RSP SMA18 Rising (10 pts)
             rsp_ma18_p = rsp_sma18.iloc[-2]
             check_rsp18_rise = rsp_ma18_c > rsp_ma18_p
-            if check_rsp18_rise: market_score += 10
+            if check_rsp18_rise: mkt_score += 10
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Value": "Slope", "Status": "RISING" if check_rsp18_rise else "FALLING"})
             
             # --- EXPOSURE LOGIC ---
-            if market_score >= 80:
+            if mkt_score >= 80:
                 exposure_pct = 100
                 risk_per_trade = RISK_UNIT_BASE
-            elif market_score >= 50:
+            elif mkt_score >= 50:
                 exposure_pct = 50
                 risk_per_trade = RISK_UNIT_BASE * 0.5
             else:
                 exposure_pct = 0
                 risk_per_trade = 0
                 
-            # Display Health Table
-            st.subheader(f"🏥 Daily Market Health: {market_score}/100")
+            # Display Health Table (Rendered as HTML via st.markdown)
+            st.subheader(f"🏥 Daily Market Health: {mkt_score}/100")
             st.caption(f"Recommended Exposure: {exposure_pct}%")
-            st.progress(market_score / 100)
+            st.progress(mkt_score / 100)
             
             df_health = pd.DataFrame(health_rows)
-            # Hide the Value column as requested, only show Indicator & Status
-            st.table(df_health[["Indicator", "Status"]].style.pipe(style_daily_health))
+            # RENDER AS HTML USING UNIFIED STYLE
+            st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(), unsafe_allow_html=True)
             st.write("---")
             
         else:
