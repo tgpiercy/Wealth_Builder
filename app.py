@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Blue Spike Logic & Visual Polish")
+st.title(f"🛡️ Titan Strategy v52.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Sector Names")
 
 RISK_UNIT = 2300  
 
@@ -257,23 +257,20 @@ def style_final(styler):
         ticker_idx = row.index.get_loc('Ticker')
         action = str(row.get('Action', '')).upper()
         vol = str(row.get('Volume', '')).upper()
-        # Get raw HTML string for RSI to check for the Blue Hex Code
         rsi_html = str(row.get('Dual RSI', ''))
         
-        # --- PRIORITY 1: BLUE SPIKE (Blue RSI + Spike Vol) ---
-        # 00BFFF is the hex code used for Blue RSI Numbers
+        # PRIORITY 1: BLUE SPIKE (Blue RSI + Spike Vol)
         if "00BFFF" in rsi_html and "SPIKE" in vol:
              styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' # Royal Blue
              return styles
 
-        # --- PRIORITY 2: STANDARD ACTION COLORS ---
+        # PRIORITY 2: STANDARD ACTION COLORS
         if "BUY" in action:
             styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' # Dark Green
         elif "SCOUT" in action:
             styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' # Dark Teal
         elif "SOON" in action or "CAUTION" in action:
-            # NEW ORANGE: Burnt Orange (Better visibility)
-            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' 
+            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' # Burnt Orange
             
         return styles
 
@@ -775,29 +772,21 @@ if st.button("RUN ANALYSIS", type="primary"):
             r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
             
-            # 1. Slope Arrow (Green Up / Red Down)
             is_rising = r5 > r5_prev
             arrow = "↑" if is_rising else "↓"
             arrow_col = "#00FF00" if is_rising else "#FF4444"
             
-            # 2. Number Signal Color
-            # Default Red
             num_col = "#FF4444"
-            
             if r5 >= r20:
                 if r20 > 50:
-                    # BLUE REQUIREMENT: Trigger (R5 > R20 > 50) AND Rising
                     if is_rising: num_col = "#00BFFF" # Deep Sky Blue
-                    else: num_col = "#FFA500" # Orange (Falling in zone)
+                    else: num_col = "#FFA500" # Orange
                 else:
-                    # GREEN: Recovery Zone (R20 < 50) AND Rising
                     if is_rising: num_col = "#00FF00"
-                    else: num_col = "#FF4444" # Failed recovery
+                    else: num_col = "#FF4444" 
             elif r20 > 50:
-                # ORANGE: Pullback (R5 < R20 but Trend > 50)
                 num_col = "#FFA500"
             
-            # HTML String Construction
             rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
             analysis_db[t] = {
@@ -830,8 +819,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
-            
-            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -842,12 +829,10 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
-            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             stop_dist_value = db['Price'] - db['Stop']
             
@@ -879,14 +864,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
-            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
-            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
@@ -973,7 +956,15 @@ if st.button("RUN ANALYSIS", type="primary"):
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
+    
+    # --- CLEAN SECTOR NAMES FOR DISPLAY ---
+    def clean_sector_name(val):
+        if ". " in val: val = val.split(". ", 1)[1]
+        val = val.replace("(SUMMARY)", "").strip()
+        return val
+
+    df_final["Sector"] = df_final["Sector"].apply(clean_sector_name)
+
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Action", "Reasoning", "Stop Price", "Position Size"]
     
-    # RENDER AS RAW HTML (REQUIRED FOR DUAL RSI COLORS)
     st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
