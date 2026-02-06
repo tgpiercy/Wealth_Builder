@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v55.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Live-Leg Zig Zag Logic")
+st.title(f"🛡️ Titan Strategy v55.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Zig Zag Core Fixed")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -216,73 +216,62 @@ def calc_rsi(series, length):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- ZIG ZAG STRUCTURE ENGINE (Corrected for Live Leg) ---
-def calc_structure(df, deviation_pct=0.035): # 3.5% deviation for better sensitivity
+# --- ZIG ZAG STRUCTURE ENGINE (Revised for Live Leg) ---
+def calc_structure(df, deviation_pct=0.035):
+    """
+    Calculates structure based on pivots + LIVE leg analysis.
+    Deviation: 3.5% default to catch sector moves.
+    """
     if len(df) < 50: return "None"
 
-    # 1. Identify Pivots (Standard Logic)
-    pivots = [] # (Index, Price, Type: 1=High, -1=Low)
-    trend = 1
+    # 1. Pivot Identification (H=1, L=-1)
+    pivots = [] 
+    trend = 1 
     last_pivot_val = df['Close'].iloc[0]
-    pivots.append((0, last_pivot_val, 1)) # Dummy start
+    pivots.append((0, last_pivot_val, 1)) 
     
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
+        
         if trend == 1:
             if price > last_pivot_val:
+                # Extending the High
                 last_pivot_val = price
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
+                else: pivots.append((i, price, 1)) # Safety, though logic usually prevents this
             elif price < last_pivot_val * (1 - deviation_pct):
+                # Reversal to Down
                 trend = -1
                 last_pivot_val = price
                 pivots.append((i, price, -1))
         else:
             if price < last_pivot_val:
+                # Extending the Low
                 last_pivot_val = price
                 if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
+                else: pivots.append((i, price, -1))
             elif price > last_pivot_val * (1 + deviation_pct):
+                # Reversal to Up
                 trend = 1
                 last_pivot_val = price
                 pivots.append((i, price, 1))
 
-    # 2. Analyze Live Context (The Fix)
-    curr_price = df['Close'].iloc[-1]
+    # 2. Structural Analysis
+    # We need at least 3 pivots: [Prev_Same, Opposite, Current]
+    if len(pivots) < 3: return "Range"
     
-    # Get last confirmed pivots
-    last_high = -1.0
-    last_low = 999999.0
-    prev_high = -1.0 # The one before last
-    prev_low = 999999.0 
+    curr_pivot = pivots[-1] # (Idx, Price, Type)
+    prev_same = pivots[-3]  # The previous peak/trough of the same type
     
-    # Walk back to find specific pivot types
-    for p in reversed(pivots):
-        if p[2] == 1:
-            if last_high == -1.0: last_high = p[1]
-            elif prev_high == -1.0: prev_high = p[1]
-        elif p[2] == -1:
-            if last_low == 999999.0: last_low = p[1]
-            elif prev_low == 999999.0: prev_low = p[1]
-
-    # 3. Decision Logic (Is Current Price breaking out?)
-    
-    # If price is currently higher than the last confirmed High -> Automatic HH
-    if curr_price > last_high: return "HH"
-    
-    # If price is lower than last confirmed Low -> Automatic LL
-    if curr_price < last_low: return "LL"
-    
-    # If we are inside the range, look at the last pivot type to see where we came from
-    last_p_type = pivots[-1][2]
-    
-    # We just made a High and are falling (but haven't broken low)
-    if last_p_type == 1:
-        if curr_price > last_low: return "HL" # Potential Higher Low forming
-    
-    # We just made a Low and are rising (but haven't broken high)
-    if last_p_type == -1:
-        if curr_price < last_high: return "LH" # Potential Lower High forming
-
-    return "Range"
+    # Type 1 = High, Type -1 = Low
+    if curr_pivot[2] == 1: 
+        # We are currently in an Uptrend/Top
+        if curr_pivot[1] > prev_same[1]: return "HH"
+        else: return "LH"
+    else:
+        # We are currently in a Downtrend/Bottom
+        if curr_pivot[1] < prev_same[1]: return "LL"
+        else: return "HL"
 
 # --- SMART STOP HELPER ---
 def round_to_03_07(price):
@@ -939,18 +928,23 @@ if st.button("RUN ANALYSIS", type="primary"):
         closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
         if not closed_trades.empty:
             st.subheader("📜 Closed Performance")
+            
+            # KPI
             wins = closed_trades[closed_trades['Return'] > 0]
             win_rate = (len(wins) / len(closed_trades)) * 100
             total_pl = closed_trades['Realized_PL'].sum()
+            
             c1, c2 = st.columns(2)
             c1.metric("Win Rate", f"{win_rate:.0f}%")
             c2.metric("Total P&L", f"${total_pl:,.2f}")
             
+            # Table
             hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
             hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
             hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
             hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
             hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+            
             st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
             st.write("---")
 
@@ -962,8 +956,10 @@ if st.button("RUN ANALYSIS", type="primary"):
         if spy is not None:
             curr_spy = spy['Close'].iloc[-1]
             bench_val = shadow_shares_total * curr_spy
+            
             alpha = total_net_worth - bench_val
             alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
+            
             c1, c2, c3 = st.columns(3)
             c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
             c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
@@ -976,6 +972,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 4. MARKET HEALTH
         # ----------------------------------------
         if spy is not None and ief is not None and vix is not None and rsp is not None:
+            # 1. VIX Score
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
             elif vix_c < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
@@ -984,26 +981,34 @@ if st.button("RUN ANALYSIS", type="primary"):
             mkt_score += v_pts
             health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
             
+            # 2. SPY
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
+            
             cond1 = s_c > s_18c; cond2 = s_18c >= s_18p; cond3 = s_8c > s_8p
             if cond1 and cond2 and cond3: mkt_score += 1
+            
             s_p = "<span style='color:#00ff00'>PASS</span>"; s_f = "<span style='color:#ff4444'>FAIL</span>"
             s_r = "<span style='color:#00ff00'>RISING</span>"; s_d = "<span style='color:#ff4444'>FALLING</span>"
+            
             health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_p if cond1 else s_f})
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
             
+            # 3. RSP
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
+            
             r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
             if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
+            
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
             
+            # TOTAL
             if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
@@ -1150,11 +1155,14 @@ if st.button("RUN ANALYSIS", type="primary"):
                 decision = "CAUTION"; reason = "VIX Lock"
 
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
+            
+            # --- SMART STOP CALCULATION IN SCANNER ---
             raw_stop = dc['Close'] - (2.618 * atr)
             smart_stop_val = round_to_03_07(raw_stop)
             stop_dist = dc['Close'] - smart_stop_val
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
+            # --- DUAL RSI LOGIC (HTML Construction) ---
             r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
             r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
@@ -1180,7 +1188,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Decision": decision,
                 "Reason": reason,
                 "Price": dc['Close'],
-                "Stop": smart_stop_val, 
+                "Stop": smart_stop_val, # Use Smart Stop
                 "StopPct": stop_pct,
                 "ATR": atr,
                 "Mom4W": mom_4w,
