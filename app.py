@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Dual RSI Entry System")
+st.title(f"🛡️ Titan Strategy v52.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Dual RSI Slope Logic")
 
 RISK_UNIT = 2300  
 
@@ -226,12 +226,10 @@ def style_final(styler):
             except: return ''
         return ''
 
-    # RSI Styling Logic
+    # UPDATED RSI STYLING: Green Text for Rising, Red for Falling
     def color_rsi(val):
-        if "BLUE" in val: return 'color: #0088ff; font-weight: bold; background-color: #001133' # Strong Bull
-        if "GREEN" in val: return 'color: #00ff00; font-weight: bold' # Bullish Momentum
-        if "ORANGE" in val: return 'color: #ffaa00; font-weight: bold' # Pullback
-        if "RED" in val: return 'color: #ff4444' # Bearish
+        if "↑" in val: return 'color: #00ff00; font-weight: bold' # Rising = Green
+        if "↓" in val: return 'color: #ff4444; font-weight: bold' # Falling = Red
         return ''
 
     return styler.set_table_styles([
@@ -726,16 +724,34 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_price = dc['Close'] - stop_dist
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
-            # --- DUAL RSI LOGIC ---
+            # --- DUAL RSI LOGIC (Slope + Levels) ---
             r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
+            r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
             
-            rsi_msg = f"{int(r5)}/{int(r20)} RED"
+            # Determine Slope
+            if r5 > r5_prev:
+                slope_arrow = "↑"
+                slope_rising = True
+            else:
+                slope_arrow = "↓"
+                slope_rising = False
+                
+            # Determine Signal
+            rsi_text = "RED" # Default Bearish
+            
             if r5 >= r20:
-                if r20 > 50: rsi_msg = f"{int(r5)}/{int(r20)} BLUE" # Strong Bull
-                else: rsi_msg = f"{int(r5)}/{int(r20)} GREEN" # Recovery
+                if r20 > 50:
+                    # BLUE REQUIREMENT: Strong Trend + RISING Momentum
+                    if slope_rising: rsi_text = "BLUE"
+                    else: rsi_text = "WEAK" # Failed Blue because falling
+                else:
+                    rsi_text = "GREEN" # Recovery
             elif r20 > 50:
-                rsi_msg = f"{int(r5)}/{int(r20)} ORANGE" # Pullback
+                rsi_text = "ORANGE" # Pullback
+            
+            # Final String: "65/55 BLUE ↑"
+            rsi_msg = f"{int(r5)}/{int(r20)} {rsi_text} {slope_arrow}"
             
             analysis_db[t] = {
                 "Decision": decision,
