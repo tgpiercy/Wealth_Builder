@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Daily Market Health Indicators")
+st.title(f"🛡️ Titan Strategy v53.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Logic Restoration Hotfix")
 
 RISK_UNIT = 2300  
 
@@ -90,9 +90,9 @@ DATA_MAP = {
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     
-    # Hidden VIX & Breadth
+    # Hidden VIX & RSP
     "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
-    "RSP": ["99. DATA", "SPY", "S&P 500 Equal Weight"], 
+    "RSP": ["99. DATA", "SPY", "S&P 500 Equal Weight"],
 
     # --- 01. BONDS/FX ---
     "IEF": ["01. BONDS/FX", "SPY", "7-10 Year Treasuries"],
@@ -595,7 +595,7 @@ with tab4:
 if st.button("RUN ANALYSIS", type="primary"):
     
     with st.spinner('Checking Vitals...'):
-        market_tickers = ["SPY", "IEF", "^VIX", "CAD=X", "HXT.TO", "RSP"] # Added RSP for Health
+        market_tickers = ["SPY", "IEF", "^VIX", "CAD=X", "HXT.TO", "RSP"] 
         market_data = {}
         for t in market_tickers:
             try:
@@ -611,9 +611,32 @@ if st.button("RUN ANALYSIS", type="primary"):
         cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 
         
         mkt_score = 0; total_exp = 0;
-        
-        # --- NEW DAILY MARKET HEALTH LOGIC ---
         health_rows = []
+        
+        # --- CALCULATE TOTAL_EXP & RISK_PER_TRADE FIRST ---
+        if spy is not None and ief is not None and vix is not None:
+            # 1. SPY Trend
+            spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            if spy_c > spy_sma18: total_exp += 40
+            
+            # 2. RS Ratio
+            aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
+            ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
+            ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
+            if ratio_c > ratio_sma18: total_exp += 40
+            elif ratio_c >= ratio_sma18 * 0.99: total_exp += 40
+            
+            # 3. VIX
+            vix_c = vix.iloc[-1]['Close']
+            if vix_c < 20: total_exp += 20
+            
+            # CALC RISK
+            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
+            if total_exp == 0: risk_per_trade = 0
+        else:
+            risk_per_trade = 0
+            
+        # --- BUILD HEALTH TABLE (After Risk Calc) ---
         if spy is not None and ief is not None and rsp is not None:
             # 1. SPY Price vs SMA18
             spy_c = spy.iloc[-1]['Close']
@@ -624,7 +647,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Status": "PASS" if spy_c > spy_sma18 else "FAIL"
             })
             
-            # 2. SPY RS vs SMA18 (RS = SPY/IEF)
+            # 2. SPY RS vs SMA18
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
             rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
             rs_sma18 = calc_sma(rs_series, 18)
@@ -673,8 +696,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Status": "RISING" if rsp_ma18_c > rsp_ma18_p else "FALLING"
             })
             
-            # 7. Breadth (S5FI - Proxy via Sector ETFs)
-            # Fetch Sector ETFs to calc % > SMA50
+            # 7. Breadth (S5FI Proxy)
             sec_tk_list = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
             count_above = 0
             valid_secs = 0
@@ -690,8 +712,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             breadth_pct = (count_above / valid_secs * 100) if valid_secs > 0 else 0
             
-            # Try fetching actual S5FI if possible, else use proxy
-            # Note: ^S5FI often unavailable. We stick to proxy for robustness.
             health_rows.append({
                 "Indicator": "Sector Breadth (>50%)",
                 "Value": f"{breadth_pct:.1f}% > SMA50",
@@ -702,6 +722,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             st.subheader("🏥 Daily Market Health")
             st.table(df_health.style.pipe(style_daily_health))
             st.write("---")
+        else:
+            st.error("Market Data Failed to Load")
 
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
@@ -876,6 +898,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
+            
+            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -886,10 +910,12 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
+            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
+            # SHARES CALC
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             stop_dist_value = db['Price'] - db['Stop']
             
@@ -921,12 +947,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
+            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
+            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
