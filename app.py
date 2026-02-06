@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.8 ({current_user.upper()})")
-st.caption("Institutional Protocol: VOO Support & Data Optimization")
+st.title(f"🛡️ Titan Strategy v54.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: Smart Stops (.03/.07)")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -93,7 +93,7 @@ DATA_MAP = {
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     
-    # Hidden VIX & RSP & VOO (Excluded from Scanner by "99. DATA" tag)
+    # Hidden VIX & RSP & VOO
     "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
     "RSP": ["99. DATA", "SPY", "S&P 500 Equal Weight"],
     "VOO": ["99. DATA", "SPY", "Vanguard S&P 500"],
@@ -220,6 +220,28 @@ def calc_rsi(series, length):
     loss = (-delta.where(delta < 0, 0)).rolling(window=length).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
+
+# --- SMART STOP HELPER ---
+def round_to_03_07(price):
+    if pd.isna(price): return 0.0
+    whole = int(price)
+    # Candidates for this whole number
+    c1 = whole + 0.03
+    c2 = whole + 0.07
+    # Candidates for previous whole number (if price is like 100.01)
+    c3 = (whole - 1) + 0.97 if whole > 0 else 0.0
+    c4 = (whole - 1) + 0.93 if whole > 0 else 0.0
+    
+    # Find closest
+    candidates = [c1, c2, c3, c4]
+    # Filter out 0 or negative if not appropriate (though stops can be low)
+    candidates = [c for c in candidates if c > 0]
+    
+    if not candidates: return price # Fallback
+    
+    # Return the candidate that minimizes distance to the raw calculated price
+    best_c = min(candidates, key=lambda x: abs(x - price))
+    return best_c
 
 # --- STYLING ---
 def style_final(styler):
@@ -687,20 +709,62 @@ with tab4:
                         st.rerun()
 
 with tab5:
-    st.subheader("🧮 Position Size Calculator")
+    st.subheader("🧮 Smart Risk Calculator (Auto-Scan)")
     current_risk_setting = RISK_UNIT_BASE 
     st.info(f"Using Global Risk Setting: ${current_risk_setting:,.0f} per trade")
-    c1, c2 = st.columns(2)
-    entry_p = c1.number_input("Entry Price", 100.0)
-    stop_p = c2.number_input("Stop Price", 90.0)
-    if entry_p > stop_p:
-        risk = entry_p - stop_p
-        shares = int(current_risk_setting / risk)
-        cost = shares * entry_p
-        st.metric("Shares", shares)
-        st.metric("Capital", f"${cost:,.2f}")
-        if cost > current_cash: st.error("Insufficient Cash")
-        else: st.success("Approved")
+    
+    # NEW LOOKUP FUNCTIONALITY
+    col_t, col_p, col_s = st.columns(3)
+    calc_ticker = col_t.text_input("Ticker Symbol (e.g. NVDA)", "").upper()
+    
+    manual_entry = col_p.number_input("Manual Entry ($)", value=0.0)
+    manual_stop = col_s.number_input("Manual Stop ($)", value=0.0)
+    
+    if calc_ticker:
+        # Auto-fetch logic
+        try:
+            tk = yf.Ticker(calc_ticker)
+            df = tk.history(period="1mo")
+            if not df.empty:
+                curr_p = df['Close'].iloc[-1]
+                # Calc ATR
+                tr1 = df['High'] - df['Low']
+                tr2 = abs(df['High'] - df['Close'].shift(1))
+                tr3 = abs(df['Low'] - df['Close'].shift(1))
+                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                atr_val = tr.rolling(14).mean().iloc[-1]
+                
+                # Auto-Calc Stop (Standard 2.618)
+                raw_stop = curr_p - (2.618 * atr_val)
+                # Smart Rounding
+                smart_stop = round_to_03_07(raw_stop)
+                
+                st.write("---")
+                st.metric(f"{calc_ticker} Price", f"${curr_p:.2f}")
+                
+                # Input override logic
+                final_entry = manual_entry if manual_entry > 0 else curr_p
+                final_stop = manual_stop if manual_stop > 0 else smart_stop
+                
+                if final_entry > final_stop:
+                    risk_per_share = final_entry - final_stop
+                    shares = int(current_risk_setting / risk_per_share)
+                    capital = shares * final_entry
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Recommended Shares", shares)
+                    c2.metric("Capital Required", f"${capital:,.2f}")
+                    c3.metric("Smart Stop", f"${final_stop:.2f}")
+                    
+                    if capital > current_cash:
+                        st.error(f"⚠️ Over Budget by ${capital - current_cash:,.2f}")
+                    else:
+                        st.success("✅ Trade Approved")
+                        
+                else:
+                    st.error("Stop Price must be below Entry Price for Longs")
+        except:
+            st.error("Could not fetch ticker data.")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -709,8 +773,6 @@ if st.button("RUN ANALYSIS", type="primary"):
     results = []
     mkt_score = 0
     health_rows = []
-    
-    # Define pf_tickers HERE to ensure availability for Scanner
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     
@@ -773,7 +835,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                     "Ticker": t, "Shares": int(shares), 
                     "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
                     "Gain/Loss ($)": f"${pl:+.2f}", "% Return": f"{pl_pct:+.2f}%",
-                    "Audit Action": "HOLD" # Placeholder
+                    "Audit Action": "HOLD"
                 })
         
         total_net_worth = current_cash + eq_val
@@ -800,23 +862,18 @@ if st.button("RUN ANALYSIS", type="primary"):
         closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
         if not closed_trades.empty:
             st.subheader("📜 Closed Performance")
-            
-            # KPI
             wins = closed_trades[closed_trades['Return'] > 0]
             win_rate = (len(wins) / len(closed_trades)) * 100
             total_pl = closed_trades['Realized_PL'].sum()
-            
             c1, c2 = st.columns(2)
             c1.metric("Win Rate", f"{win_rate:.0f}%")
             c2.metric("Total P&L", f"${total_pl:,.2f}")
             
-            # Table
             hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
             hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
             hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
             hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
             hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-            
             st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
             st.write("---")
 
@@ -853,13 +910,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
-            
             cond1 = s_c > s_18c; cond2 = s_18c >= s_18p; cond3 = s_8c > s_8p
             if cond1 and cond2 and cond3: mkt_score += 1
-            
             s_p = "<span style='color:#00ff00'>PASS</span>"; s_f = "<span style='color:#ff4444'>FAIL</span>"
             s_r = "<span style='color:#00ff00'>RISING</span>"; s_d = "<span style='color:#ff4444'>FALLING</span>"
-            
             health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_p if cond1 else s_f})
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
@@ -867,10 +921,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
-            
             r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
             if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
-            
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
@@ -1011,8 +1063,11 @@ if st.button("RUN ANALYSIS", type="primary"):
                 decision = "CAUTION"; reason = "VIX Lock"
 
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
-            stop_dist = 2.618 * atr
-            stop_price = dc['Close'] - stop_dist
+            
+            # --- SMART STOP CALCULATION IN SCANNER ---
+            raw_stop = dc['Close'] - (2.618 * atr)
+            smart_stop_val = round_to_03_07(raw_stop)
+            stop_dist = dc['Close'] - smart_stop_val
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
             # --- DUAL RSI LOGIC (HTML Construction) ---
@@ -1041,7 +1096,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Decision": decision,
                 "Reason": reason,
                 "Price": dc['Close'],
-                "Stop": stop_price,
+                "Stop": smart_stop_val, # Use Smart Stop
                 "StopPct": stop_pct,
                 "ATR": atr,
                 "Mom4W": mom_4w,
@@ -1058,7 +1113,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
-        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
@@ -1082,14 +1136,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC & BLUE SPIKE OVERRIDE
+            # SHARES CALC & BLUE SPIKE LOGIC
             rsi_html = db['RSI_Msg']
             vol_str = db['Vol_Msg']
             is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
             
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
-            
-            # Override Risk if Blue Spike
             if is_blue_spike: final_risk = risk_per_trade
 
             stop_dist_value = db['Price'] - db['Stop']
