@@ -57,12 +57,12 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.9.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sector Summary & Reordering")
+st.title(f"🛡️ Titan Strategy v52.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Dual RSI Entry System")
 
 RISK_UNIT = 2300  
 
-# --- SECTOR PARENT MAP (Updated for New Numbering) ---
+# --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
     "04. MATERIALS": "XLB",
     "05. ENERGY": "XLE",
@@ -78,7 +78,6 @@ SECTOR_PARENTS = {
     "03. THEMES": "SPY"
 }
 
-# List of ETFs to duplicate into the "02. SECTORS" summary group
 SECTOR_ETFS = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
 
 # --- DATA MAP ---
@@ -91,14 +90,14 @@ DATA_MAP = {
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     
-    # Hidden VIX (Data only)
+    # Hidden VIX
     "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
 
     # --- 01. BONDS/FX ---
     "IEF": ["01. BONDS/FX", "SPY", "7-10 Year Treasuries"],
     "DLR.TO": ["01. BONDS/FX", None, "USD/CAD Currency"],
 
-    # --- 03. THEMES (Renumbered) ---
+    # --- 03. THEMES ---
     "BOTZ": ["03. THEMES", "SPY", "Robotics & AI"],
     "AIQ": ["03. THEMES", "SPY", "Artificial Intel"],
     "ARKG": ["03. THEMES", "SPY", "Genomics"],
@@ -210,6 +209,13 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
+def calc_rsi(series, length):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=length).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=length).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
 # --- STYLING ---
 def style_final(styler):
     def color_pct(val):
@@ -218,6 +224,14 @@ def style_final(styler):
                 num = float(val.strip('%'))
                 return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff0000; font-weight: bold'
             except: return ''
+        return ''
+
+    # RSI Styling Logic
+    def color_rsi(val):
+        if "BLUE" in val: return 'color: #0088ff; font-weight: bold; background-color: #001133' # Strong Bull
+        if "GREEN" in val: return 'color: #00ff00; font-weight: bold' # Bullish Momentum
+        if "ORANGE" in val: return 'color: #ffaa00; font-weight: bold' # Pullback
+        if "RED" in val: return 'color: #ff4444' # Bearish
         return ''
 
     return styler.set_table_styles([
@@ -232,6 +246,7 @@ def style_final(styler):
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .map(color_pct, subset=["4W %", "2W %"])\
+      .map(color_rsi, subset=["Dual RSI"])\
       .hide(axis='index')
 
 def style_market(styler):
@@ -262,6 +277,7 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
+# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -622,6 +638,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_d['AD_SMA18'] = calc_sma(df_d['AD'], 18)
             df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
             df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
+            df_d['RSI5'] = calc_rsi(df_d['Close'], 5)
+            df_d['RSI20'] = calc_rsi(df_d['Close'], 20)
             
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
@@ -708,6 +726,17 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_price = dc['Close'] - stop_dist
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
+            # --- DUAL RSI LOGIC ---
+            r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
+            r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
+            
+            rsi_msg = f"{int(r5)}/{int(r20)} RED"
+            if r5 >= r20:
+                if r20 > 50: rsi_msg = f"{int(r5)}/{int(r20)} BLUE" # Strong Bull
+                else: rsi_msg = f"{int(r5)}/{int(r20)} GREEN" # Recovery
+            elif r20 > 50:
+                rsi_msg = f"{int(r5)}/{int(r20)} ORANGE" # Pullback
+            
             analysis_db[t] = {
                 "Decision": decision,
                 "Reason": reason,
@@ -724,18 +753,15 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "D_Chk_Price": d_chk['Price'],
                 "W_Cloud": w_cloud_pass,
                 "AD_Pass": ad_pass,
-                "Vol_Msg": vol_msg
+                "Vol_Msg": vol_msg,
+                "RSI_Msg": rsi_msg
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
         results = []
         for t in all_tickers:
-            # Skip checking against "99. DATA" here since we only want to show scanner items
-            # The 'is_scanner' logic uses DATA_MAP which includes 99. DATA for VIX
-            # We filter explicitly.
-            
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
-            if "99. DATA" in cat_name: continue # Hide VIX/Data feeds from scanner table
+            if "99. DATA" in cat_name: continue 
             
             is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             if not is_scanner or t not in analysis_db: continue
@@ -748,7 +774,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             if cat_name in SECTOR_PARENTS:
                 parent = SECTOR_PARENTS[cat_name]
-                # Lock only if parent is AVOID and we are not locking the parent itself
                 if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
                     if t != parent: 
                         final_decision = "AVOID"
@@ -783,6 +808,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Ichimoku<br>Cloud": "PASS" if db['W_Cloud'] else "FAIL", 
                 "A/D Breadth": "STRONG" if db['AD_Pass'] else "WEAK",
                 "Volume": db['Vol_Msg'], 
+                "Dual RSI": db['RSI_Msg'],
                 "Action": final_decision, 
                 "Reasoning": final_reason,
                 "Stop Price": disp_stop, 
@@ -918,5 +944,5 @@ if st.button("RUN ANALYSIS", type="primary"):
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
-    cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Action", "Reasoning", "Stop Price", "Position Size"]
+    cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Action", "Reasoning", "Stop Price", "Position Size"]
     st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
