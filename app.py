@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sell Logic Fixed")
+st.title(f"🛡️ Titan Strategy v54.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Safety Checks for New Data")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -689,17 +689,26 @@ with tab5:
     st.subheader("🧮 Position Size Calculator")
     current_risk_setting = RISK_UNIT_BASE 
     st.info(f"Using Global Risk Setting: ${current_risk_setting:,.0f} per trade")
-    c1, c2 = st.columns(2)
-    entry_p = c1.number_input("Entry Price", 100.0)
-    stop_p = c2.number_input("Stop Price", 90.0)
+    
+    col_a, col_b = st.columns(2)
+    entry_p = col_a.number_input("Entry Price ($)", value=100.0, step=0.1)
+    stop_p = col_b.number_input("Stop Price ($)", value=90.0, step=0.1)
+    
     if entry_p > stop_p:
-        risk = entry_p - stop_p
-        shares = int(current_risk_setting / risk)
-        cost = shares * entry_p
-        st.metric("Shares", shares)
-        st.metric("Capital", f"${cost:,.2f}")
-        if cost > current_cash: st.error("Insufficient Cash")
-        else: st.success("Approved")
+        risk_per_share = entry_p - stop_p
+        shares_calc = int(current_risk_setting / risk_per_share)
+        total_cost = shares_calc * entry_p
+        
+        st.write("---")
+        st.metric("Shares to Buy", f"{shares_calc}")
+        st.metric("Total Capital Required", f"${total_cost:,.2f}")
+        
+        if total_cost > current_cash:
+            st.error(f"❌ Insufficient Cash (Short by ${total_cost - current_cash:,.2f})")
+        else:
+            st.success("✅ Trade is Within Budget")
+    else:
+        st.warning("Entry must be higher than Stop for a Long position.")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -739,7 +748,9 @@ if st.button("RUN ANALYSIS", type="primary"):
         pf_rows = []
         
         if not open_pos.empty:
+            # Need live prices for holdings
             holding_tickers = open_pos['Ticker'].unique().tolist()
+            # Add to cache if missing
             for t in holding_tickers:
                 if t not in market_data:
                     try:
@@ -832,6 +843,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 4. MARKET HEALTH
         # ----------------------------------------
         if spy is not None and ief is not None and vix is not None and rsp is not None:
+            # 1. VIX Score
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
             elif vix_c < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
@@ -840,26 +852,34 @@ if st.button("RUN ANALYSIS", type="primary"):
             mkt_score += v_pts
             health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
             
+            # 2. SPY
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
+            
             cond1 = s_c > s_18c; cond2 = s_18c >= s_18p; cond3 = s_8c > s_8p
             if cond1 and cond2 and cond3: mkt_score += 1
+            
             s_p = "<span style='color:#00ff00'>PASS</span>"; s_f = "<span style='color:#ff4444'>FAIL</span>"
             s_r = "<span style='color:#00ff00'>RISING</span>"; s_d = "<span style='color:#ff4444'>FALLING</span>"
+            
             health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_p if cond1 else s_f})
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
             
+            # 3. RSP
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
+            
             r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
             if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
+            
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
             
+            # TOTAL
             if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
@@ -883,8 +903,23 @@ if st.button("RUN ANALYSIS", type="primary"):
         
         analysis_db = {}
         for t in all_tickers:
-            if t not in cache_d: continue
-            df_d = cache_d[t].copy()
+            if t not in cache_d: 
+                try:
+                    fetch_sym = "SPY" if t == "MANL" else t
+                    tk = yf.Ticker(fetch_sym)
+                    df = tk.history(period="2y", interval="1d") 
+                    df.index = pd.to_datetime(df.index).tz_localize(None)
+                    if not df.empty and 'Close' in df.columns: 
+                        cache_d[t] = df
+                        df_d = df
+                    else: continue
+                except: continue
+            else:
+                df_d = cache_d[t].copy()
+
+            # --- DATA SAFETY CHECK ---
+            if len(df_d) < 20: continue
+
             # Calculations
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -898,6 +933,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
+            
+            # --- WEEKLY DATA SAFETY CHECK ---
+            if len(df_w) < 2: continue
+            
             df_w.dropna(subset=['Close'], inplace=True)
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
@@ -1024,7 +1063,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
-        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
@@ -1048,7 +1086,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC & BLUE SPIKE OVERRIDE
+            # SHARES CALC & BLUE SPIKE LOGIC
             rsi_html = db['RSI_Msg']
             vol_str = db['Vol_Msg']
             is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
