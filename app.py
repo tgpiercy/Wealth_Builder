@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.14 ({current_user.upper()})")
-st.caption("Institutional Protocol: Closed Trades Success Tracker")
+st.title(f"🛡️ Titan Strategy v53.15 ({current_user.upper()})")
+st.caption("Institutional Protocol: Performance Benchmark vs SPY")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -350,7 +350,8 @@ def style_history(styler):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]
+    # ADDED 'Type' to schema
+    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type"]
     
     if not os.path.exists(PORTFOLIO_FILE):
         df = pd.DataFrame(columns=cols)
@@ -358,6 +359,8 @@ def load_portfolio():
         return df
     
     df = pd.read_csv(PORTFOLIO_FILE)
+    
+    # Ensure all cols exist
     for c in cols:
         if c not in df.columns: df[c] = None
     
@@ -366,6 +369,26 @@ def load_portfolio():
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     
+    # --- MIGRATION LOGIC FOR 'Type' ---
+    # Try to infer if Type is missing
+    if df['Type'].isnull().all() and not df.empty:
+        for idx, row in df.iterrows():
+            if row['Ticker'] != "CASH":
+                df.at[idx, 'Type'] = "STOCK"
+            else:
+                # It's CASH. Is it a Trade Cash or Transfer?
+                # Check for Stock Trade on same Date (Buy) or Exit_Date (Sell)
+                c_date = row['Date']
+                # Check matching buys
+                buys = df[(df['Ticker']!='CASH') & (df['Date']==c_date)]
+                # Check matching sells
+                sells = df[(df['Ticker']!='CASH') & (df['Exit_Date']==c_date)]
+                
+                if not buys.empty or not sells.empty:
+                    df.at[idx, 'Type'] = "TRADE_CASH"
+                else:
+                    df.at[idx, 'Type'] = "TRANSFER"
+                    
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
@@ -423,7 +446,8 @@ with tab1:
             new_row = pd.DataFrame([{
                 "ID": new_id, "Ticker": b_tick, "Date": b_date, "Shares": b_shares, 
                 "Cost_Basis": b_price, "Status": "OPEN", "Exit_Date": None, 
-                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
+                "Type": "STOCK"
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
             
@@ -432,7 +456,8 @@ with tab1:
                  cash_row = pd.DataFrame([{
                     "ID": cash_id, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), 
                     "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                    "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                    "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
+                    "Type": "TRADE_CASH"
                 }])
                  pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
@@ -497,7 +522,8 @@ with tab2:
                             "Exit_Price": s_price, 
                             "Return": ret_pct, 
                             "Realized_PL": pl_dollars, 
-                            "SPY_Return": spy_ret_val
+                            "SPY_Return": spy_ret_val,
+                            "Type": "STOCK"
                         }])
                         pf_df = pd.concat([pf_df, new_closed_row], ignore_index=True)
                     else:
@@ -512,7 +538,8 @@ with tab2:
                     cash_row = pd.DataFrame([{
                         "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
                         "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
+                        "Type": "TRADE_CASH"
                     }])
                     pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
@@ -535,7 +562,8 @@ with tab3:
             new_row = pd.DataFrame([{
                 "ID": new_id, "Ticker": "CASH", "Date": c_date, "Shares": final_amt, 
                 "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
+                "Type": "TRANSFER"
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
             save_portfolio(pf_df)
@@ -628,7 +656,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         for t in market_tickers:
             try:
                 tk = yf.Ticker(t)
-                df = tk.history(period="2y", interval="1d")
+                df = tk.history(period="10y", interval="1d") # Need deep history for benchmark
                 df.index = pd.to_datetime(df.index).tz_localize(None)
                 if not df.empty and 'Close' in df.columns: market_data[t] = df
             except: pass
@@ -670,7 +698,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             if spy_cond1 and spy_cond2 and spy_cond3: mkt_score += 1
             
-            # SPY Rows (HTML)
             s_p = "<span style='color:#00ff00'>PASS</span>"
             s_f = "<span style='color:#ff4444'>FAIL</span>"
             s_r = "<span style='color:#00ff00'>RISING</span>"
@@ -694,7 +721,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             if rsp_cond1 and rsp_cond2 and rsp_cond3: mkt_score += 1
 
-            # RSP Rows (HTML)
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if rsp_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if rsp_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if rsp_cond3 else s_d})
@@ -721,15 +747,12 @@ if st.button("RUN ANALYSIS", type="primary"):
                 exp_msg = "CASH / SAFETY (0%)"
                 exp_col = "#ff4444"
 
-            # TOTAL ROW (HTML)
             t_col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
             health_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{t_col}; font-weight:bold'>TOTAL: {mkt_score}/11</span>"})
             health_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{exp_col}; font-weight:bold'>{exp_msg}</span>"})
             
             st.subheader(f"🏥 Daily Market Health")
             df_health = pd.DataFrame(health_rows)
-            
-            # RENDER AS RAW HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
             
@@ -1078,22 +1101,67 @@ if st.button("RUN ANALYSIS", type="primary"):
         # --- NEW SUCCESS TRACKER FORMAT ---
         hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
         
-        # Format the columns for display
         hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
         hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
-        
-        # The formatting function color_pl_dol expects '$' to find and parse, but our logic in map uses subset.
-        # We need raw numbers for coloring? No, the styler parses strings.
-        # So we format them as strings here.
-        
         hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
         hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
         
-        # Final Selection
         hist_view = hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]]
         
         st.dataframe(hist_view.style.pipe(style_history))
         st.write("---")
+
+    # --- BENCHMARK SECTION (Performance vs SPY) ---
+    st.subheader("📈 Performance vs SPY Benchmark")
+    
+    # 1. Reconstruct Deposits History from "TRANSFER" type rows
+    transfer_history = pf_df[pf_df['Type'] == 'TRANSFER'].copy()
+    if not transfer_history.empty:
+        transfer_history['Date'] = pd.to_datetime(transfer_history['Date'])
+        transfer_history = transfer_history.sort_values('Date')
+        
+        benchmark_shares = 0.0
+        # Access the cached SPY history from above (10y)
+        if "SPY" in market_data:
+            spy_hist = market_data["SPY"]
+            
+            for idx, row in transfer_history.iterrows():
+                t_date = row['Date']
+                t_amt = row['Shares'] # Positive = Deposit, Negative = Withdraw
+                
+                # Find SPY price on or immediately after t_date
+                # Use 'asof' logic on the index
+                try:
+                    # Get index loc of date
+                    idx_loc = spy_hist.index.searchsorted(t_date)
+                    if idx_loc < len(spy_hist):
+                        spy_price = spy_hist.iloc[idx_loc]['Close']
+                        shares_bought = t_amt / spy_price
+                        benchmark_shares += shares_bought
+                except: pass
+                
+            # Current Value
+            curr_spy_price = spy.iloc[-1]['Close']
+            benchmark_val = benchmark_shares * curr_spy_price
+            
+            # Titan Net Worth (USD)
+            titan_val = total_acct # Calculated earlier in Active Holdings
+            
+            # Alpha
+            alpha_dollars = titan_val - benchmark_val
+            alpha_pct = ((titan_val - benchmark_val) / benchmark_val) * 100 if benchmark_val > 0 else 0
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Titan Net Worth", f"${titan_val:,.2f}")
+            c2.metric("SPY Benchmark", f"${benchmark_val:,.2f}")
+            c3.metric("Alpha (Edge)", f"${alpha_dollars:,.2f}", f"{alpha_pct:+.2f}%")
+            
+        else:
+            st.warning("SPY Data needed for benchmark")
+    else:
+        st.info("No Deposits/Withdrawals found to build benchmark.")
+
+    st.write("---")
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
