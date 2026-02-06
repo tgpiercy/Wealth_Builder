@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.15 ({current_user.upper()})")
-st.caption("Institutional Protocol: Performance Benchmark vs SPY")
+st.title(f"🛡️ Titan Strategy v53.16 ({current_user.upper()})")
+st.caption("Institutional Protocol: Auto-Correction Protocol")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -350,7 +350,6 @@ def style_history(styler):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    # ADDED 'Type' to schema
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type"]
     
     if not os.path.exists(PORTFOLIO_FILE):
@@ -360,7 +359,6 @@ def load_portfolio():
     
     df = pd.read_csv(PORTFOLIO_FILE)
     
-    # Ensure all cols exist
     for c in cols:
         if c not in df.columns: df[c] = None
     
@@ -368,26 +366,31 @@ def load_portfolio():
     df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
-    
-    # --- MIGRATION LOGIC FOR 'Type' ---
-    # Try to infer if Type is missing
-    if df['Type'].isnull().all() and not df.empty:
-        for idx, row in df.iterrows():
-            if row['Ticker'] != "CASH":
-                df.at[idx, 'Type'] = "STOCK"
-            else:
-                # It's CASH. Is it a Trade Cash or Transfer?
-                # Check for Stock Trade on same Date (Buy) or Exit_Date (Sell)
+
+    # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
+    # Check if ANY rows are missing Type, if so, we run the fixer
+    if df['Type'].isnull().any() and not df.empty:
+        
+        # 1. Identify Stock Trades
+        df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
+        
+        # 2. Identify Cash Rows that need fixing
+        cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
+        if cash_mask.any():
+            for idx, row in df[cash_mask].iterrows():
                 c_date = row['Date']
-                # Check matching buys
+                # Does this date match a stock purchase? (Buy cash out)
                 buys = df[(df['Ticker']!='CASH') & (df['Date']==c_date)]
-                # Check matching sells
+                # Does this date match a stock sale? (Sell cash in)
                 sells = df[(df['Ticker']!='CASH') & (df['Exit_Date']==c_date)]
                 
                 if not buys.empty or not sells.empty:
-                    df.at[idx, 'Type'] = "TRADE_CASH"
+                     df.at[idx, 'Type'] = "TRADE_CASH"
                 else:
-                    df.at[idx, 'Type'] = "TRANSFER"
+                     df.at[idx, 'Type'] = "TRANSFER"
+        
+        # Save corrections
+        df.to_csv(PORTFOLIO_FILE, index=False)
                     
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
@@ -571,9 +574,20 @@ with tab3:
             st.rerun()
 
 with tab4:
-    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade"])
+    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "Force Re-Classify History"])
     
-    if not pf_df.empty:
+    if action_type == "Force Re-Classify History":
+        st.info("This will scan all transactions and re-label Cash entries as either 'TRANSFER' (Deposit/Withdraw) or 'TRADE_CASH' (Proceeds from Stock Sales) based on dates.")
+        if st.button("RUN CLASSIFICATION FIX"):
+             # Reset all Types to None
+             pf_df['Type'] = None
+             pf_df.to_csv(PORTFOLIO_FILE, index=False)
+             # Reload triggers the auto-fix logic in load_portfolio
+             st.cache_data.clear()
+             st.success("History Reset. Reloading...")
+             st.rerun()
+
+    elif not pf_df.empty:
         opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
         sel_str = st.selectbox("Select Trade", opts)
         
@@ -760,357 +774,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             st.error("Market Data Failed to Load")
             risk_per_trade = 0
 
-    with st.spinner('Running Titan Protocol...'):
-        tickers = list(DATA_MAP.keys())
-        pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
-        pf_tickers = [x for x in pf_tickers if x != "CASH"]
-        all_tickers = list(set(tickers + pf_tickers))
-        
-        cache_d = {}
-        cache_d.update(market_data)
-        
-        # --- PASS 1: Calculate Analysis for ALL Tickers ---
-        analysis_db = {}
-        
-        for t in all_tickers:
-            if t in cache_d: continue
-            try:
-                fetch_sym = "SPY" if t == "MANL" else t
-                tk = yf.Ticker(fetch_sym)
-                df = tk.history(period="10y", interval="1d") 
-                df.index = pd.to_datetime(df.index).tz_localize(None)
-                if not df.empty and 'Close' in df.columns: cache_d[t] = df
-            except: pass
-
-        for t in all_tickers:
-            if t not in cache_d: continue
-            
-            df_d = cache_d[t].copy()
-            df_d['SMA18'] = calc_sma(df_d['Close'], 18)
-            df_d['SMA40'] = calc_sma(df_d['Close'], 40)
-            df_d['SMA200'] = calc_sma(df_d['Close'], 200)
-            df_d['AD'] = calc_ad(df_d['High'], df_d['Low'], df_d['Close'], df_d['Volume'])
-            df_d['AD_SMA18'] = calc_sma(df_d['AD'], 18)
-            df_d['AD_SMA40'] = calc_sma(df_d['AD'], 40)
-            df_d['VolSMA'] = calc_sma(df_d['Volume'], 18)
-            df_d['RSI5'] = calc_rsi(df_d['Close'], 5)
-            df_d['RSI20'] = calc_rsi(df_d['Close'], 20)
-            
-            logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
-            df_w = df_d.resample('W-FRI').agg(logic)
-            df_w.dropna(subset=['Close'], inplace=True)
-            df_w['SMA8'] = calc_sma(df_w['Close'], 8)
-            df_w['SMA18'] = calc_sma(df_w['Close'], 18)
-            df_w['SMA40'] = calc_sma(df_w['Close'], 40)
-            span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
-            df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
-
-            mom_4w = ""; mom_2w = ""
-            if len(df_w) >= 5:
-                curr = df_w.iloc[-1]['Close']; prev2 = df_w.iloc[-3]['Close']; prev4 = df_w.iloc[-5]['Close']
-                mom_2w = f"{((curr/prev2)-1)*100:.1f}%"
-                mom_4w = f"{((curr/prev4)-1)*100:.1f}%"
-
-            dc = df_d.iloc[-1]; dp = df_d.iloc[-2]; wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
-
-            bench_ticker = "SPY"
-            if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
-            if t == "MANL": bench_ticker = "SPY"
-            
-            rs_score_pass = False; rs_breakdown = False
-            
-            if bench_ticker is None:
-                rs_score_pass = True 
-            elif bench_ticker in cache_d:
-                bench_df = cache_d[bench_ticker]
-                aligned = pd.concat([df_d['Close'], bench_df['Close']], axis=1, join='inner')
-                rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
-                rs_sma18 = calc_sma(rs_series, 18)
-                c_rs = rs_series.iloc[-1]; c_rs_sma = rs_sma18.iloc[-1]; p_rs_sma = rs_sma18.iloc[-2]
-                rs_score_pass = (c_rs >= rs_sma18.iloc[-1] * 0.995) and (c_rs_sma >= p_rs_sma)
-                pp_rs_sma = rs_sma18.iloc[-3]
-                rs_breakdown = (c_rs < c_rs_sma) and (c_rs_sma < p_rs_sma) and (p_rs_sma < pp_rs_sma)
-
-            ad_pass = False
-            if not pd.isna(dc['AD_SMA18']):
-                ad_pass = (dc['AD'] >= dc['AD_SMA18'] * 0.995) and (dc['AD_SMA18'] >= dp['AD_SMA18'])
-            
-            vol_msg = "NORMAL"
-            if dc['Volume'] > (dc['VolSMA'] * 1.5): vol_msg = "SPIKE (Live)"
-            elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
-            elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
-            elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
-
-            w_score = 0
-            if wc['Close'] > wc['SMA18']: w_score += 1
-            if wc['SMA18'] > wp['SMA18']: w_score += 1
-            if wc['SMA18'] > wc['SMA40']: w_score += 1
-            if wc['Close'] > wc['Cloud_Top']: w_score += 1
-            if wc['Close'] > wc['SMA8']: w_score += 1 
-            
-            d_chk = {'Price': dc['Close'] > dc['SMA18'], 'Trend': dc['SMA18'] >= dp['SMA18'], 'Align': dc['SMA18'] > dc['SMA40'], 'A/D': ad_pass, 'RS': rs_score_pass}
-            d_score = sum(d_chk.values())
-            
-            w_uptrend = (wc['Close'] > wc['SMA18']) and (wc['SMA18'] > wc['SMA40']) and (wc['SMA18'] > wp['SMA18'])
-            d_health_ok = (dc['Close'] > dc['SMA18']) and (dc['SMA18'] >= dp['SMA18']) and ad_pass
-            w_pulse = "NO"; w_pulse = "GOOD" if w_uptrend and d_health_ok else ("WEAK" if w_uptrend else "NO")
-
-            decision = "AVOID"; reason = "Low Score"
-            if w_score >= 4:
-                if d_score == 5: decision = "BUY"; reason = "Score 5/5" if w_score==5 else "Score 4/5"
-                elif d_score == 4: decision = "SOON" if w_score==5 else "SCOUT"; reason = "D-Score 4"
-                elif d_score == 3: decision = "SCOUT"; reason = "Dip Buy"
-                else: decision = "WATCH"; reason = "Daily Weak"
-            else: decision = "AVOID"; reason = "Weekly Weak"
-
-            w_sma8_pass = wc['Close'] > wc['SMA8']
-            w_cloud_pass = wc['Close'] > wc['Cloud_Top']
-            
-            if not w_sma8_pass: decision = "AVOID"; reason = "BELOW W-SMA8"
-            elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
-            elif "SCOUT" in decision and "WEAK" in w_pulse: decision = "WATCH"; reason = "Impulse Weak"
-            elif "BUY" in decision and not (dc['Close'] > dc['SMA200']): decision = "SCOUT"; reason = "Below 200MA"
-            elif not w_cloud_pass and "BUY" in decision: decision = "WATCH"; reason = "Cloud Fail"
-            elif "SCOUT" in decision and not d_chk['Price']: decision = "WATCH"; reason = "Price Low"
-            elif rs_breakdown: decision = "WATCH"; reason = "RS BREAK"
-            elif risk_per_trade == 0 and ("BUY" in decision or "SCOUT" in decision): 
-                decision = "CAUTION"; reason = "VIX Lock"
-
-            atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
-            stop_dist = 2.618 * atr
-            stop_price = dc['Close'] - stop_dist
-            stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
-            
-            # --- DUAL RSI LOGIC (HTML Construction) ---
-            r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
-            r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
-            r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
-            
-            is_rising = r5 > r5_prev
-            arrow = "↑" if is_rising else "↓"
-            arrow_col = "#00FF00" if is_rising else "#FF4444"
-            
-            num_col = "#FF4444"
-            if r5 >= r20:
-                if r20 > 50:
-                    if is_rising: num_col = "#00BFFF" 
-                    else: num_col = "#FFA500" 
-                else:
-                    if is_rising: num_col = "#00FF00"
-                    else: num_col = "#FF4444" 
-            elif r20 > 50:
-                num_col = "#FFA500"
-            
-            rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
-            
-            analysis_db[t] = {
-                "Decision": decision,
-                "Reason": reason,
-                "Price": dc['Close'],
-                "Stop": stop_price,
-                "StopPct": stop_pct,
-                "ATR": atr,
-                "Mom4W": mom_4w,
-                "Mom2W": mom_2w,
-                "W_SMA8_Pass": w_sma8_pass,
-                "W_Pulse": w_pulse,
-                "W_Score": w_score,
-                "D_Score": d_score,
-                "D_Chk_Price": d_chk['Price'],
-                "W_Cloud": w_cloud_pass,
-                "AD_Pass": ad_pass,
-                "Vol_Msg": vol_msg,
-                "RSI_Msg": rsi_msg
-            }
-
-        # --- PASS 2: Build Results & Apply Sector Lock ---
-        results = []
-        for t in all_tickers:
-            cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
-            if "99. DATA" in cat_name: continue 
-            
-            is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
-            if not is_scanner or t not in analysis_db: continue
-            
-            db = analysis_db[t]
-            
-            # SECTOR LOCK LOGIC
-            final_decision = db['Decision']
-            final_reason = db['Reason']
-            
-            if cat_name in SECTOR_PARENTS:
-                parent = SECTOR_PARENTS[cat_name]
-                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
-                    if t != parent: 
-                        final_decision = "AVOID"
-                        final_reason = "Sector Lock"
-
-            # SORT RANKING
-            sort_rank = 1
-            if "00. INDICES" in cat_name: sort_rank = 0 
-            elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
-
-            # SHARES CALC & BLUE SPIKE OVERRIDE
-            rsi_html = db['RSI_Msg']
-            vol_str = db['Vol_Msg']
-            is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
-            
-            final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
-            
-            # Override Risk if Blue Spike
-            if is_blue_spike: final_risk = risk_per_trade
-
-            stop_dist_value = db['Price'] - db['Stop']
-            
-            # If AVOID but NOT Blue Spike -> Hide Shares.
-            # If AVOID BUT IS Blue Spike -> Show Shares.
-            if "AVOID" in final_decision and not is_blue_spike:
-                disp_stop = ""
-                disp_shares = ""
-            else:
-                shares = int(final_risk / stop_dist_value) if stop_dist_value > 0 else 0
-                disp_stop = f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)"
-                disp_shares = f"{shares} shares"
-
-            row = {
-                "Sector": cat_name, 
-                "Ticker": t,
-                "Rank": sort_rank, 
-                "4W %": db['Mom4W'], "2W %": db['Mom2W'],
-                "Weekly<br>SMA8": "PASS" if db['W_SMA8_Pass'] else "FAIL", 
-                "Weekly<br>Impulse": db['W_Pulse'], 
-                "Weekly<br>Score": db['W_Score'], "Daily<br>Score": db['D_Score'],
-                "Structure": "ABOVE 18" if db['D_Chk_Price'] else "BELOW 18",
-                "Ichimoku<br>Cloud": "PASS" if db['W_Cloud'] else "FAIL", 
-                "A/D Breadth": "STRONG" if db['AD_Pass'] else "WEAK",
-                "Volume": db['Vol_Msg'], 
-                "Dual RSI": db['RSI_Msg'],
-                "Action": final_decision, 
-                "Reasoning": final_reason,
-                "Stop Price": disp_stop, 
-                "Position Size": disp_shares
-            }
-            results.append(row)
-            
-            # HXT.TO DUPLICATION
-            if t == "HXT.TO":
-                row_cad = row.copy()
-                row_cad["Sector"] = "15. CANADA (HXT)"
-                row_cad["Rank"] = 0 
-                results.append(row_cad)
-            
-            # SECTOR DUPLICATION (For 02. SECTORS Summary)
-            if t in SECTOR_ETFS:
-                row_sec = row.copy()
-                row_sec["Sector"] = "02. SECTORS (SUMMARY)"
-                row_sec["Rank"] = 0
-                results.append(row_sec)
-
-    if not pf_df.empty:
-        open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
-        
-        agg_trades = {}
-        for index, row in open_trades.iterrows():
-            t = row['Ticker']
-            s = row['Shares']
-            c = row['Cost_Basis']
-            
-            if t not in agg_trades: agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
-            agg_trades[t]['Shares'] += s
-            agg_trades[t]['TotalCost'] += (s * c)
-            
-        equity_val = 0.0
-        total_active_cost = 0.0
-        pf_rows = []
-        
-        for t, data in agg_trades.items():
-            if t not in analysis_db: continue
-            
-            total_shares = data['Shares']
-            avg_cost = data['TotalCost'] / total_shares if total_shares > 0 else 0
-            curr_price = analysis_db[t]['Price']
-            
-            pos_val = total_shares * curr_price
-            equity_val += pos_val
-            total_active_cost += data['TotalCost']
-            
-            pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
-            gl_val = pos_val - data['TotalCost']
-            
-            decision = analysis_db[t]['Decision']
-            cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
-            if cat_name in SECTOR_PARENTS:
-                parent = SECTOR_PARENTS[cat_name]
-                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
-                    if t != parent: decision = "AVOID"
-
-            stop_price = analysis_db[t]['Stop']
-            
-            action = "HOLD"
-            if "AVOID" in decision: action = "EXIT (Signal Break)"
-            elif curr_price < stop_price: action = "EXIT (Stop Hit)"
-            elif "WATCH" in decision: action = "CAUTION / HOLD"
-            elif "CAUTION" in decision: action = "CAUTION / HOLD"
-            
-            pf_rows.append({
-                "Ticker": t, "Shares": int(total_shares), 
-                "Avg Cost": f"${avg_cost:.2f}", "Current": f"${curr_price:.2f}",
-                "Gain/Loss ($)": f"${gl_val:+,.2f}",
-                "% Return": f"{pl_pct:+.2f}%", 
-                "Titan Status": decision, "Audit Action": action
-            })
-
-        total_acct = current_cash + equity_val
-        cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
-        invested_pct = 100 - cash_pct
-        total_acct_cad = total_acct * cad_rate
-        
-        open_pl_val = equity_val - total_active_cost
-        open_pl_cad = open_pl_val * cad_rate
-
-        def fmt_delta(val):
-            return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
-
-        st.subheader("💼 Active Holdings")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", fmt_delta(open_pl_cad))
-        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", fmt_delta(open_pl_val))
-        c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
-
-        if pf_rows:
-            df_pf = pd.DataFrame(pf_rows)
-            st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
-            st.write("---")
-
-    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
-    if not closed_trades.empty:
-        st.subheader("📜 Closed Performance")
-        
-        wins = closed_trades[closed_trades['Return'] > 0]
-        win_rate = (len(wins) / len(closed_trades)) * 100
-        avg_ret = closed_trades['Return'].mean()
-        total_pl_dollars = closed_trades['Realized_PL'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
-        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
-        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
-        
-        # --- NEW SUCCESS TRACKER FORMAT ---
-        hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
-        
-        hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
-        hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
-        hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
-        hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-        
-        hist_view = hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]]
-        
-        st.dataframe(hist_view.style.pipe(style_history))
-        st.write("---")
-
     # --- BENCHMARK SECTION (Performance vs SPY) ---
     st.subheader("📈 Performance vs SPY Benchmark")
     
@@ -1129,10 +792,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 t_date = row['Date']
                 t_amt = row['Shares'] # Positive = Deposit, Negative = Withdraw
                 
-                # Find SPY price on or immediately after t_date
-                # Use 'asof' logic on the index
                 try:
-                    # Get index loc of date
                     idx_loc = spy_hist.index.searchsorted(t_date)
                     if idx_loc < len(spy_hist):
                         spy_price = spy_hist.iloc[idx_loc]['Close']
@@ -1140,26 +800,32 @@ if st.button("RUN ANALYSIS", type="primary"):
                         benchmark_shares += shares_bought
                 except: pass
                 
-            # Current Value
             curr_spy_price = spy.iloc[-1]['Close']
             benchmark_val = benchmark_shares * curr_spy_price
             
-            # Titan Net Worth (USD)
-            titan_val = total_acct # Calculated earlier in Active Holdings
+            # Re-Calculate Total Equity for comparison
+            # (Need to sum cash + active holdings)
+            # Re-using logic from above briefly
+            eq_val = 0.0
+            open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
+            for _, r in open_pos.iterrows():
+                 if r['Ticker'] in analysis_db:
+                     eq_val += (r['Shares'] * analysis_db[r['Ticker']]['Price'])
             
-            # Alpha
-            alpha_dollars = titan_val - benchmark_val
-            alpha_pct = ((titan_val - benchmark_val) / benchmark_val) * 100 if benchmark_val > 0 else 0
+            total_net_worth = current_cash + eq_val
+            
+            alpha_dollars = total_net_worth - benchmark_val
+            alpha_pct = ((total_net_worth - benchmark_val) / benchmark_val) * 100 if benchmark_val > 0 else 0
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Titan Net Worth", f"${titan_val:,.2f}")
+            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
             c2.metric("SPY Benchmark", f"${benchmark_val:,.2f}")
             c3.metric("Alpha (Edge)", f"${alpha_dollars:,.2f}", f"{alpha_pct:+.2f}%")
             
         else:
             st.warning("SPY Data needed for benchmark")
     else:
-        st.info("No Deposits/Withdrawals found to build benchmark.")
+        st.info("No Deposits found to build benchmark.")
 
     st.write("---")
 
