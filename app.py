@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Visuals & Logic")
+st.title(f"🛡️ Titan Strategy v52.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: HTML-Injected Dual RSI")
 
 RISK_UNIT = 2300  
 
@@ -226,34 +226,8 @@ def style_final(styler):
             except: return ''
         return ''
 
-    # UPDATED RSI STYLING - PARSES NUMBERS FOR COLOR
-    def color_rsi(val):
-        try:
-            # Expected Format: "65/55 ↑"
-            parts = val.split()
-            if len(parts) < 2: return ''
-            
-            nums = parts[0].split('/')
-            r5 = float(nums[0])
-            r20 = float(nums[1])
-            arrow = parts[1]
-            is_rising = (arrow == "↑")
-            
-            # Re-Apply Logic for Colors
-            if r5 >= r20:
-                if r20 > 50:
-                    # BLUE REQUIREMENT: R5 > R20 > 50 AND RISING
-                    if is_rising: return 'color: #00BFFF; font-weight: bold' # Deep Sky Blue
-                    else: return 'color: #FF4444; font-weight: bold' # Failed Blue = Red
-                else:
-                    return 'color: #00FF00; font-weight: bold' # Green (Recovery)
-            elif r20 > 50:
-                return 'color: #FFA500; font-weight: bold' # Orange (Pullback)
-            else:
-                return 'color: #FF4444; font-weight: bold' # Red (Bearish)
-        except:
-            return ''
-
+    # Note: RSI Coloring is now handled via HTML Injection in the Data Construction Phase
+    
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
@@ -266,7 +240,6 @@ def style_final(styler):
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .map(color_pct, subset=["4W %", "2W %"])\
-      .map(color_rsi, subset=["Dual RSI"])\
       .hide(axis='index')
 
 def style_market(styler):
@@ -746,19 +719,35 @@ if st.button("RUN ANALYSIS", type="primary"):
             stop_price = dc['Close'] - stop_dist
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
-            # --- DUAL RSI LOGIC (Slope + Levels) ---
+            # --- DUAL RSI LOGIC (HTML Construction) ---
             r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
             r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
             
-            # Determine Slope
-            if r5 > r5_prev:
-                slope_arrow = "↑"
-            else:
-                slope_arrow = "↓"
+            # 1. Slope Arrow (Green Up / Red Down)
+            is_rising = r5 > r5_prev
+            arrow = "↑" if is_rising else "↓"
+            arrow_col = "#00FF00" if is_rising else "#FF4444"
             
-            # Final String: "65/55 ↑" (Just numbers and arrow)
-            rsi_msg = f"{int(r5)}/{int(r20)} {slope_arrow}"
+            # 2. Number Signal Color
+            # Default Red
+            num_col = "#FF4444"
+            
+            if r5 >= r20:
+                if r20 > 50:
+                    # BLUE REQUIREMENT: Trigger (R5 > R20 > 50) AND Rising
+                    if is_rising: num_col = "#00BFFF" # Deep Sky Blue
+                    else: num_col = "#FFA500" # Orange (Falling in zone)
+                else:
+                    # GREEN: Recovery Zone (R20 < 50) AND Rising
+                    if is_rising: num_col = "#00FF00"
+                    else: num_col = "#FF4444" # Failed recovery
+            elif r20 > 50:
+                # ORANGE: Pullback (R5 < R20 but Trend > 50)
+                num_col = "#FFA500"
+            
+            # HTML String Construction
+            rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
             analysis_db[t] = {
                 "Decision": decision,
@@ -931,7 +920,43 @@ if st.button("RUN ANALYSIS", type="primary"):
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
 
+    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
+    if not closed_trades.empty:
+        st.subheader("📜 Closed Performance")
+        
+        wins = closed_trades[closed_trades['Return'] > 0]
+        win_rate = (len(wins) / len(closed_trades)) * 100
+        avg_ret = closed_trades['Return'].mean()
+        total_pl_dollars = closed_trades['Realized_PL'].sum()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
+        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
+        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
+        
+        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]].copy()
+        
+        hist_view["% Delta vs SPY"] = hist_view["Return"] - hist_view["SPY_Return"]
+        
+        hist_view["% Delta vs SPY"] = hist_view["% Delta vs SPY"].apply(lambda x: f"{x:+.2f}%")
+        hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+        hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
+        
+        hist_view.rename(columns={
+            "Realized_PL": "$ P&L", 
+            "Return": "% Return",
+            "Cost_Basis": "Buy Price", 
+            "Exit_Price": "Sell Price"
+        }, inplace=True)
+        
+        hist_view = hist_view.drop(columns=["SPY_Return"])
+        
+        st.dataframe(hist_view.style.pipe(style_history))
+        st.write("---")
+
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
     cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Action", "Reasoning", "Stop Price", "Position Size"]
-    st.markdown(df_final[cols].style.pipe(style_final).to_html(), unsafe_allow_html=True)
+    
+    # RENDER AS RAW HTML (REQUIRED FOR DUAL RSI COLORS)
+    st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
