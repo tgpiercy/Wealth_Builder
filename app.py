@@ -1,4 +1,4 @@
-import streamlit as st
+\import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -57,10 +57,26 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.8 ({current_user.upper()})")
-st.caption("Institutional Protocol: Thematic Separation")
+st.title(f"🛡️ Titan Strategy v51.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Lock Logic Enforced")
 
 RISK_UNIT = 2300  
+
+# --- SECTOR PARENT MAP (For Locking Logic) ---
+SECTOR_PARENTS = {
+    "01. MATERIALS": "XLB",
+    "02. ENERGY": "XLE",
+    "03. FINANCIALS": "XLF",
+    "04. INDUSTRIALS": "XLI",
+    "05. TECHNOLOGY": "XLK",
+    "06. COMM SERVICES": "XLC",
+    "07. HEALTH CARE": "XLV",
+    "08. CONS DISCRET": "XLY",
+    "09. CONS STAPLES": "XLP",
+    "10. UTILITIES / RE": "XLU",
+    "12. CANADA (HXT)": "HXT.TO",
+    "13. THEMES": "SPY" # Themes lock if SPY fails
+}
 
 # --- DATA MAP ---
 # Format: Ticker: [Category, Benchmark, Description]
@@ -73,7 +89,7 @@ DATA_MAP = {
     "IWC": ["00. INDICES", "SPY", "Micro-Cap"],
     "^VIX": ["00. INDICES", "SPY", "VIX Volatility"],
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
-    "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], # Also appears in Canada via logic
+    "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
 
     # --- 01. MATERIALS ---
     "XLB": ["01. MATERIALS", "SPY", "Materials Sector"],
@@ -130,6 +146,7 @@ DATA_MAP = {
 
     # --- 09. CONS STAPLES ---
     "XLP": ["09. CONS STAPLES", "SPY", "Cons Staples Sector"],
+    "MOO": ["09. CONS STAPLES", "SPY", "Agribusiness"],
 
     # --- 10. UTILITIES / RE ---
     "XLU": ["10. UTIL / RE", "SPY", "Utilities Sector"],
@@ -140,7 +157,6 @@ DATA_MAP = {
     "DLR.TO": ["11. BONDS/FX", None, "USD/CAD Currency"],
     
     # --- 12. CANADA (HXT) ---
-    # HXT.TO is inserted here via logic in the loop below
     "CNQ.TO": ["12. CANADA (HXT)", "HXT.TO", "Cdn Natural Res"],
     "CP.TO": ["12. CANADA (HXT)", "HXT.TO", "CP KC Rail"],
     "WSP.TO": ["12. CANADA (HXT)", "HXT.TO", "WSP Global"],
@@ -149,8 +165,7 @@ DATA_MAP = {
     "NTR.TO": ["12. CANADA (HXT)", "HXT.TO", "Nutrien"],
     "TECK-B.TO": ["12. CANADA (HXT)", "HXT.TO", "Teck Resources"],
 
-    # --- 13. THEMES (Standalone) ---
-    # Moved thematic/growth ETFs here. Benchmarked to SPY.
+    # --- 13. THEMES ---
     "BOTZ": ["13. THEMES", "SPY", "Robotics & AI"],
     "AIQ": ["13. THEMES", "SPY", "Artificial Intel"],
     "ARKG": ["13. THEMES", "SPY", "Genomics"],
@@ -163,7 +178,6 @@ DATA_MAP = {
     "COPX": ["13. THEMES", "SPY", "Copper Miners"],
     "REMX": ["13. THEMES", "SPY", "Rare Earths"],
     "PAVE": ["13. THEMES", "SPY", "Infrastructure"],
-    "MOO": ["13. THEMES", "SPY", "Agribusiness"],
 
     # --- MANUAL ---
     "MANL": ["99. MANUAL", "SPY", "Manual / Spy Proxy"]
@@ -245,7 +259,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -582,6 +595,9 @@ if st.button("RUN ANALYSIS", type="primary"):
         cache_d = {}
         cache_d.update(market_data)
         
+        # --- PASS 1: Calculate Analysis for ALL Tickers ---
+        analysis_db = {}
+        
         for t in all_tickers:
             if t in cache_d: continue
             try:
@@ -592,12 +608,8 @@ if st.button("RUN ANALYSIS", type="primary"):
                 if not df.empty and 'Close' in df.columns: cache_d[t] = df
             except: pass
 
-        analysis_db = {}
-        results = []
-        
         for t in all_tickers:
             if t not in cache_d: continue
-            is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             
             df_d = cache_d[t].copy()
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
@@ -691,49 +703,83 @@ if st.button("RUN ANALYSIS", type="primary"):
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
             stop_dist = 2.618 * atr
             stop_price = dc['Close'] - stop_dist
+            stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
             analysis_db[t] = {
-                "Price": dc['Close'],
-                "Stop": stop_price,
                 "Decision": decision,
                 "Reason": reason,
-                "ATR": atr
+                "Price": dc['Close'],
+                "Stop": stop_price,
+                "StopPct": stop_pct,
+                "ATR": atr,
+                "Mom4W": mom_4w,
+                "Mom2W": mom_2w,
+                "W_SMA8_Pass": w_sma8_pass,
+                "W_Pulse": w_pulse,
+                "W_Score": w_score,
+                "D_Score": d_score,
+                "D_Chk_Price": d_chk['Price'],
+                "W_Cloud": w_cloud_pass,
+                "AD_Pass": ad_pass,
+                "Vol_Msg": vol_msg
             }
 
-            if is_scanner and t not in ["MANL", "VOO"]:
-                final_risk = risk_per_trade / 3 if "SCOUT" in decision else risk_per_trade
-                shares = int(final_risk / stop_dist) if stop_dist > 0 and ("BUY" in decision or "SCOUT" in decision) else 0
-                stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
-                
-                # --- SORT RANKING LOGIC (UPDATED) ---
-                sort_rank = 1
-                cat_name = DATA_MAP[t][0]
-                if "00. INDICES" in cat_name: 
-                    sort_rank = 0 
-                elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]:
-                    sort_rank = 0 
+        # --- PASS 2: Build Results & Apply Sector Lock ---
+        results = []
+        for t in all_tickers:
+            is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
+            if not is_scanner or t not in analysis_db: continue
+            
+            db = analysis_db[t]
+            cat_name = DATA_MAP[t][0]
+            
+            # SECTOR LOCK LOGIC
+            final_decision = db['Decision']
+            final_reason = db['Reason']
+            
+            if cat_name in SECTOR_PARENTS:
+                parent = SECTOR_PARENTS[cat_name]
+                # Lock only if parent is AVOID and we are not locking the parent itself
+                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
+                    if t != parent: 
+                        final_decision = "AVOID"
+                        final_reason = "Sector Lock"
 
-                row = {
-                    "Sector": cat_name, 
-                    "Ticker": t,
-                    "Rank": sort_rank, 
-                    "4W %": mom_4w, "2W %": mom_2w,
-                    "Weekly<br>SMA8": "PASS" if w_sma8_pass else "FAIL", 
-                    "Weekly<br>Impulse": w_pulse, 
-                    "Weekly<br>Score": w_score, "Daily<br>Score": d_score,
-                    "Structure": "ABOVE 18" if d_chk['Price'] else "BELOW 18",
-                    "Ichimoku<br>Cloud": "PASS" if w_cloud_pass else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
-                    "Volume": vol_msg, "Action": decision, "Reasoning": reason,
-                    "Stop Price": f"${stop_price:.2f} (-{stop_pct:.1f}%)", "Position Size": f"{shares} shares"
-                }
-                results.append(row)
-                
-                # --- HXT.TO DUPLICATION LOGIC ---
-                if t == "HXT.TO":
-                    row_cad = row.copy()
-                    row_cad["Sector"] = "12. CANADA (HXT)"
-                    row_cad["Rank"] = 0 # Ensure it stays at top of Canada section
-                    results.append(row_cad)
+            # SORT RANKING
+            sort_rank = 1
+            if "00. INDICES" in cat_name: sort_rank = 0 
+            elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
+
+            # SHARES CALC
+            final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
+            stop_dist_ value = db['Price'] - db['Stop']
+            shares = int(final_risk / stop_dist_value) if stop_dist_value > 0 and ("BUY" in final_decision or "SCOUT" in final_decision) else 0
+
+            row = {
+                "Sector": cat_name, 
+                "Ticker": t,
+                "Rank": sort_rank, 
+                "4W %": db['Mom4W'], "2W %": db['Mom2W'],
+                "Weekly<br>SMA8": "PASS" if db['W_SMA8_Pass'] else "FAIL", 
+                "Weekly<br>Impulse": db['W_Pulse'], 
+                "Weekly<br>Score": db['W_Score'], "Daily<br>Score": db['D_Score'],
+                "Structure": "ABOVE 18" if db['D_Chk_Price'] else "BELOW 18",
+                "Ichimoku<br>Cloud": "PASS" if db['W_Cloud'] else "FAIL", 
+                "A/D Breadth": "STRONG" if db['AD_Pass'] else "WEAK",
+                "Volume": db['Vol_Msg'], 
+                "Action": final_decision, 
+                "Reasoning": final_reason,
+                "Stop Price": f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)", 
+                "Position Size": f"{shares} shares"
+            }
+            results.append(row)
+            
+            # HXT.TO DUPLICATION
+            if t == "HXT.TO":
+                row_cad = row.copy()
+                row_cad["Sector"] = "12. CANADA (HXT)"
+                row_cad["Rank"] = 0 
+                results.append(row_cad)
 
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
@@ -764,10 +810,21 @@ if st.button("RUN ANALYSIS", type="primary"):
             total_active_cost += data['TotalCost']
             
             pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
-            
             gl_val = pos_val - data['TotalCost']
             
+            # Use Analysis DB decision (includes Sector Lock if applicable)
+            # But wait, Pass 2 did the locking in the loop. 
+            # We need to re-apply lock logic here or just display the raw analysis?
+            # Ideally, the "Status" in Active Holdings should match the Scanner.
+            # Let's quickly re-check lock for consistency.
+            
             decision = analysis_db[t]['Decision']
+            cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
+            if cat_name in SECTOR_PARENTS:
+                parent = SECTOR_PARENTS[cat_name]
+                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
+                    if t != parent: decision = "AVOID" # Lock it here too
+
             stop_price = analysis_db[t]['Stop']
             
             action = "HOLD"
