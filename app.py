@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Sector Names")
+st.title(f"🛡️ Titan Strategy v53.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Daily Market Health Indicators")
 
 RISK_UNIT = 2300  
 
@@ -90,8 +90,9 @@ DATA_MAP = {
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     
-    # Hidden VIX
+    # Hidden VIX & Breadth
     "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
+    "RSP": ["99. DATA", "SPY", "S&P 500 Equal Weight"], 
 
     # --- 01. BONDS/FX ---
     "IEF": ["01. BONDS/FX", "SPY", "7-10 Year Treasuries"],
@@ -259,18 +260,16 @@ def style_final(styler):
         vol = str(row.get('Volume', '')).upper()
         rsi_html = str(row.get('Dual RSI', ''))
         
-        # PRIORITY 1: BLUE SPIKE (Blue RSI + Spike Vol)
         if "00BFFF" in rsi_html and "SPIKE" in vol:
              styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' # Royal Blue
              return styles
 
-        # PRIORITY 2: STANDARD ACTION COLORS
         if "BUY" in action:
-            styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' # Dark Green
+            styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' 
         elif "SCOUT" in action:
-            styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' # Dark Teal
+            styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' 
         elif "SOON" in action or "CAUTION" in action:
-            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' # Burnt Orange
+            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' 
             
         return styles
 
@@ -290,11 +289,11 @@ def style_final(styler):
       .map(color_rsi, subset=["Dual RSI"])\
       .hide(axis='index')
 
-def style_market(styler):
+def style_daily_health(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#333'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
-    ]).map(lambda v: 'color: #00ff00' if v in ["BULLISH", "RISK ON", "CALM"] else ('color: #ffaa00' if v in ["STABLE", "CAUTION"] else 'color: #ff0000'), subset=["Status"])
+    ]).map(lambda v: 'color: #00ff00' if v in ["PASS", "RISING", "BULLISH"] else 'color: #ff0000')
 
 def color_pl(val):
     if isinstance(val, str) and '%' in val:
@@ -596,7 +595,7 @@ with tab4:
 if st.button("RUN ANALYSIS", type="primary"):
     
     with st.spinner('Checking Vitals...'):
-        market_tickers = ["SPY", "IEF", "^VIX", "CAD=X", "HXT.TO"]
+        market_tickers = ["SPY", "IEF", "^VIX", "CAD=X", "HXT.TO", "RSP"] # Added RSP for Health
         market_data = {}
         for t in market_tickers:
             try:
@@ -607,44 +606,102 @@ if st.button("RUN ANALYSIS", type="primary"):
             except: pass
         
         spy = market_data.get("SPY"); ief = market_data.get("IEF"); vix = market_data.get("^VIX")
+        rsp = market_data.get("RSP")
         cad = market_data.get("CAD=X")
         cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 
         
-        mkt_score = 0; total_exp = 0; exposure_rows = []
+        mkt_score = 0; total_exp = 0;
         
-        if spy is not None and ief is not None and vix is not None:
-            spy_c = spy.iloc[-1]['Close']; spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
-            if spy_c > spy_sma18: status = "BULLISH"; total_exp += 40
-            else: status = "BEARISH"
-            exposure_rows.append({"Metric": "Trend (SPY > SMA18)", "Value": f"${spy_c:.2f}", "Status": status})
-
+        # --- NEW DAILY MARKET HEALTH LOGIC ---
+        health_rows = []
+        if spy is not None and ief is not None and rsp is not None:
+            # 1. SPY Price vs SMA18
+            spy_c = spy.iloc[-1]['Close']
+            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
+            health_rows.append({
+                "Indicator": "SPY Price > SMA18",
+                "Value": f"{spy_c:.2f} > {spy_sma18:.2f}",
+                "Status": "PASS" if spy_c > spy_sma18 else "FAIL"
+            })
+            
+            # 2. SPY RS vs SMA18 (RS = SPY/IEF)
             aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
-            ratio = aligned.iloc[:,0] / aligned.iloc[:,1]
-            ratio_c = ratio.iloc[-1]; ratio_sma18 = calc_sma(ratio, 18).iloc[-1]
-            dist_pct = ((ratio_c - ratio_sma18) / ratio_sma18) * 100
-            if ratio_c > ratio_sma18: status = "RISK ON"; total_exp += 40
-            elif ratio_c >= ratio_sma18 * 0.99: status = "STABLE"; total_exp += 40
-            else: status = "RISK OFF"
-            exposure_rows.append({"Metric": "Power (SPY:IEF)", "Value": f"{ratio_c:.3f} ({dist_pct:+.2f}%)", "Status": status})
-
-            vix_c = vix.iloc[-1]['Close']
-            if vix_c < 20: status = "CALM"; total_exp += 20
-            elif vix_c < 25: status = "CAUTION"
-            else: status = "PANIC"
-            exposure_rows.append({"Metric": "VIX (<20)", "Value": f"{vix_c:.2f}", "Status": status})
+            rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
+            rs_sma18 = calc_sma(rs_series, 18)
+            rs_sma8 = calc_sma(rs_series, 8)
             
-            exposure_rows.append({"Metric": "TOTAL EXPOSURE", "Value": "---", "Status": f"{total_exp}%"})
+            rs_c = rs_series.iloc[-1]
+            rs_ma18_c = rs_sma18.iloc[-1]
+            health_rows.append({
+                "Indicator": "SPY RS > SMA18",
+                "Value": f"{rs_c:.3f} > {rs_ma18_c:.3f}",
+                "Status": "PASS" if rs_c > rs_ma18_c else "FAIL"
+            })
             
-            risk_per_trade = RISK_UNIT * 0.5 if total_exp <= 40 else RISK_UNIT
-            if total_exp == 0: risk_per_trade = 0
+            # 3. RS SMA18 Rising
+            rs_ma18_p = rs_sma18.iloc[-2]
+            health_rows.append({
+                "Indicator": "RS SMA18 Rising",
+                "Value": "Slope",
+                "Status": "RISING" if rs_ma18_c > rs_ma18_p else "FALLING"
+            })
             
-            df_mkt = pd.DataFrame(exposure_rows)
-            st.subheader(f"📊 Market Health: {total_exp}% Invested")
-            st.markdown(df_mkt.style.pipe(style_market).to_html(), unsafe_allow_html=True)
+            # 4. RS SMA8 Rising
+            rs_ma8_c = rs_sma8.iloc[-1]
+            rs_ma8_p = rs_sma8.iloc[-2]
+            health_rows.append({
+                "Indicator": "RS SMA8 Rising",
+                "Value": "Slope",
+                "Status": "RISING" if rs_ma8_c > rs_ma8_p else "FALLING"
+            })
+            
+            # 5. RSP Price > SMA18
+            rsp_c = rsp.iloc[-1]['Close']
+            rsp_sma18 = calc_sma(rsp['Close'], 18)
+            rsp_ma18_c = rsp_sma18.iloc[-1]
+            health_rows.append({
+                "Indicator": "RSP Price > SMA18",
+                "Value": f"{rsp_c:.2f} > {rsp_ma18_c:.2f}",
+                "Status": "PASS" if rsp_c > rsp_ma18_c else "FAIL"
+            })
+            
+            # 6. RSP SMA18 Rising
+            rsp_ma18_p = rsp_sma18.iloc[-2]
+            health_rows.append({
+                "Indicator": "RSP SMA18 Rising",
+                "Value": "Slope",
+                "Status": "RISING" if rsp_ma18_c > rsp_ma18_p else "FALLING"
+            })
+            
+            # 7. Breadth (S5FI - Proxy via Sector ETFs)
+            # Fetch Sector ETFs to calc % > SMA50
+            sec_tk_list = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
+            count_above = 0
+            valid_secs = 0
+            for stk in sec_tk_list:
+                try:
+                    s_dat = yf.Ticker(stk).history(period="6mo")
+                    if not s_dat.empty:
+                        sma50 = s_dat['Close'].rolling(50).mean().iloc[-1]
+                        cur = s_dat['Close'].iloc[-1]
+                        if cur > sma50: count_above += 1
+                        valid_secs += 1
+                except: pass
+            
+            breadth_pct = (count_above / valid_secs * 100) if valid_secs > 0 else 0
+            
+            # Try fetching actual S5FI if possible, else use proxy
+            # Note: ^S5FI often unavailable. We stick to proxy for robustness.
+            health_rows.append({
+                "Indicator": "Sector Breadth (>50%)",
+                "Value": f"{breadth_pct:.1f}% > SMA50",
+                "Status": "BULLISH" if breadth_pct > 50 else "BEARISH"
+            })
+            
+            df_health = pd.DataFrame(health_rows)
+            st.subheader("🏥 Daily Market Health")
+            st.table(df_health.style.pipe(style_daily_health))
             st.write("---")
-        else:
-            risk_per_trade = 0
-            st.error("Market Data Failed to Load")
 
     with st.spinner('Running Titan Protocol...'):
         tickers = list(DATA_MAP.keys())
@@ -779,8 +836,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             num_col = "#FF4444"
             if r5 >= r20:
                 if r20 > 50:
-                    if is_rising: num_col = "#00BFFF" # Deep Sky Blue
-                    else: num_col = "#FFA500" # Orange
+                    if is_rising: num_col = "#00BFFF" 
+                    else: num_col = "#FFA500" 
                 else:
                     if is_rising: num_col = "#00FF00"
                     else: num_col = "#FF4444" 
@@ -957,7 +1014,6 @@ if st.button("RUN ANALYSIS", type="primary"):
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
     
-    # --- CLEAN SECTOR NAMES FOR DISPLAY ---
     def clean_sector_name(val):
         if ". " in val: val = val.split(". ", 1)[1]
         val = val.replace("(SUMMARY)", "").strip()
