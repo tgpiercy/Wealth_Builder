@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.10 ({current_user.upper()})")
-st.caption("Institutional Protocol: Consolidated Health Table")
+st.title(f"🛡️ Titan Strategy v53.11 ({current_user.upper()})")
+st.caption("Institutional Protocol: Actionable Blue Spikes")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -296,7 +296,7 @@ def style_daily_health(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
-    ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
+    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
       .hide(axis='index')
 
 def color_pl(val):
@@ -513,6 +513,78 @@ with tab2:
     else:
         st.info("No Open Positions")
 
+with tab3:
+    st.caption("Deposit / Withdraw")
+    with st.form("cash_ops"):
+        op_type = st.radio("Operation", ["Deposit", "Withdraw"])
+        amount = st.number_input("Amount", min_value=0.01, value=1000.00, step=0.01, format="%.2f")
+        c_date = st.date_input("Date")
+        
+        if st.form_submit_button("Execute"):
+            final_amt = amount if op_type == "Deposit" else -amount
+            new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
+            new_row = pd.DataFrame([{
+                "ID": new_id, "Ticker": "CASH", "Date": c_date, "Shares": final_amt, 
+                "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
+                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0
+            }])
+            pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+            save_portfolio(pf_df)
+            st.success(f"{op_type} ${amount}")
+            st.rerun()
+
+with tab4:
+    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade"])
+    
+    if not pf_df.empty:
+        opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
+        sel_str = st.selectbox("Select Trade", opts)
+        
+        if sel_str:
+            sel_id = int(sel_str.split("|")[0].replace("ID:", "").strip())
+            row_idx = pf_df[pf_df['ID'] == sel_id].index[0]
+            
+            if action_type == "Delete Trade":
+                if st.button("Permanently Delete"):
+                    pf_df = pf_df[pf_df['ID'] != sel_id]
+                    save_portfolio(pf_df)
+                    st.warning(f"Deleted ID {sel_id}")
+                    st.rerun()
+            
+            elif action_type == "Edit Trade":
+                with st.form("edit_form"):
+                    st.subheader(f"Editing ID: {sel_id}")
+                    c1, c2 = st.columns(2)
+                    cur_status = pf_df.at[row_idx, 'Status']
+                    new_status = c1.selectbox("Status", ["OPEN", "CLOSED"], index=0 if cur_status=="OPEN" else 1)
+                    new_shares = c2.number_input("Shares", value=float(pf_df.at[row_idx, 'Shares']))
+                    
+                    c3, c4 = st.columns(2)
+                    new_cost = c3.number_input("Cost Basis", value=float(pf_df.at[row_idx, 'Cost_Basis']))
+                    cur_exit = pf_df.at[row_idx, 'Exit_Price']
+                    new_exit = c4.number_input("Exit Price (0 if Open)", value=float(cur_exit) if pd.notna(cur_exit) else 0.0)
+                    
+                    if st.form_submit_button("Update Record"):
+                        pf_df.at[row_idx, 'Status'] = new_status
+                        pf_df.at[row_idx, 'Shares'] = new_shares
+                        pf_df.at[row_idx, 'Cost_Basis'] = new_cost
+                        if new_status == "OPEN":
+                            pf_df.at[row_idx, 'Exit_Price'] = None
+                            pf_df.at[row_idx, 'Exit_Date'] = None
+                            pf_df.at[row_idx, 'Return'] = 0.0
+                            pf_df.at[row_idx, 'Realized_PL'] = 0.0
+                        else:
+                            pf_df.at[row_idx, 'Exit_Price'] = new_exit
+                            if new_exit > 0:
+                                ret = ((new_exit - new_cost)/new_cost)*100
+                                pl = (new_exit - new_cost) * new_shares
+                                pf_df.at[row_idx, 'Return'] = ret
+                                pf_df.at[row_idx, 'Realized_PL'] = pl
+                                
+                        save_portfolio(pf_df)
+                        st.success("Record Updated")
+                        st.rerun()
+
 with tab5:
     st.subheader("🧮 Position Size Calculator")
     current_risk_setting = RISK_UNIT_BASE 
@@ -619,9 +691,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if rsp_cond3 else s_d})
 
             # EXPOSURE LOGIC (11 Max Points: 9 VIX + 1 SPY + 1 RSP)
-            # Wait, user said "Score vix out of 3" in V53.6, but "VIX 9 pts total" in V53.9. 
-            # Logic: Max 9 (VIX) + 1 (SPY) + 1 (RSP) = 11 TOTAL MAX SCORE
-            
             if mkt_score >= 10:
                 exposure_pct = 100
                 risk_per_trade = RISK_UNIT_BASE
@@ -650,6 +719,10 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             st.subheader(f"🏥 Daily Market Health")
             df_health = pd.DataFrame(health_rows)
+            
+            # --- ACTIONABLE BLUE SPIKE LOGIC IN LOOP BELOW ---
+            # (Passing risk_per_trade to the scanner)
+
             # RENDER AS RAW HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
@@ -831,6 +904,8 @@ if st.button("RUN ANALYSIS", type="primary"):
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
+            
+            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -841,14 +916,26 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
+            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
+            # SHARES CALC & BLUE SPIKE OVERRIDE
+            rsi_html = db['RSI_Msg']
+            vol_str = db['Vol_Msg']
+            is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
+            
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
+            
+            # Override Risk if Blue Spike
+            if is_blue_spike: final_risk = risk_per_trade
+
             stop_dist_value = db['Price'] - db['Stop']
             
-            if "AVOID" in final_decision:
+            # If AVOID but NOT Blue Spike -> Hide Shares.
+            # If AVOID BUT IS Blue Spike -> Show Shares.
+            if "AVOID" in final_decision and not is_blue_spike:
                 disp_stop = ""
                 disp_shares = ""
             else:
@@ -876,12 +963,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
+            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
+            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
