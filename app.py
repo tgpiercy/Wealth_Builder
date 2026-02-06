@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Scoring Transparency")
+st.title(f"🛡️ Titan Strategy v53.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Strict 3-Factor Trend Scoring")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -264,7 +264,7 @@ def style_final(styler):
         rsi_html = str(row.get('Dual RSI', ''))
         
         if "00BFFF" in rsi_html and "SPIKE" in vol:
-             styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' 
+             styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' # Royal Blue
              return styles
 
         if "BUY" in action:
@@ -296,7 +296,7 @@ def style_daily_health(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
-    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "RISING" in v else ('color: #ffffff; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
+    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
       .hide(axis='index')
 
 def color_pl(val):
@@ -633,78 +633,90 @@ if st.button("RUN ANALYSIS", type="primary"):
         health_rows = []
         
         if spy is not None and ief is not None and vix is not None and rsp is not None:
-            # 1. SPY Price > SMA18 (20 pts)
-            spy_c = spy.iloc[-1]['Close']
-            spy_sma18 = calc_sma(spy['Close'], 18).iloc[-1]
-            check_spy_trend = spy_c > spy_sma18
-            if check_spy_trend: mkt_score += 20
-            health_rows.append({"Indicator": "SPY Price > SMA18", "Status": "PASS (+20)" if check_spy_trend else "FAIL (0)"})
-            
-            # 2. SPY RS > SMA18 (20 pts)
-            aligned = pd.concat([spy['Close'], ief['Close']], axis=1, join='inner')
-            rs_series = aligned.iloc[:,0] / aligned.iloc[:,1]
-            rs_sma18 = calc_sma(rs_series, 18)
-            rs_sma8 = calc_sma(rs_series, 8)
-            
-            rs_c = rs_series.iloc[-1]
-            rs_ma18_c = rs_sma18.iloc[-1]
-            check_rs_trend = rs_c > rs_ma18_c
-            if check_rs_trend: mkt_score += 20
-            health_rows.append({"Indicator": "SPY RS > SMA18", "Status": "PASS (+20)" if check_rs_trend else "FAIL (0)"})
-            
-            # 3. VIX < 20 (20 pts)
+            # 1. VIX Score (Max 3)
             vix_c = vix.iloc[-1]['Close']
-            check_vix = vix_c < 20
-            if check_vix: mkt_score += 20
-            health_rows.append({"Indicator": "VIX < 20", "Status": "PASS (+20)" if check_vix else "FAIL (0)"})
+            if vix_c < 17:
+                vix_pts = 3; vix_msg = "NORMAL (<17)"
+            elif vix_c < 20:
+                vix_pts = 2; vix_msg = "CAUTIOUS (17-20)"
+            elif vix_c < 25:
+                vix_pts = 1; vix_msg = "DEFENSIVE (20-25)"
+            else:
+                vix_pts = 0; vix_msg = "PANIC (>25)"
             
-            # 4. RSP Price > SMA18 (10 pts)
+            mkt_score += vix_pts
+            health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": f"{vix_msg} | +{vix_pts}/3"})
+
+            # 2. SPY Score (Max 1) - STRICT 3-FACTOR
+            spy_c = spy.iloc[-1]['Close']
+            spy_sma18 = calc_sma(spy['Close'], 18)
+            spy_sma8 = calc_sma(spy['Close'], 8)
+            
+            spy_s18_c = spy_sma18.iloc[-1]; spy_s18_p = spy_sma18.iloc[-2]
+            spy_s8_c = spy_sma8.iloc[-1]; spy_s8_p = spy_sma8.iloc[-2]
+            
+            spy_cond1 = spy_c > spy_s18_c # Price > 18
+            spy_cond2 = spy_s18_c >= spy_s18_p # 18 Flat/Rising
+            spy_cond3 = spy_s8_c > spy_s8_p # 8 Rising
+            
+            if spy_cond1 and spy_cond2 and spy_cond3:
+                mkt_score += 1; spy_msg = "PASS (ALL 3)"
+                spy_pts = 1
+            else:
+                spy_msg = "FAIL"
+                spy_pts = 0
+            
+            health_rows.append({"Indicator": "SPY Trend (Structure+Slope)", "Status": f"{spy_msg} | +{spy_pts}/1"})
+
+            # 3. RSP Score (Max 1) - STRICT 3-FACTOR
             rsp_c = rsp.iloc[-1]['Close']
             rsp_sma18 = calc_sma(rsp['Close'], 18)
-            rsp_ma18_c = rsp_sma18.iloc[-1]
-            check_rsp_trend = rsp_c > rsp_ma18_c
-            if check_rsp_trend: mkt_score += 10
-            health_rows.append({"Indicator": "RSP Price > SMA18", "Status": "PASS (+10)" if check_rsp_trend else "FAIL (0)"})
+            rsp_sma8 = calc_sma(rsp['Close'], 8)
             
-            # 5. RS SMA18 Rising (10 pts)
-            rs_ma18_p = rs_sma18.iloc[-2]
-            check_rs18_rise = rs_ma18_c > rs_ma18_p
-            if check_rs18_rise: mkt_score += 10
-            health_rows.append({"Indicator": "RS SMA18 Rising", "Status": "RISING (+10)" if check_rs18_rise else "FALLING (0)"})
+            rsp_s18_c = rsp_sma18.iloc[-1]; rsp_s18_p = rsp_sma18.iloc[-2]
+            rsp_s8_c = rsp_sma8.iloc[-1]; rsp_s8_p = rsp_sma8.iloc[-2]
             
-            # 6. RS SMA8 Rising (10 pts)
-            rs_ma8_c = rs_sma8.iloc[-1]
-            rs_ma8_p = rs_sma8.iloc[-2]
-            check_rs8_rise = rs_ma8_c > rs_ma8_p
-            if check_rs8_rise: mkt_score += 10
-            health_rows.append({"Indicator": "RS SMA8 Rising", "Status": "RISING (+10)" if check_rs8_rise else "FALLING (0)"})
+            rsp_cond1 = rsp_c > rsp_s18_c # Price > 18
+            rsp_cond2 = rsp_s18_c >= rsp_s18_p # 18 Flat/Rising
+            rsp_cond3 = rsp_s8_c > rsp_s8_p # 8 Rising
             
-            # 7. RSP SMA18 Rising (10 pts)
-            rsp_ma18_p = rsp_sma18.iloc[-2]
-            check_rsp18_rise = rsp_ma18_c > rsp_ma18_p
-            if check_rsp18_rise: mkt_score += 10
-            health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "RISING (+10)" if check_rsp18_rise else "FALLING (0)"})
-            
+            if rsp_cond1 and rsp_cond2 and rsp_cond3:
+                mkt_score += 1; rsp_msg = "PASS (ALL 3)"
+                rsp_pts = 1
+            else:
+                rsp_msg = "FAIL"
+                rsp_pts = 0
+                
+            health_rows.append({"Indicator": "RSP Breadth (Structure+Slope)", "Status": f"{rsp_msg} | +{rsp_pts}/1"})
+
             # TOTAL ROW
-            health_rows.append({"Indicator": "TOTAL SCORE", "Status": f"TOTAL: {mkt_score}/100"})
+            health_rows.append({"Indicator": "TOTAL SCORE", "Status": f"TOTAL: {mkt_score}/5"})
             
-            # EXPOSURE
-            if mkt_score >= 80:
+            # EXPOSURE LOGIC
+            if mkt_score == 5:
                 exposure_pct = 100
                 risk_per_trade = RISK_UNIT_BASE
-            elif mkt_score >= 50:
+                exp_msg = "AGGRESSIVE (100%)"
+            elif mkt_score == 4:
+                exposure_pct = 100
+                risk_per_trade = RISK_UNIT_BASE
+                exp_msg = "CAUTIOUS BUY (100%)"
+            elif mkt_score == 3:
                 exposure_pct = 50
                 risk_per_trade = RISK_UNIT_BASE * 0.5
+                exp_msg = "DEFENSIVE (50%)"
             else:
                 exposure_pct = 0
                 risk_per_trade = 0
+                exp_msg = "CASH / SAFETY (0%)"
                 
-            st.subheader(f"🏥 Daily Market Health: {mkt_score}/100")
-            st.caption(f"Recommended Exposure: {exposure_pct}%")
-            st.progress(mkt_score / 100)
+            st.subheader(f"🏥 Daily Market Health: {mkt_score}/5")
+            st.caption(f"Strategy Mode: {exp_msg}")
+            
+            # Progress bar normalized to 5
+            st.progress(mkt_score / 5)
             
             df_health = pd.DataFrame(health_rows)
-            # Render as HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(), unsafe_allow_html=True)
             st.write("---")
             
@@ -721,7 +733,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         cache_d = {}
         cache_d.update(market_data)
         
-        # --- PASS 1: Calculate Analysis for ALL Tickers ---
+        # --- PASS 1: Analysis ---
         analysis_db = {}
         
         for t in all_tickers:
