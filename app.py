@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.10 ({current_user.upper()})")
-st.caption("Institutional Protocol: Streamlined Interface")
+st.title(f"🛡️ Titan Strategy v54.11 ({current_user.upper()})")
+st.caption("Institutional Protocol: Multi-Tiered Risk Calculator")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -220,19 +220,15 @@ def calc_rsi(series, length):
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
     whole = int(price)
-    # Candidates for this whole number
     c1 = whole + 0.03
     c2 = whole + 0.07
-    # Candidates for previous whole number (if price is like 100.01)
     c3 = (whole - 1) + 0.97 if whole > 0 else 0.0
     c4 = (whole - 1) + 0.93 if whole > 0 else 0.0
     
-    # Find closest
     candidates = [c1, c2, c3, c4]
     candidates = [c for c in candidates if c > 0]
     
     if not candidates: return price 
-    
     best_c = min(candidates, key=lambda x: abs(x - price))
     return best_c
 
@@ -370,7 +366,6 @@ def fmt_delta(val):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    # Defined Schema with Shadow Tracking
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
     
     if not os.path.exists(PORTFOLIO_FILE):
@@ -389,7 +384,7 @@ def load_portfolio():
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
 
-    # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
+    # Auto-Correction
     if df['Type'].isnull().any() and not df.empty:
         df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
         cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
@@ -704,9 +699,7 @@ with tab4:
 with tab5:
     st.subheader("🧮 Smart Risk Calculator")
     
-    # Moved global setting inside the tab
     RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
-    
     calc_ticker = st.text_input("Ticker", "").upper()
     
     if calc_ticker:
@@ -726,28 +719,52 @@ with tab5:
                 
                 st.write("---")
                 
-                # Logic strictly uses calculated values
                 if curr_p > smart_stop:
                     risk_per_share = curr_p - smart_stop
-                    shares = int(RISK_UNIT_BASE / risk_per_share)
-                    capital = shares * curr_p
                     
-                    st.markdown(f"**Price:** ${curr_p:.2f}")
+                    # 100% Risk Calculation
+                    shares_100 = int(RISK_UNIT_BASE / risk_per_share)
+                    cap_100 = shares_100 * curr_p
                     
-                    st.markdown(f"""
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                        <div><div style="font-size: 12px; color: #888;">Shares</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares}</div></div>
-                        <div><div style="font-size: 12px; color: #888;">Capital</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${capital:,.2f}</div></div>
-                        <div><div style="font-size: 12px; color: #888;">Stop</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${smart_stop:.2f}</div></div>
-                    </div>
+                    # 50% Risk Calculation
+                    shares_50 = int((RISK_UNIT_BASE * 0.5) / risk_per_share)
+                    cap_50 = shares_50 * curr_p
+                    
+                    st.markdown(f"**Price:** ${curr_p:.2f} | **Stop:** ${smart_stop:.2f}")
+                    
+                    st.markdown("""
+                    <style>
+                    .metric-box {
+                        background-color: #262730;
+                        border: 1px solid #444;
+                        border-radius: 5px;
+                        padding: 10px;
+                        margin-bottom: 10px;
+                    }
+                    .metric-label { font-size: 12px; color: #aaa; }
+                    .metric-value { font-size: 18px; font-weight: bold; color: #fff; }
+                    .defensive { color: #FFA500; }
+                    .standard { color: #00FF00; }
+                    </style>
                     """, unsafe_allow_html=True)
 
-                    if capital > current_cash:
-                         st.markdown(f"<div style='color: #FF4444; font-weight: bold; font-size: 14px;'>⚠️ Over Budget by ${capital - current_cash:,.2f}</div>", unsafe_allow_html=True)
-                    else:
-                         st.markdown(f"<div style='color: #00FF00; font-weight: bold; font-size: 14px;'>✅ Trade Approved</div>", unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class="metric-box">
+                        <div class="metric-label standard">STANDARD (100% Risk)</div>
+                        <div class="metric-value">{shares_100} Shares</div>
+                        <div class="metric-label">Capital: ${cap_100:,.0f}</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label defensive">DEFENSIVE (50% Risk)</div>
+                        <div class="metric-value">{shares_50} Shares</div>
+                        <div class="metric-label">Capital: ${cap_50:,.0f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if cap_100 > current_cash:
+                         st.caption(f"⚠️ Cash Short (100%): -${cap_100 - current_cash:,.0f}")
                 else:
-                    st.error("Stop Price calculated above Entry (Short trend?).")
+                    st.error("Stop Price calculated above Entry.")
             else:
                 st.error("Ticker not found.")
         except:
@@ -791,9 +808,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         pf_rows = []
         
         if not open_pos.empty:
-            # Need live prices for holdings
             holding_tickers = open_pos['Ticker'].unique().tolist()
-            # Add to cache if missing
             for t in holding_tickers:
                 if t not in market_data:
                     try:
@@ -1100,7 +1115,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
-        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
