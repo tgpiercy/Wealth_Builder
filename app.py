@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Dual RSI Slope Logic")
+st.title(f"🛡️ Titan Strategy v52.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Visuals & Logic")
 
 RISK_UNIT = 2300  
 
@@ -226,11 +226,33 @@ def style_final(styler):
             except: return ''
         return ''
 
-    # UPDATED RSI STYLING: Green Text for Rising, Red for Falling
+    # UPDATED RSI STYLING - PARSES NUMBERS FOR COLOR
     def color_rsi(val):
-        if "↑" in val: return 'color: #00ff00; font-weight: bold' # Rising = Green
-        if "↓" in val: return 'color: #ff4444; font-weight: bold' # Falling = Red
-        return ''
+        try:
+            # Expected Format: "65/55 ↑"
+            parts = val.split()
+            if len(parts) < 2: return ''
+            
+            nums = parts[0].split('/')
+            r5 = float(nums[0])
+            r20 = float(nums[1])
+            arrow = parts[1]
+            is_rising = (arrow == "↑")
+            
+            # Re-Apply Logic for Colors
+            if r5 >= r20:
+                if r20 > 50:
+                    # BLUE REQUIREMENT: R5 > R20 > 50 AND RISING
+                    if is_rising: return 'color: #00BFFF; font-weight: bold' # Deep Sky Blue
+                    else: return 'color: #FF4444; font-weight: bold' # Failed Blue = Red
+                else:
+                    return 'color: #00FF00; font-weight: bold' # Green (Recovery)
+            elif r20 > 50:
+                return 'color: #FFA500; font-weight: bold' # Orange (Pullback)
+            else:
+                return 'color: #FF4444; font-weight: bold' # Red (Bearish)
+        except:
+            return ''
 
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
@@ -732,26 +754,11 @@ if st.button("RUN ANALYSIS", type="primary"):
             # Determine Slope
             if r5 > r5_prev:
                 slope_arrow = "↑"
-                slope_rising = True
             else:
                 slope_arrow = "↓"
-                slope_rising = False
-                
-            # Determine Signal
-            rsi_text = "RED" # Default Bearish
             
-            if r5 >= r20:
-                if r20 > 50:
-                    # BLUE REQUIREMENT: Strong Trend + RISING Momentum
-                    if slope_rising: rsi_text = "BLUE"
-                    else: rsi_text = "WEAK" # Failed Blue because falling
-                else:
-                    rsi_text = "GREEN" # Recovery
-            elif r20 > 50:
-                rsi_text = "ORANGE" # Pullback
-            
-            # Final String: "65/55 BLUE ↑"
-            rsi_msg = f"{int(r5)}/{int(r20)} {rsi_text} {slope_arrow}"
+            # Final String: "65/55 ↑" (Just numbers and arrow)
+            rsi_msg = f"{int(r5)}/{int(r20)} {slope_arrow}"
             
             analysis_db[t] = {
                 "Decision": decision,
@@ -923,40 +930,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_pf = pd.DataFrame(pf_rows)
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
-
-    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
-    if not closed_trades.empty:
-        st.subheader("📜 Closed Performance")
-        
-        wins = closed_trades[closed_trades['Return'] > 0]
-        win_rate = (len(wins) / len(closed_trades)) * 100
-        avg_ret = closed_trades['Return'].mean()
-        total_pl_dollars = closed_trades['Realized_PL'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
-        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
-        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
-        
-        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]].copy()
-        
-        hist_view["% Delta vs SPY"] = hist_view["Return"] - hist_view["SPY_Return"]
-        
-        hist_view["% Delta vs SPY"] = hist_view["% Delta vs SPY"].apply(lambda x: f"{x:+.2f}%")
-        hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-        hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
-        
-        hist_view.rename(columns={
-            "Realized_PL": "$ P&L", 
-            "Return": "% Return",
-            "Cost_Basis": "Buy Price", 
-            "Exit_Price": "Sell Price"
-        }, inplace=True)
-        
-        hist_view = hist_view.drop(columns=["SPY_Return"])
-        
-        st.dataframe(hist_view.style.pipe(style_history))
-        st.write("---")
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
