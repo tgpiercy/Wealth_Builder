@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Strict 3-Factor Trend Scoring")
+st.title(f"🛡️ Titan Strategy v53.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Health Monitor")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -296,7 +296,7 @@ def style_daily_health(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-weight', 'bold')]}
-    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
+    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
       .hide(axis='index')
 
 def color_pl(val):
@@ -636,16 +636,16 @@ if st.button("RUN ANALYSIS", type="primary"):
             # 1. VIX Score (Max 3)
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17:
-                vix_pts = 3; vix_msg = "NORMAL (<17)"
+                vix_pts = 3; vix_msg = "NORMAL"
             elif vix_c < 20:
-                vix_pts = 2; vix_msg = "CAUTIOUS (17-20)"
+                vix_pts = 2; vix_msg = "CAUTIOUS"
             elif vix_c < 25:
-                vix_pts = 1; vix_msg = "DEFENSIVE (20-25)"
+                vix_pts = 1; vix_msg = "DEFENSIVE"
             else:
-                vix_pts = 0; vix_msg = "PANIC (>25)"
+                vix_pts = 0; vix_msg = "PANIC"
             
             mkt_score += vix_pts
-            health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": f"{vix_msg} | +{vix_pts}/3"})
+            health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": vix_msg})
 
             # 2. SPY Score (Max 1) - STRICT 3-FACTOR
             spy_c = spy.iloc[-1]['Close']
@@ -660,13 +660,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             spy_cond3 = spy_s8_c > spy_s8_p # 8 Rising
             
             if spy_cond1 and spy_cond2 and spy_cond3:
-                mkt_score += 1; spy_msg = "PASS (ALL 3)"
-                spy_pts = 1
-            else:
-                spy_msg = "FAIL"
-                spy_pts = 0
+                mkt_score += 1
             
-            health_rows.append({"Indicator": "SPY Trend (Structure+Slope)", "Status": f"{spy_msg} | +{spy_pts}/1"})
+            # Expanded SPY Rows
+            health_rows.append({"Indicator": "SPY Price > SMA18", "Status": "PASS" if spy_cond1 else "FAIL"})
+            health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "RISING" if spy_cond2 else "FALLING"})
+            health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "RISING" if spy_cond3 else "FALLING"})
 
             # 3. RSP Score (Max 1) - STRICT 3-FACTOR
             rsp_c = rsp.iloc[-1]['Close']
@@ -681,13 +680,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             rsp_cond3 = rsp_s8_c > rsp_s8_p # 8 Rising
             
             if rsp_cond1 and rsp_cond2 and rsp_cond3:
-                mkt_score += 1; rsp_msg = "PASS (ALL 3)"
-                rsp_pts = 1
-            else:
-                rsp_msg = "FAIL"
-                rsp_pts = 0
-                
-            health_rows.append({"Indicator": "RSP Breadth (Structure+Slope)", "Status": f"{rsp_msg} | +{rsp_pts}/1"})
+                mkt_score += 1
+
+            # Expanded RSP Rows
+            health_rows.append({"Indicator": "RSP Price > SMA18", "Status": "PASS" if rsp_cond1 else "FAIL"})
+            health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "RISING" if rsp_cond2 else "FALLING"})
+            health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "RISING" if rsp_cond3 else "FALLING"})
 
             # TOTAL ROW
             health_rows.append({"Indicator": "TOTAL SCORE", "Status": f"TOTAL: {mkt_score}/5"})
@@ -733,7 +731,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         cache_d = {}
         cache_d.update(market_data)
         
-        # --- PASS 1: Analysis ---
+        # --- PASS 1: Calculate Analysis for ALL Tickers ---
         analysis_db = {}
         
         for t in all_tickers:
