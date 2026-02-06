@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.16.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Scope & Stability Fix")
+st.title(f"🛡️ Titan Strategy v54.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Shadow SPY Benchmark")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -350,7 +350,8 @@ def style_history(styler):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type"]
+    # ADDED Shadow_SPY to schema
+    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
     
     if not os.path.exists(PORTFOLIO_FILE):
         df = pd.DataFrame(columns=cols)
@@ -366,14 +367,11 @@ def load_portfolio():
     df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
+    df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce')
 
     # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
     if df['Type'].isnull().any() and not df.empty:
-        
-        # 1. Identify Stock Trades
         df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
-        
-        # 2. Identify Cash Rows
         cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
         if cash_mask.any():
             for idx, row in df[cash_mask].iterrows():
@@ -385,7 +383,6 @@ def load_portfolio():
                      df.at[idx, 'Type'] = "TRADE_CASH"
                 else:
                      df.at[idx, 'Type'] = "TRANSFER"
-        
         df.to_csv(PORTFOLIO_FILE, index=False)
                     
     for idx, row in df.iterrows():
@@ -446,17 +443,18 @@ with tab1:
                 "ID": new_id, "Ticker": b_tick, "Date": b_date, "Shares": b_shares, 
                 "Cost_Basis": b_price, "Status": "OPEN", "Exit_Date": None, 
                 "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                "Type": "STOCK"
+                "Type": "STOCK", "Shadow_SPY": 0.0
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
             
+            # TRADE_CASH row logic
             if current_cash >= (b_shares * b_price):
                  cash_id = pf_df["ID"].max() + 1
                  cash_row = pd.DataFrame([{
                     "ID": cash_id, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), 
                     "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
                     "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                    "Type": "TRADE_CASH"
+                    "Type": "TRADE_CASH", "Shadow_SPY": 0.0
                 }])
                  pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
@@ -495,18 +493,17 @@ with tab2:
                     ret_pct = ((s_price - buy_price) / buy_price) * 100
                     pl_dollars = (s_price - buy_price) * s_shares
                     
-                    spy_ret_val = 0.0
-                    try:
-                        spy_tk = yf.Ticker("SPY")
-                        b_dt = pd.to_datetime(buy_date_str)
-                        s_dt = pd.to_datetime(s_date)
-                        hist = spy_tk.history(start=b_dt, end=s_dt + timedelta(days=5))
-                        spy_buy = hist.asof(b_dt)['Close']
-                        spy_sell = hist.asof(s_dt)['Close']
-                        if not pd.isna(spy_buy) and not pd.isna(spy_sell):
-                            spy_ret_val = ((spy_sell - spy_buy) / spy_buy) * 100
-                    except: pass
-
+                    # TRADE_CASH row (Proceeds)
+                    cash_id = pf_df["ID"].max() + 1
+                    cash_row = pd.DataFrame([{
+                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
+                        "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
+                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
+                        "Type": "TRADE_CASH", "Shadow_SPY": 0.0
+                    }])
+                    pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
+                    
+                    # Update stock row
                     if s_shares < max_qty:
                         pf_df.at[row_idx, 'Shares'] -= s_shares
                         new_id = pf_df["ID"].max() + 1
@@ -521,8 +518,8 @@ with tab2:
                             "Exit_Price": s_price, 
                             "Return": ret_pct, 
                             "Realized_PL": pl_dollars, 
-                            "SPY_Return": spy_ret_val,
-                            "Type": "STOCK"
+                            "SPY_Return": 0.0,
+                            "Type": "STOCK", "Shadow_SPY": 0.0
                         }])
                         pf_df = pd.concat([pf_df, new_closed_row], ignore_index=True)
                     else:
@@ -531,16 +528,6 @@ with tab2:
                         pf_df.at[row_idx, 'Exit_Price'] = s_price
                         pf_df.at[row_idx, 'Return'] = ret_pct
                         pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
-                        pf_df.at[row_idx, 'SPY_Return'] = spy_ret_val
-                    
-                    cash_id = pf_df["ID"].max() + 1
-                    cash_row = pd.DataFrame([{
-                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
-                        "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                        "Type": "TRADE_CASH"
-                    }])
-                    pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
 
                     save_portfolio(pf_df)
                     st.success(f"Sold {s_shares} shares. P&L: ${pl_dollars:+.2f}")
@@ -556,30 +543,78 @@ with tab3:
         c_date = st.date_input("Date")
         
         if st.form_submit_button("Execute"):
+            # FETCH SPY PRICE FOR SHADOW BENCHMARK
+            shadow_shares = 0.0
+            try:
+                # If date is today/recent, get live price
+                # If old, get history
+                spy_obj = yf.Ticker("SPY")
+                
+                # Check if market is open/close or date is past
+                # Simple logic: Fetch history 5 days around date
+                start_d = pd.to_datetime(c_date)
+                end_d = start_d + timedelta(days=5)
+                hist = spy_obj.history(start=start_d, end=end_d)
+                
+                if not hist.empty:
+                    # Get the price on the exact day or next available
+                    ref_price = hist['Close'].iloc[0]
+                    shadow_shares = amount / ref_price
+                else:
+                    # Fallback to current price if future/today
+                    curr = spy_obj.history(period="1d")
+                    if not curr.empty:
+                        ref_price = curr['Close'].iloc[-1]
+                        shadow_shares = amount / ref_price
+            except:
+                st.warning("Could not fetch SPY price for Benchmark calculation. Using 0.")
+
             final_amt = amount if op_type == "Deposit" else -amount
+            final_shadow = shadow_shares if op_type == "Deposit" else -shadow_shares
+            
             new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
             new_row = pd.DataFrame([{
                 "ID": new_id, "Ticker": "CASH", "Date": c_date, "Shares": final_amt, 
                 "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
                 "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                "Type": "TRANSFER"
+                "Type": "TRANSFER", "Shadow_SPY": final_shadow
             }])
             pf_df = pd.concat([pf_df, new_row], ignore_index=True)
             save_portfolio(pf_df)
-            st.success(f"{op_type} ${amount}")
+            st.success(f"{op_type} ${amount} (Shadow: {final_shadow:.2f} SPY shares)")
             st.rerun()
 
 with tab4:
-    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "Force Re-Classify History"])
+    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "Rebuild Benchmark History"])
     
-    if action_type == "Force Re-Classify History":
-        st.info("This will scan all transactions and re-label Cash entries as either 'TRANSFER' (Deposit/Withdraw) or 'TRADE_CASH' (Proceeds from Stock Sales) based on dates.")
-        if st.button("RUN CLASSIFICATION FIX"):
-             pf_df['Type'] = None
-             pf_df.to_csv(PORTFOLIO_FILE, index=False)
-             st.cache_data.clear()
-             st.success("History Reset. Reloading...")
-             st.rerun()
+    if action_type == "Rebuild Benchmark History":
+        st.info("This will recalculate Shadow SPY shares for ALL past deposits/withdrawals based on historical prices.")
+        if st.button("RUN BENCHMARK REBUILD"):
+             with st.spinner("Fetching historical SPY data..."):
+                 try:
+                     spy_hist = yf.Ticker("SPY").history(period="10y")
+                     spy_hist.index = pd.to_datetime(spy_hist.index).tz_localize(None)
+                     
+                     for idx, row in pf_df.iterrows():
+                         if row['Type'] == 'TRANSFER' and row['Ticker'] == 'CASH':
+                             t_date = pd.to_datetime(row['Date'])
+                             amt = float(row['Shares'])
+                             
+                             # Find price
+                             idx_loc = spy_hist.index.searchsorted(t_date)
+                             if idx_loc < len(spy_hist):
+                                 price = spy_hist.iloc[idx_loc]['Close']
+                                 pf_df.at[idx, 'Shadow_SPY'] = amt / price
+                             else:
+                                 # Fallback to last known
+                                 price = spy_hist.iloc[-1]['Close']
+                                 pf_df.at[idx, 'Shadow_SPY'] = amt / price
+                                 
+                     save_portfolio(pf_df)
+                     st.success("Benchmark Rebuilt Successfully!")
+                     st.rerun()
+                 except Exception as e:
+                     st.error(f"Error rebuilding: {e}")
 
     elif not pf_df.empty:
         opts = pf_df.apply(lambda x: f"ID:{x['ID']} | {x['Ticker']} ({x['Status']})", axis=1).tolist()
@@ -658,7 +693,7 @@ with tab5:
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
     
-    # Initialize variables for global scope access
+    # Init vars to prevent scope error
     results = []
     mkt_score = 0
     health_rows = []
@@ -766,7 +801,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             st.subheader(f"🏥 Daily Market Health")
             df_health = pd.DataFrame(health_rows)
-            # RENDER AS RAW HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
             
@@ -947,8 +981,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
-            
-            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -959,7 +991,6 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
-            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
@@ -1020,161 +1051,35 @@ if st.button("RUN ANALYSIS", type="primary"):
                 row_sec["Rank"] = 0
                 results.append(row_sec)
 
-    if not pf_df.empty:
-        open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
-        
-        agg_trades = {}
-        for index, row in open_trades.iterrows():
-            t = row['Ticker']
-            s = row['Shares']
-            c = row['Cost_Basis']
-            
-            if t not in agg_trades: agg_trades[t] = {'Shares': 0, 'TotalCost': 0.0}
-            agg_trades[t]['Shares'] += s
-            agg_trades[t]['TotalCost'] += (s * c)
-            
-        equity_val = 0.0
-        total_active_cost = 0.0
-        pf_rows = []
-        
-        for t, data in agg_trades.items():
-            if t not in analysis_db: continue
-            
-            total_shares = data['Shares']
-            avg_cost = data['TotalCost'] / total_shares if total_shares > 0 else 0
-            curr_price = analysis_db[t]['Price']
-            
-            pos_val = total_shares * curr_price
-            equity_val += pos_val
-            total_active_cost += data['TotalCost']
-            
-            pl_pct = ((curr_price - avg_cost) / avg_cost) * 100
-            gl_val = pos_val - data['TotalCost']
-            
-            decision = analysis_db[t]['Decision']
-            cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
-            if cat_name in SECTOR_PARENTS:
-                parent = SECTOR_PARENTS[cat_name]
-                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
-                    if t != parent: decision = "AVOID"
-
-            stop_price = analysis_db[t]['Stop']
-            
-            action = "HOLD"
-            if "AVOID" in decision: action = "EXIT (Signal Break)"
-            elif curr_price < stop_price: action = "EXIT (Stop Hit)"
-            elif "WATCH" in decision: action = "CAUTION / HOLD"
-            elif "CAUTION" in decision: action = "CAUTION / HOLD"
-            
-            pf_rows.append({
-                "Ticker": t, "Shares": int(total_shares), 
-                "Avg Cost": f"${avg_cost:.2f}", "Current": f"${curr_price:.2f}",
-                "Gain/Loss ($)": f"${gl_val:+,.2f}",
-                "% Return": f"{pl_pct:+.2f}%", 
-                "Titan Status": decision, "Audit Action": action
-            })
-
-        total_acct = current_cash + equity_val
-        cash_pct = (current_cash / total_acct * 100) if total_acct > 0 else 0
-        invested_pct = 100 - cash_pct
-        total_acct_cad = total_acct * cad_rate
-        
-        open_pl_val = equity_val - total_active_cost
-        open_pl_cad = open_pl_val * cad_rate
-
-        def fmt_delta(val):
-            return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
-
-        st.subheader("💼 Active Holdings")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (CAD)", f"${total_acct_cad:,.2f}", fmt_delta(open_pl_cad))
-        c2.metric("Net Worth (USD)", f"${total_acct:,.2f}", fmt_delta(open_pl_val))
-        c3.metric("Cash Balance", f"${current_cash:,.2f}", f"{cash_pct:.1f}%")
-        c4.metric("Invested Equity", f"${equity_val:,.2f}", f"{invested_pct:.1f}%")
-
-        if pf_rows:
-            df_pf = pd.DataFrame(pf_rows)
-            st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
-            st.write("---")
-
-    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
-    if not closed_trades.empty:
-        st.subheader("📜 Closed Performance")
-        
-        wins = closed_trades[closed_trades['Return'] > 0]
-        win_rate = (len(wins) / len(closed_trades)) * 100
-        avg_ret = closed_trades['Return'].mean()
-        total_pl_dollars = closed_trades['Realized_PL'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
-        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
-        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
-        
-        # --- NEW SUCCESS TRACKER FORMAT ---
-        hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
-        
-        hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
-        hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
-        hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
-        hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-        
-        hist_view = hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]]
-        
-        st.dataframe(hist_view.style.pipe(style_history))
-        st.write("---")
-
     # --- BENCHMARK SECTION (Performance vs SPY) ---
     st.subheader("📈 Performance vs SPY Benchmark")
     
     # 1. Reconstruct Deposits History from "TRANSFER" type rows
     transfer_history = pf_df[pf_df['Type'] == 'TRANSFER'].copy()
     if not transfer_history.empty:
-        transfer_history['Date'] = pd.to_datetime(transfer_history['Date'])
-        transfer_history = transfer_history.sort_values('Date')
+        # Calculate Benchmark from "Shadow_SPY" column
+        total_shadow_shares = transfer_history['Shadow_SPY'].sum()
         
-        benchmark_shares = 0.0
-        # Access the cached SPY history from above (10y)
-        if "SPY" in market_data:
-            spy_hist = market_data["SPY"]
-            
-            for idx, row in transfer_history.iterrows():
-                t_date = row['Date']
-                t_amt = row['Shares'] # Positive = Deposit, Negative = Withdraw
-                
-                try:
-                    idx_loc = spy_hist.index.searchsorted(t_date)
-                    if idx_loc < len(spy_hist):
-                        spy_price = spy_hist.iloc[idx_loc]['Close']
-                        shares_bought = t_amt / spy_price
-                        benchmark_shares += shares_bought
-                except: pass
-                
-            curr_spy_price = spy.iloc[-1]['Close']
-            benchmark_val = benchmark_shares * curr_spy_price
-            
-            # Re-Calculate Total Equity for comparison
-            # (Need to sum cash + active holdings)
-            # Re-using logic from above briefly
-            eq_val = 0.0
-            open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
-            for _, r in open_pos.iterrows():
-                 if r['Ticker'] in analysis_db:
-                     eq_val += (r['Shares'] * analysis_db[r['Ticker']]['Price'])
-            
-            total_net_worth = current_cash + eq_val
-            
-            alpha_dollars = total_net_worth - benchmark_val
-            alpha_pct = ((total_net_worth - benchmark_val) / benchmark_val) * 100 if benchmark_val > 0 else 0
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
-            c2.metric("SPY Benchmark", f"${benchmark_val:,.2f}")
-            c3.metric("Alpha (Edge)", f"${alpha_dollars:,.2f}", f"{alpha_pct:+.2f}%")
-            
-        else:
-            st.warning("SPY Data needed for benchmark")
+        # Current Value
+        curr_spy_price = spy.iloc[-1]['Close']
+        benchmark_val = total_shadow_shares * curr_spy_price
+        
+        # Re-Calculate Total Equity
+        eq_val = 0.0
+        open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
+        for _, r in open_pos.iterrows():
+             if r['Ticker'] in analysis_db:
+                 eq_val += (r['Shares'] * analysis_db[r['Ticker']]['Price'])
+        
+        total_net_worth = current_cash + eq_val
+        
+        alpha_dollars = total_net_worth - benchmark_val
+        alpha_pct = ((total_net_worth - benchmark_val) / benchmark_val) * 100 if benchmark_val > 0 else 0
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
+        c2.metric("SPY Benchmark", f"${benchmark_val:,.2f}")
+        c3.metric("Alpha (Edge)", f"${alpha_dollars:,.2f}", f"{alpha_pct:+.2f}%")
     else:
         st.info("No Deposits found to build benchmark.")
 
