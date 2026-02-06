@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Shadow Benchmark Edition")
+st.title(f"🛡️ Titan Strategy v54.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Shadow Benchmark & Scope Fix")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -360,29 +360,22 @@ def load_portfolio():
     
     df = pd.read_csv(PORTFOLIO_FILE)
     
-    # Ensure all columns exist
     for c in cols:
         if c not in df.columns: df[c] = None
     
-    # Enforce Types
     df['Shares'] = pd.to_numeric(df['Shares'], errors='coerce')
     df['Cost_Basis'] = pd.to_numeric(df['Cost_Basis'], errors='coerce')
     df['Exit_Price'] = pd.to_numeric(df['Exit_Price'], errors='coerce')
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
 
-    # --- AUTO-REPAIR MISSING TYPES ---
-    # If Type is missing (from old data), we must guess it once.
+    # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
     if df['Type'].isnull().any() and not df.empty:
-        # Stock rows are easy
         df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
-        
-        # Cash rows: Infer if it was a Deposit or Trade Proceeds
         cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
         if cash_mask.any():
             for idx, row in df[cash_mask].iterrows():
                 c_date = row['Date']
-                # Did we buy/sell stock on this date?
                 buys = df[(df['Ticker']!='CASH') & (df['Date']==c_date)]
                 sells = df[(df['Ticker']!='CASH') & (df['Exit_Date']==c_date)]
                 
@@ -390,16 +383,15 @@ def load_portfolio():
                      df.at[idx, 'Type'] = "TRADE_CASH"
                 else:
                      df.at[idx, 'Type'] = "TRANSFER"
-        
         df.to_csv(PORTFOLIO_FILE, index=False)
                     
-    # Auto-Calc PL for closed
     for idx, row in df.iterrows():
         if row['Status'] == 'CLOSED' and pd.isna(row['Realized_PL']):
              try:
                  pl = (float(row['Exit_Price']) - float(row['Cost_Basis'])) * float(row['Shares'])
                  df.at[idx, 'Realized_PL'] = pl
              except: df.at[idx, 'Realized_PL'] = 0.0
+        if pd.isna(row['SPY_Return']): df.at[idx, 'SPY_Return'] = 0.0
 
     if "ID" not in df.columns or df["ID"].isnull().all():
         df["ID"] = range(1, len(df) + 1)
@@ -666,6 +658,10 @@ if st.button("RUN ANALYSIS", type="primary"):
     mkt_score = 0
     health_rows = []
     
+    # Define pf_tickers HERE to ensure availability for Scanner
+    pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
+    pf_tickers = [x for x in pf_tickers if x != "CASH"]
+
     # Pre-fetch Market Data
     with st.spinner('Checking Vitals...'):
         market_tickers = ["SPY", "IEF", "^VIX", "CAD=X", "HXT.TO", "RSP"] 
@@ -730,8 +726,8 @@ if st.button("RUN ANALYSIS", type="primary"):
         # Display Active Holdings
         st.subheader("💼 Active Holdings")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Net Worth (CAD)", f"${total_nw_cad:,.2f}")
-        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}")
+        c1.metric("Net Worth (CAD)", f"${total_nw_cad:,.2f}", fmt_delta(open_pl_cad))
+        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", fmt_delta(open_pl_val))
         c3.metric("Cash", f"${current_cash:,.2f}")
         c4.metric("Equity", f"${eq_val:,.2f}")
         
