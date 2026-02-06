@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.9.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sector Lock & Syntax Fix")
+st.title(f"🛡️ Titan Strategy v51.9.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Scanner Output")
 
 RISK_UNIT = 2300  
 
@@ -79,8 +79,6 @@ SECTOR_PARENTS = {
 }
 
 # --- DATA MAP ---
-# Format: Ticker: [Category, Benchmark, Description]
-
 DATA_MAP = {
     # --- 00. INDICES ---
     "DIA": ["00. INDICES", "SPY", "Dow Jones"],
@@ -754,7 +752,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             # SHARES CALC
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             stop_dist_value = db['Price'] - db['Stop']
-            shares = int(final_risk / stop_dist_value) if stop_dist_value > 0 and ("BUY" in final_decision or "SCOUT" in final_decision) else 0
+            
+            if "AVOID" in final_decision:
+                disp_stop = ""
+                disp_shares = ""
+            else:
+                shares = int(final_risk / stop_dist_value) if stop_dist_value > 0 else 0
+                disp_stop = f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)"
+                disp_shares = f"{shares} shares"
 
             row = {
                 "Sector": cat_name, 
@@ -770,8 +775,8 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Volume": db['Vol_Msg'], 
                 "Action": final_decision, 
                 "Reasoning": final_reason,
-                "Stop Price": f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)", 
-                "Position Size": f"{shares} shares"
+                "Stop Price": disp_stop, 
+                "Position Size": disp_shares
             }
             results.append(row)
             
