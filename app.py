@@ -58,7 +58,7 @@ if st.sidebar.button("Log Out"):
     logout()
 
 st.title(f"🛡️ Titan Strategy v54.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: Smart Stops (.03/.07)")
+st.caption("Institutional Protocol: UI Polish & Compact Calculator")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -234,12 +234,10 @@ def round_to_03_07(price):
     
     # Find closest
     candidates = [c1, c2, c3, c4]
-    # Filter out 0 or negative if not appropriate (though stops can be low)
     candidates = [c for c in candidates if c > 0]
     
-    if not candidates: return price # Fallback
+    if not candidates: return price 
     
-    # Return the candidate that minimizes distance to the raw calculated price
     best_c = min(candidates, key=lambda x: abs(x - price))
     return best_c
 
@@ -377,7 +375,6 @@ def fmt_delta(val):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    # Defined Schema with Shadow Tracking
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
     
     if not os.path.exists(PORTFOLIO_FILE):
@@ -396,7 +393,7 @@ def load_portfolio():
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
 
-    # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
+    # Auto-Correction
     if df['Type'].isnull().any() and not df.empty:
         df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
         cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
@@ -713,36 +710,29 @@ with tab5:
     current_risk_setting = RISK_UNIT_BASE 
     st.info(f"Using Global Risk Setting: ${current_risk_setting:,.0f} per trade")
     
-    # NEW LOOKUP FUNCTIONALITY
     col_t, col_p, col_s = st.columns(3)
     calc_ticker = col_t.text_input("Ticker Symbol (e.g. NVDA)", "").upper()
-    
     manual_entry = col_p.number_input("Manual Entry ($)", value=0.0)
     manual_stop = col_s.number_input("Manual Stop ($)", value=0.0)
     
     if calc_ticker:
-        # Auto-fetch logic
         try:
             tk = yf.Ticker(calc_ticker)
             df = tk.history(period="1mo")
             if not df.empty:
                 curr_p = df['Close'].iloc[-1]
-                # Calc ATR
                 tr1 = df['High'] - df['Low']
                 tr2 = abs(df['High'] - df['Close'].shift(1))
                 tr3 = abs(df['Low'] - df['Close'].shift(1))
                 tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
                 atr_val = tr.rolling(14).mean().iloc[-1]
                 
-                # Auto-Calc Stop (Standard 2.618)
                 raw_stop = curr_p - (2.618 * atr_val)
-                # Smart Rounding
                 smart_stop = round_to_03_07(raw_stop)
                 
                 st.write("---")
                 st.metric(f"{calc_ticker} Price", f"${curr_p:.2f}")
                 
-                # Input override logic
                 final_entry = manual_entry if manual_entry > 0 else curr_p
                 final_stop = manual_stop if manual_stop > 0 else smart_stop
                 
@@ -751,16 +741,18 @@ with tab5:
                     shares = int(current_risk_setting / risk_per_share)
                     capital = shares * final_entry
                     
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Recommended Shares", shares)
-                    c2.metric("Capital Required", f"${capital:,.2f}")
-                    c3.metric("Smart Stop", f"${final_stop:.2f}")
-                    
+                    st.markdown(f"""
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <div><div style="font-size: 12px; color: #888;">Shares</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares}</div></div>
+                        <div><div style="font-size: 12px; color: #888;">Capital</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${capital:,.2f}</div></div>
+                        <div><div style="font-size: 12px; color: #888;">Stop</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${final_stop:.2f}</div></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
                     if capital > current_cash:
-                        st.error(f"⚠️ Over Budget by ${capital - current_cash:,.2f}")
+                         st.markdown(f"<div style='color: #FF4444; font-weight: bold; font-size: 14px;'>⚠️ Over Budget by ${capital - current_cash:,.2f}</div>", unsafe_allow_html=True)
                     else:
-                        st.success("✅ Trade Approved")
-                        
+                         st.markdown(f"<div style='color: #00FF00; font-weight: bold; font-size: 14px;'>✅ Trade Approved</div>", unsafe_allow_html=True)
                 else:
                     st.error("Stop Price must be below Entry Price for Longs")
         except:
@@ -804,9 +796,7 @@ if st.button("RUN ANALYSIS", type="primary"):
         pf_rows = []
         
         if not open_pos.empty:
-            # Need live prices for holdings
             holding_tickers = open_pos['Ticker'].unique().tolist()
-            # Add to cache if missing
             for t in holding_tickers:
                 if t not in market_data:
                     try:
