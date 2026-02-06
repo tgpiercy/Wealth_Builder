@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.13 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Table Styling")
+st.title(f"🛡️ Titan Strategy v53.14 ({current_user.upper()})")
+st.caption("Institutional Protocol: Closed Trades Success Tracker")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -264,7 +264,7 @@ def style_final(styler):
         rsi_html = str(row.get('Dual RSI', ''))
         
         if "AVOID" in action:
-             pass # Never highlight blue if avoided
+             pass 
         elif "00BFFF" in rsi_html and "SPIKE" in vol:
              styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' 
              return styles
@@ -344,8 +344,8 @@ def style_history(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
          {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return", "% Delta vs SPY"])\
-      .map(color_pl_dol, subset=["$ P&L"])\
+    ]).map(color_pl, subset=["% Return"])\
+      .map(color_pl_dol, subset=["P/L"])\
       .hide(axis='index')
 
 # --- PORTFOLIO ENGINE ---
@@ -728,6 +728,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             st.subheader(f"🏥 Daily Market Health")
             df_health = pd.DataFrame(health_rows)
+            
             # RENDER AS RAW HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
@@ -1059,6 +1060,40 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_pf = pd.DataFrame(pf_rows)
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
+
+    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
+    if not closed_trades.empty:
+        st.subheader("📜 Closed Performance")
+        
+        wins = closed_trades[closed_trades['Return'] > 0]
+        win_rate = (len(wins) / len(closed_trades)) * 100
+        avg_ret = closed_trades['Return'].mean()
+        total_pl_dollars = closed_trades['Realized_PL'].sum()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
+        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
+        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
+        
+        # --- NEW SUCCESS TRACKER FORMAT ---
+        hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
+        
+        # Format the columns for display
+        hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
+        hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
+        
+        # The formatting function color_pl_dol expects '$' to find and parse, but our logic in map uses subset.
+        # We need raw numbers for coloring? No, the styler parses strings.
+        # So we format them as strings here.
+        
+        hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
+        hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+        
+        # Final Selection
+        hist_view = hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]]
+        
+        st.dataframe(hist_view.style.pipe(style_history))
+        st.write("---")
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
