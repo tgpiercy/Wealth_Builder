@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Safety Checks for New Data")
+st.title(f"🛡️ Titan Strategy v54.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: VOO Support & Data Optimization")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -93,9 +93,10 @@ DATA_MAP = {
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
     
-    # Hidden VIX & RSP
+    # Hidden VIX & RSP & VOO (Excluded from Scanner by "99. DATA" tag)
     "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
     "RSP": ["99. DATA", "SPY", "S&P 500 Equal Weight"],
+    "VOO": ["99. DATA", "SPY", "Vanguard S&P 500"],
 
     # --- 01. BONDS/FX ---
     "IEF": ["01. BONDS/FX", "SPY", "7-10 Year Treasuries"],
@@ -689,26 +690,17 @@ with tab5:
     st.subheader("🧮 Position Size Calculator")
     current_risk_setting = RISK_UNIT_BASE 
     st.info(f"Using Global Risk Setting: ${current_risk_setting:,.0f} per trade")
-    
-    col_a, col_b = st.columns(2)
-    entry_p = col_a.number_input("Entry Price ($)", value=100.0, step=0.1)
-    stop_p = col_b.number_input("Stop Price ($)", value=90.0, step=0.1)
-    
+    c1, c2 = st.columns(2)
+    entry_p = c1.number_input("Entry Price", 100.0)
+    stop_p = c2.number_input("Stop Price", 90.0)
     if entry_p > stop_p:
-        risk_per_share = entry_p - stop_p
-        shares_calc = int(current_risk_setting / risk_per_share)
-        total_cost = shares_calc * entry_p
-        
-        st.write("---")
-        st.metric("Shares to Buy", f"{shares_calc}")
-        st.metric("Total Capital Required", f"${total_cost:,.2f}")
-        
-        if total_cost > current_cash:
-            st.error(f"❌ Insufficient Cash (Short by ${total_cost - current_cash:,.2f})")
-        else:
-            st.success("✅ Trade is Within Budget")
-    else:
-        st.warning("Entry must be higher than Stop for a Long position.")
+        risk = entry_p - stop_p
+        shares = int(current_risk_setting / risk)
+        cost = shares * entry_p
+        st.metric("Shares", shares)
+        st.metric("Capital", f"${cost:,.2f}")
+        if cost > current_cash: st.error("Insufficient Cash")
+        else: st.success("Approved")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -717,6 +709,8 @@ if st.button("RUN ANALYSIS", type="primary"):
     results = []
     mkt_score = 0
     health_rows = []
+    
+    # Define pf_tickers HERE to ensure availability for Scanner
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     
@@ -779,7 +773,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                     "Ticker": t, "Shares": int(shares), 
                     "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
                     "Gain/Loss ($)": f"${pl:+.2f}", "% Return": f"{pl_pct:+.2f}%",
-                    "Audit Action": "HOLD"
+                    "Audit Action": "HOLD" # Placeholder
                 })
         
         total_net_worth = current_cash + eq_val
@@ -806,18 +800,23 @@ if st.button("RUN ANALYSIS", type="primary"):
         closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
         if not closed_trades.empty:
             st.subheader("📜 Closed Performance")
+            
+            # KPI
             wins = closed_trades[closed_trades['Return'] > 0]
             win_rate = (len(wins) / len(closed_trades)) * 100
             total_pl = closed_trades['Realized_PL'].sum()
+            
             c1, c2 = st.columns(2)
             c1.metric("Win Rate", f"{win_rate:.0f}%")
             c2.metric("Total P&L", f"${total_pl:,.2f}")
             
+            # Table
             hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
             hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
             hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
             hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
             hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+            
             st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
             st.write("---")
 
@@ -843,7 +842,6 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 4. MARKET HEALTH
         # ----------------------------------------
         if spy is not None and ief is not None and vix is not None and rsp is not None:
-            # 1. VIX Score
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
             elif vix_c < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
@@ -852,7 +850,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             mkt_score += v_pts
             health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
             
-            # 2. SPY
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
@@ -867,7 +864,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
             
-            # 3. RSP
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
@@ -879,7 +875,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
             
-            # TOTAL
             if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
@@ -1063,6 +1058,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
+        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
@@ -1086,12 +1082,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC & BLUE SPIKE LOGIC
+            # SHARES CALC & BLUE SPIKE OVERRIDE
             rsi_html = db['RSI_Msg']
             vol_str = db['Vol_Msg']
             is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
             
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
+            
+            # Override Risk if Blue Spike
             if is_blue_spike: final_risk = risk_per_trade
 
             stop_dist_value = db['Price'] - db['Stop']
