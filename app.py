@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.12 ({current_user.upper()})")
-st.caption("Institutional Protocol: Calculator UI Polish")
+st.title(f"🛡️ Titan Strategy v54.13 ({current_user.upper()})")
+st.caption("Institutional Protocol: Calc Tab Reorder & White UI")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -440,7 +440,8 @@ current_cash = cash_rows['Shares'].sum() if not cash_rows.empty else 0.0
 
 st.sidebar.metric("Cash Available", f"${current_cash:,.2f}")
 
-tab1, tab2, tab3, tab4, tab5 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🛠️ Fix", "🧮 Calc"])
+# SWAPPED TABS: Calc is now 4, Fix is now 5
+tab1, tab2, tab3, tab4, tab5 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 Cash", "🧮 Calc", "🛠️ Fix"])
 
 with tab1:
     with st.form("buy_trade"):
@@ -613,6 +614,75 @@ with tab3:
             st.rerun()
 
 with tab4:
+    st.subheader("🧮 Smart Risk Calculator")
+    
+    # Global setting inside Tab 4 (Calc)
+    RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
+    
+    calc_ticker = st.text_input("Ticker", "").upper()
+    
+    if calc_ticker:
+        try:
+            tk = yf.Ticker(calc_ticker)
+            df = tk.history(period="1mo")
+            if not df.empty:
+                curr_p = df['Close'].iloc[-1]
+                tr1 = df['High'] - df['Low']
+                tr2 = abs(df['High'] - df['Close'].shift(1))
+                tr3 = abs(df['Low'] - df['Close'].shift(1))
+                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                atr_val = tr.rolling(14).mean().iloc[-1]
+                
+                raw_stop = curr_p - (2.618 * atr_val)
+                smart_stop = round_to_03_07(raw_stop)
+                
+                if curr_p > smart_stop:
+                    risk_per_share = curr_p - smart_stop
+                    
+                    # 100% Risk Calculation
+                    shares_100 = int(RISK_UNIT_BASE / risk_per_share)
+                    cap_100 = shares_100 * curr_p
+                    
+                    # 50% Risk Calculation
+                    shares_50 = int((RISK_UNIT_BASE * 0.5) / risk_per_share)
+                    cap_50 = shares_50 * curr_p
+                    
+                    # HTML CARD
+                    st.markdown(f"""
+                    <div style="background-color: #1E1E1E; border-radius: 10px; padding: 15px; border: 1px solid #333;">
+                        <h3 style="margin: 0; color: #FFFFFF;">{calc_ticker}</h3>
+                        <div style="display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px; font-size: 14px;">
+                            <span style="color: #FFFFFF;">Entry: <b>${curr_p:.2f}</b></span>
+                            <span style="color: #FFFFFF;">Stop: <b>${smart_stop:.2f}</b></span>
+                        </div>
+                        <hr style="margin: 5px 0; border-color: #444;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <span style="color: #00FF00; font-weight: bold; font-size: 14px;">STANDARD (100%)</span>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_100}</div>
+                                <div style="font-size: 12px; color: #AAA;">${cap_100:,.0f}</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                            <span style="color: #FFA500; font-weight: bold; font-size: 14px;">DEFENSIVE (50%)</span>
+                            <div style="text-align: right;">
+                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_50}</div>
+                                <div style="font-size: 12px; color: #AAA;">${cap_50:,.0f}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if cap_100 > current_cash:
+                         st.markdown(f"<div style='color: #FF4444; font-weight: bold; font-size: 14px; margin-top: 10px;'>⚠️ Cash Short (100%): -${cap_100 - current_cash:,.0f}</div>", unsafe_allow_html=True)
+                else:
+                    st.error("Stop Price calculated above Entry.")
+            else:
+                st.error("Ticker not found.")
+        except:
+            st.error("Could not fetch ticker data.")
+
+with tab5:
     action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
     
     if action_type == "⚠️ FACTORY RESET":
@@ -695,75 +765,6 @@ with tab4:
                         save_portfolio(pf_df)
                         st.success("Record Updated")
                         st.rerun()
-
-with tab5:
-    st.subheader("🧮 Smart Risk Calculator")
-    
-    # Global setting inside Tab 5
-    RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
-    
-    calc_ticker = st.text_input("Ticker", "").upper()
-    
-    if calc_ticker:
-        try:
-            tk = yf.Ticker(calc_ticker)
-            df = tk.history(period="1mo")
-            if not df.empty:
-                curr_p = df['Close'].iloc[-1]
-                tr1 = df['High'] - df['Low']
-                tr2 = abs(df['High'] - df['Close'].shift(1))
-                tr3 = abs(df['Low'] - df['Close'].shift(1))
-                tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                atr_val = tr.rolling(14).mean().iloc[-1]
-                
-                raw_stop = curr_p - (2.618 * atr_val)
-                smart_stop = round_to_03_07(raw_stop)
-                
-                if curr_p > smart_stop:
-                    risk_per_share = curr_p - smart_stop
-                    
-                    # 100% Risk Calculation
-                    shares_100 = int(RISK_UNIT_BASE / risk_per_share)
-                    cap_100 = shares_100 * curr_p
-                    
-                    # 50% Risk Calculation
-                    shares_50 = int((RISK_UNIT_BASE * 0.5) / risk_per_share)
-                    cap_50 = shares_50 * curr_p
-                    
-                    # HTML CARD
-                    st.markdown(f"""
-                    <div style="background-color: #1E1E1E; border-radius: 10px; padding: 15px; border: 1px solid #333;">
-                        <h3 style="margin: 0; color: #4F8BF9;">{calc_ticker}</h3>
-                        <div style="display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px; font-size: 14px;">
-                            <span>Entry: <b style="color: #FFF;">${curr_p:.2f}</b></span>
-                            <span>Stop: <b style="color: #FF4B4B;">${smart_stop:.2f}</b></span>
-                        </div>
-                        <hr style="margin: 5px 0; border-color: #444;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <span style="color: #00FF00; font-weight: bold; font-size: 14px;">STANDARD (100%)</span>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_100}</div>
-                                <div style="font-size: 12px; color: #AAA;">${cap_100:,.0f}</div>
-                            </div>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <span style="color: #FFA500; font-weight: bold; font-size: 14px;">DEFENSIVE (50%)</span>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_50}</div>
-                                <div style="font-size: 12px; color: #AAA;">${cap_50:,.0f}</div>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if cap_100 > current_cash:
-                         st.markdown(f"<div style='color: #FF4444; font-weight: bold; font-size: 14px; margin-top: 10px;'>⚠️ Cash Short (100%): -${cap_100 - current_cash:,.0f}</div>", unsafe_allow_html=True)
-                else:
-                    st.error("Stop Price calculated above Entry.")
-            else:
-                st.error("Ticker not found.")
-        except:
-            st.error("Could not fetch ticker data.")
 
 # --- MAIN EXECUTION ---
 if st.button("RUN ANALYSIS", type="primary"):
@@ -1112,6 +1113,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
+        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
