@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: HTML-Injected Dual RSI")
+st.title(f"🛡️ Titan Strategy v52.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Ticker Highlighting Enabled")
 
 RISK_UNIT = 2300  
 
@@ -226,12 +226,52 @@ def style_final(styler):
             except: return ''
         return ''
 
-    # Note: RSI Coloring is now handled via HTML Injection in the Data Construction Phase
-    
+    def color_rsi(val):
+        try:
+            parts = val.split()
+            if len(parts) < 2: return ''
+            nums = parts[0].split('/')
+            r5 = float(nums[0])
+            r20 = float(nums[1])
+            arrow = parts[1]
+            is_rising = (arrow == "↑")
+            
+            if r5 >= r20:
+                if r20 > 50:
+                    if is_rising: return 'color: #00BFFF; font-weight: bold' 
+                    else: return 'color: #FF4444; font-weight: bold' 
+                else:
+                    return 'color: #00FF00; font-weight: bold' 
+            elif r20 > 50:
+                return 'color: #FFA500; font-weight: bold' 
+            else:
+                return 'color: #FF4444; font-weight: bold' 
+        except:
+            return ''
+
+    # ROW-WISE TICKER HIGHLIGHTING
+    def highlight_ticker_row(row):
+        styles = ['' for _ in row.index]
+        if 'Action' not in row.index or 'Ticker' not in row.index: return styles
+        
+        action = str(row['Action']).upper()
+        ticker_idx = row.index.get_loc('Ticker')
+        
+        # Priority Colors
+        if "BUY" in action:
+            styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' # Dark Green
+        elif "SCOUT" in action:
+            styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' # Dark Teal
+        elif "SOON" in action or "CAUTION" in action:
+            styles[ticker_idx] = 'background-color: #885500; color: white; font-weight: bold' # Dark Orange/Brown
+            
+        return styles
+
     return styler.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
+      .apply(highlight_ticker_row, axis=1)\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"])\
       .map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"])\
       .map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"])\
@@ -240,6 +280,7 @@ def style_final(styler):
       .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"])\
       .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
       .map(color_pct, subset=["4W %", "2W %"])\
+      .map(color_rsi, subset=["Dual RSI"])\
       .hide(axis='index')
 
 def style_market(styler):
@@ -919,40 +960,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             df_pf = pd.DataFrame(pf_rows)
             st.markdown(df_pf.style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
             st.write("---")
-
-    closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
-    if not closed_trades.empty:
-        st.subheader("📜 Closed Performance")
-        
-        wins = closed_trades[closed_trades['Return'] > 0]
-        win_rate = (len(wins) / len(closed_trades)) * 100
-        avg_ret = closed_trades['Return'].mean()
-        total_pl_dollars = closed_trades['Realized_PL'].sum()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Win Rate", f"{win_rate:.0f}%", f"{len(wins)}/{len(closed_trades)} Trades")
-        c2.metric("Cumulative P&L", f"${total_pl_dollars:,.2f}", delta="Net Profit")
-        c3.metric("Avg Return %", f"{avg_ret:+.2f}%")
-        
-        hist_view = closed_trades[["Ticker", "Date", "Exit_Date", "Cost_Basis", "Exit_Price", "Return", "Realized_PL", "SPY_Return"]].copy()
-        
-        hist_view["% Delta vs SPY"] = hist_view["Return"] - hist_view["SPY_Return"]
-        
-        hist_view["% Delta vs SPY"] = hist_view["% Delta vs SPY"].apply(lambda x: f"{x:+.2f}%")
-        hist_view["Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-        hist_view["Realized_PL"] = hist_view["Realized_PL"].apply(lambda x: f"${x:+.2f}")
-        
-        hist_view.rename(columns={
-            "Realized_PL": "$ P&L", 
-            "Return": "% Return",
-            "Cost_Basis": "Buy Price", 
-            "Exit_Price": "Sell Price"
-        }, inplace=True)
-        
-        hist_view = hist_view.drop(columns=["SPY_Return"])
-        
-        st.dataframe(hist_view.style.pipe(style_history))
-        st.write("---")
 
     st.subheader("🔍 Master Scanner")
     df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
