@@ -1,4 +1,4 @@
-\import streamlit as st
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Integrated Risk Calculator")
+st.title(f"🛡️ Titan Strategy v53.2.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Integrated Risk Calculator & Syntax Fix")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -263,10 +263,12 @@ def style_final(styler):
         vol = str(row.get('Volume', '')).upper()
         rsi_html = str(row.get('Dual RSI', ''))
         
+        # PRIORITY 1: BLUE SPIKE (Blue RSI + Spike Vol)
         if "00BFFF" in rsi_html and "SPIKE" in vol:
              styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' # Royal Blue
              return styles
 
+        # PRIORITY 2: STANDARD ACTION COLORS
         if "BUY" in action:
             styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' 
         elif "SCOUT" in action:
