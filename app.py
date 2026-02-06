@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v52.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Ticker Highlighting Enabled")
+st.title(f"🛡️ Titan Strategy v52.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Blue Spike Logic & Visual Polish")
 
 RISK_UNIT = 2300  
 
@@ -252,18 +252,28 @@ def style_final(styler):
     # ROW-WISE TICKER HIGHLIGHTING
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
-        if 'Action' not in row.index or 'Ticker' not in row.index: return styles
+        if 'Ticker' not in row.index: return styles
         
-        action = str(row['Action']).upper()
         ticker_idx = row.index.get_loc('Ticker')
+        action = str(row.get('Action', '')).upper()
+        vol = str(row.get('Volume', '')).upper()
+        # Get raw HTML string for RSI to check for the Blue Hex Code
+        rsi_html = str(row.get('Dual RSI', ''))
         
-        # Priority Colors
+        # --- PRIORITY 1: BLUE SPIKE (Blue RSI + Spike Vol) ---
+        # 00BFFF is the hex code used for Blue RSI Numbers
+        if "00BFFF" in rsi_html and "SPIKE" in vol:
+             styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' # Royal Blue
+             return styles
+
+        # --- PRIORITY 2: STANDARD ACTION COLORS ---
         if "BUY" in action:
             styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' # Dark Green
         elif "SCOUT" in action:
             styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' # Dark Teal
         elif "SOON" in action or "CAUTION" in action:
-            styles[ticker_idx] = 'background-color: #885500; color: white; font-weight: bold' # Dark Orange/Brown
+            # NEW ORANGE: Burnt Orange (Better visibility)
+            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' 
             
         return styles
 
