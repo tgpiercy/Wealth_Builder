@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v53.11 ({current_user.upper()})")
-st.caption("Institutional Protocol: Actionable Blue Spikes")
+st.title(f"🛡️ Titan Strategy v53.12 ({current_user.upper()})")
+st.caption("Institutional Protocol: White Indicators / Colored Status")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -293,10 +293,17 @@ def style_final(styler):
       .hide(axis='index')
 
 def style_daily_health(styler):
+    def color_status(v):
+        if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v: return 'color: #00ff00; font-weight: bold'
+        if "FAIL" in v or "PANIC" in v or "DEFENSIVE" in v or "FALLING" in v: return 'color: #ff4444; font-weight: bold'
+        return 'color: white; font-weight: bold'
+
     return styler.set_table_styles([
-         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
-         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
-    ]).map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
+         {'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, 
+         {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}
+    ]).set_properties(**{'background-color': '#222', 'border-color': '#444'})\
+      .set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'})\
+      .map(color_status, subset=['Status'])\
       .hide(axis='index')
 
 def color_pl(val):
@@ -691,6 +698,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if rsp_cond3 else s_d})
 
             # EXPOSURE LOGIC (11 Max Points: 9 VIX + 1 SPY + 1 RSP)
+            
             if mkt_score >= 10:
                 exposure_pct = 100
                 risk_per_trade = RISK_UNIT_BASE
@@ -719,10 +727,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             st.subheader(f"🏥 Daily Market Health")
             df_health = pd.DataFrame(health_rows)
-            
-            # --- ACTIONABLE BLUE SPIKE LOGIC IN LOOP BELOW ---
-            # (Passing risk_per_trade to the scanner)
-
             # RENDER AS RAW HTML
             st.markdown(df_health[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
