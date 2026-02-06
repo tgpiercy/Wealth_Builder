@@ -57,13 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v54.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: UI Polish & Compact Calculator")
-
-# --- GLOBAL SETTINGS ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Global Settings")
-RISK_UNIT_BASE = st.sidebar.number_input("Base Risk Per Trade ($)", min_value=100, value=2300, step=100)
+st.title(f"🛡️ Titan Strategy v54.10 ({current_user.upper()})")
+st.caption("Institutional Protocol: Streamlined Interface")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -375,6 +370,7 @@ def fmt_delta(val):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
+    # Defined Schema with Shadow Tracking
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
     
     if not os.path.exists(PORTFOLIO_FILE):
@@ -393,7 +389,7 @@ def load_portfolio():
     df['Realized_PL'] = pd.to_numeric(df['Realized_PL'], errors='coerce')
     df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
 
-    # Auto-Correction
+    # --- AGGRESSIVE AUTO-CORRECTION FOR TYPES ---
     if df['Type'].isnull().any() and not df.empty:
         df.loc[(df['Ticker'] != 'CASH') & (df['Type'].isnull()), 'Type'] = "STOCK"
         cash_mask = (df['Ticker'] == 'CASH') & (df['Type'].isnull())
@@ -706,14 +702,12 @@ with tab4:
                         st.rerun()
 
 with tab5:
-    st.subheader("🧮 Smart Risk Calculator (Auto-Scan)")
-    current_risk_setting = RISK_UNIT_BASE 
-    st.info(f"Using Global Risk Setting: ${current_risk_setting:,.0f} per trade")
+    st.subheader("🧮 Smart Risk Calculator")
     
-    col_t, col_p, col_s = st.columns(3)
-    calc_ticker = col_t.text_input("Ticker Symbol (e.g. NVDA)", "").upper()
-    manual_entry = col_p.number_input("Manual Entry ($)", value=0.0)
-    manual_stop = col_s.number_input("Manual Stop ($)", value=0.0)
+    # Moved global setting inside the tab
+    RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
+    
+    calc_ticker = st.text_input("Ticker", "").upper()
     
     if calc_ticker:
         try:
@@ -731,21 +725,20 @@ with tab5:
                 smart_stop = round_to_03_07(raw_stop)
                 
                 st.write("---")
-                st.metric(f"{calc_ticker} Price", f"${curr_p:.2f}")
                 
-                final_entry = manual_entry if manual_entry > 0 else curr_p
-                final_stop = manual_stop if manual_stop > 0 else smart_stop
-                
-                if final_entry > final_stop:
-                    risk_per_share = final_entry - final_stop
-                    shares = int(current_risk_setting / risk_per_share)
-                    capital = shares * final_entry
+                # Logic strictly uses calculated values
+                if curr_p > smart_stop:
+                    risk_per_share = curr_p - smart_stop
+                    shares = int(RISK_UNIT_BASE / risk_per_share)
+                    capital = shares * curr_p
+                    
+                    st.markdown(f"**Price:** ${curr_p:.2f}")
                     
                     st.markdown(f"""
                     <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                         <div><div style="font-size: 12px; color: #888;">Shares</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares}</div></div>
                         <div><div style="font-size: 12px; color: #888;">Capital</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${capital:,.2f}</div></div>
-                        <div><div style="font-size: 12px; color: #888;">Stop</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${final_stop:.2f}</div></div>
+                        <div><div style="font-size: 12px; color: #888;">Stop</div><div style="font-size: 18px; font-weight: bold; color: #FFF;">${smart_stop:.2f}</div></div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -754,7 +747,9 @@ with tab5:
                     else:
                          st.markdown(f"<div style='color: #00FF00; font-weight: bold; font-size: 14px;'>✅ Trade Approved</div>", unsafe_allow_html=True)
                 else:
-                    st.error("Stop Price must be below Entry Price for Longs")
+                    st.error("Stop Price calculated above Entry (Short trend?).")
+            else:
+                st.error("Ticker not found.")
         except:
             st.error("Could not fetch ticker data.")
 
@@ -796,7 +791,9 @@ if st.button("RUN ANALYSIS", type="primary"):
         pf_rows = []
         
         if not open_pos.empty:
+            # Need live prices for holdings
             holding_tickers = open_pos['Ticker'].unique().tolist()
+            # Add to cache if missing
             for t in holding_tickers:
                 if t not in market_data:
                     try:
@@ -1103,6 +1100,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
+        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
