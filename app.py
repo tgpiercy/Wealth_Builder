@@ -57,26 +57,29 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v51.9.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Scanner Output")
+st.title(f"🛡️ Titan Strategy v51.9.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Summary & Reordering")
 
 RISK_UNIT = 2300  
 
-# --- SECTOR PARENT MAP (For Locking Logic) ---
+# --- SECTOR PARENT MAP (Updated for New Numbering) ---
 SECTOR_PARENTS = {
-    "01. MATERIALS": "XLB",
-    "02. ENERGY": "XLE",
-    "03. FINANCIALS": "XLF",
-    "04. INDUSTRIALS": "XLI",
-    "05. TECHNOLOGY": "XLK",
-    "06. COMM SERVICES": "XLC",
-    "07. HEALTH CARE": "XLV",
-    "08. CONS DISCRET": "XLY",
-    "09. CONS STAPLES": "XLP",
-    "10. UTILITIES / RE": "XLU",
-    "12. CANADA (HXT)": "HXT.TO",
-    "13. THEMES": "SPY" # Themes lock if SPY fails
+    "04. MATERIALS": "XLB",
+    "05. ENERGY": "XLE",
+    "06. FINANCIALS": "XLF",
+    "07. INDUSTRIALS": "XLI",
+    "08. TECHNOLOGY": "XLK",
+    "09. COMM SERVICES": "XLC",
+    "10. HEALTH CARE": "XLV",
+    "11. CONS DISCRET": "XLY",
+    "12. CONS STAPLES": "XLP",
+    "13. UTILITIES / RE": "XLU",
+    "15. CANADA (HXT)": "HXT.TO",
+    "03. THEMES": "SPY"
 }
+
+# List of ETFs to duplicate into the "02. SECTORS" summary group
+SECTOR_ETFS = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
 
 # --- DATA MAP ---
 DATA_MAP = {
@@ -85,97 +88,99 @@ DATA_MAP = {
     "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
     "IWM": ["00. INDICES", "SPY", "Russell 2000"],
     "IWC": ["00. INDICES", "SPY", "Micro-Cap"],
-    "^VIX": ["00. INDICES", "SPY", "VIX Volatility"],
     "SPY": ["00. INDICES", "SPY", "S&P 500 Base"],
     "HXT.TO": ["00. INDICES", "SPY", "TSX 60 Index"], 
-
-    # --- 01. MATERIALS ---
-    "XLB": ["01. MATERIALS", "SPY", "Materials Sector"],
-    "GLD": ["01. MATERIALS", "SPY", "Gold Bullion"],
-    "SLV": ["01. MATERIALS", "SPY", "Silver Bullion"],
-
-    # --- 02. ENERGY ---
-    "XLE": ["02. ENERGY", "SPY", "Energy Sector"],
-    "XOP": ["02. ENERGY", "SPY", "Oil & Gas Exp"],
-    "OIH": ["02. ENERGY", "SPY", "Oil Services"],
-    "MLPX": ["02. ENERGY", "SPY", "MLP Infra"],
-
-    # --- 03. FINANCIALS ---
-    "XLF": ["03. FINANCIALS", "SPY", "Financials Sector"],
-    "KBE": ["03. FINANCIALS", "SPY", "Bank ETF"],
-    "KRE": ["03. FINANCIALS", "SPY", "Regional Banks"],
-    "IAK": ["03. FINANCIALS", "SPY", "Insurance"],
-
-    # --- 04. INDUSTRIALS ---
-    "XLI": ["04. INDUSTRIALS", "SPY", "Industrials Sector"],
-    "ITA": ["04. INDUSTRIALS", "SPY", "Aerospace & Def"],
-    "IYT": ["04. INDUSTRIALS", "SPY", "Transport"],
-
-    # --- 05. TECHNOLOGY ---
-    "XLK": ["05. TECHNOLOGY", "SPY", "Technology Sector"],
-    "AAPL": ["05. TECHNOLOGY", "QQQ", "Apple Inc"], 
-    "MSFT": ["05. TECHNOLOGY", "QQQ", "Microsoft"],
-    "NVDA": ["05. TECHNOLOGY", "QQQ", "Nvidia"],
-    "SMH": ["05. TECHNOLOGY", "SPY", "Semiconductors"],
-    "XSD": ["05. TECHNOLOGY", "SPY", "Semi SPDR"], 
-    "IGV": ["05. TECHNOLOGY", "SPY", "Tech Software"],
-    "SMCI": ["05. TECHNOLOGY", "QQQ", "Super Micro"],
-    "DELL": ["05. TECHNOLOGY", "QQQ", "Dell Tech"],
-    "WDC": ["05. TECHNOLOGY", "QQQ", "Western Digital"],
-    "PSTG": ["05. TECHNOLOGY", "QQQ", "Pure Storage"],
-    "ANET": ["05. TECHNOLOGY", "QQQ", "Arista Networks"],
-
-    # --- 06. COMM SERVICES ---
-    "XLC": ["06. COMM SERVICES", "SPY", "Comm Services"],
-    "META": ["06. COMM SERVICES", "QQQ", "Meta Platforms"],
-    "GOOGL": ["06. COMM SERVICES", "QQQ", "Alphabet Inc"],
-
-    # --- 07. HEALTH CARE ---
-    "XLV": ["07. HEALTH CARE", "SPY", "Health Care Sector"],
-    "IBB": ["07. HEALTH CARE", "SPY", "Biotech Core"],
-    "XBI": ["07. HEALTH CARE", "SPY", "Biotech SPDR"],
-    "PPH": ["07. HEALTH CARE", "SPY", "Pharma"],
-    "IHI": ["07. HEALTH CARE", "SPY", "Med Devices"],
-
-    # --- 08. CONS DISCRET ---
-    "XLY": ["08. CONS DISCRET", "SPY", "Cons Discret Sector"],
-    "AMZN": ["08. CONS DISCRET", "QQQ", "Amazon"],
-    "ITB": ["08. CONS DISCRET", "SPY", "Home Construction"],
-
-    # --- 09. CONS STAPLES ---
-    "XLP": ["09. CONS STAPLES", "SPY", "Cons Staples Sector"],
-    "MOO": ["09. CONS STAPLES", "SPY", "Agribusiness"],
-
-    # --- 10. UTILITIES / RE ---
-    "XLU": ["10. UTIL / RE", "SPY", "Utilities Sector"],
-    "XLRE": ["10. UTIL / RE", "SPY", "Real Estate Sector"],
-
-    # --- 11. BONDS/FX ---
-    "IEF": ["11. BONDS/FX", "SPY", "7-10 Year Treasuries"],
-    "DLR.TO": ["11. BONDS/FX", None, "USD/CAD Currency"],
     
-    # --- 12. CANADA (HXT) ---
-    "CNQ.TO": ["12. CANADA (HXT)", "HXT.TO", "Cdn Natural Res"],
-    "CP.TO": ["12. CANADA (HXT)", "HXT.TO", "CP KC Rail"],
-    "WSP.TO": ["12. CANADA (HXT)", "HXT.TO", "WSP Global"],
-    "SHOP.TO": ["12. CANADA (HXT)", "HXT.TO", "Shopify"],
-    "CSU.TO": ["12. CANADA (HXT)", "HXT.TO", "Constellation Soft"],
-    "NTR.TO": ["12. CANADA (HXT)", "HXT.TO", "Nutrien"],
-    "TECK-B.TO": ["12. CANADA (HXT)", "HXT.TO", "Teck Resources"],
+    # Hidden VIX (Data only)
+    "^VIX": ["99. DATA", "SPY", "VIX Volatility"],
 
-    # --- 13. THEMES ---
-    "BOTZ": ["13. THEMES", "SPY", "Robotics & AI"],
-    "AIQ": ["13. THEMES", "SPY", "Artificial Intel"],
-    "ARKG": ["13. THEMES", "SPY", "Genomics"],
-    "ICLN": ["13. THEMES", "SPY", "Clean Energy"],
-    "TAN": ["13. THEMES", "SPY", "Solar Energy"],
-    "NLR": ["13. THEMES", "SPY", "Nuclear"],
-    "URA": ["13. THEMES", "SPY", "Uranium"],
-    "GDX": ["13. THEMES", "SPY", "Gold Miners"],
-    "SILJ": ["13. THEMES", "SPY", "Junior Silver"], 
-    "COPX": ["13. THEMES", "SPY", "Copper Miners"],
-    "REMX": ["13. THEMES", "SPY", "Rare Earths"],
-    "PAVE": ["13. THEMES", "SPY", "Infrastructure"],
+    # --- 01. BONDS/FX ---
+    "IEF": ["01. BONDS/FX", "SPY", "7-10 Year Treasuries"],
+    "DLR.TO": ["01. BONDS/FX", None, "USD/CAD Currency"],
+
+    # --- 03. THEMES (Renumbered) ---
+    "BOTZ": ["03. THEMES", "SPY", "Robotics & AI"],
+    "AIQ": ["03. THEMES", "SPY", "Artificial Intel"],
+    "ARKG": ["03. THEMES", "SPY", "Genomics"],
+    "ICLN": ["03. THEMES", "SPY", "Clean Energy"],
+    "TAN": ["03. THEMES", "SPY", "Solar Energy"],
+    "NLR": ["03. THEMES", "SPY", "Nuclear"],
+    "URA": ["03. THEMES", "SPY", "Uranium"],
+    "GDX": ["03. THEMES", "SPY", "Gold Miners"],
+    "SILJ": ["03. THEMES", "SPY", "Junior Silver"], 
+    "COPX": ["03. THEMES", "SPY", "Copper Miners"],
+    "REMX": ["03. THEMES", "SPY", "Rare Earths"],
+    "PAVE": ["03. THEMES", "SPY", "Infrastructure"],
+
+    # --- 04. MATERIALS ---
+    "XLB": ["04. MATERIALS", "SPY", "Materials Sector"],
+    "GLD": ["04. MATERIALS", "SPY", "Gold Bullion"],
+    "SLV": ["04. MATERIALS", "SPY", "Silver Bullion"],
+
+    # --- 05. ENERGY ---
+    "XLE": ["05. ENERGY", "SPY", "Energy Sector"],
+    "XOP": ["05. ENERGY", "SPY", "Oil & Gas Exp"],
+    "OIH": ["05. ENERGY", "SPY", "Oil Services"],
+    "MLPX": ["05. ENERGY", "SPY", "MLP Infra"],
+
+    # --- 06. FINANCIALS ---
+    "XLF": ["06. FINANCIALS", "SPY", "Financials Sector"],
+    "KBE": ["06. FINANCIALS", "SPY", "Bank ETF"],
+    "KRE": ["06. FINANCIALS", "SPY", "Regional Banks"],
+    "IAK": ["06. FINANCIALS", "SPY", "Insurance"],
+
+    # --- 07. INDUSTRIALS ---
+    "XLI": ["07. INDUSTRIALS", "SPY", "Industrials Sector"],
+    "ITA": ["07. INDUSTRIALS", "SPY", "Aerospace & Def"],
+    "IYT": ["07. INDUSTRIALS", "SPY", "Transport"],
+
+    # --- 08. TECHNOLOGY ---
+    "XLK": ["08. TECHNOLOGY", "SPY", "Technology Sector"],
+    "AAPL": ["08. TECHNOLOGY", "QQQ", "Apple Inc"], 
+    "MSFT": ["08. TECHNOLOGY", "QQQ", "Microsoft"],
+    "NVDA": ["08. TECHNOLOGY", "QQQ", "Nvidia"],
+    "SMH": ["08. TECHNOLOGY", "SPY", "Semiconductors"],
+    "XSD": ["08. TECHNOLOGY", "SPY", "Semi SPDR"], 
+    "IGV": ["08. TECHNOLOGY", "SPY", "Tech Software"],
+    "SMCI": ["08. TECHNOLOGY", "QQQ", "Super Micro"],
+    "DELL": ["08. TECHNOLOGY", "QQQ", "Dell Tech"],
+    "WDC": ["08. TECHNOLOGY", "QQQ", "Western Digital"],
+    "PSTG": ["08. TECHNOLOGY", "QQQ", "Pure Storage"],
+    "ANET": ["08. TECHNOLOGY", "QQQ", "Arista Networks"],
+
+    # --- 09. COMM SERVICES ---
+    "XLC": ["09. COMM SERVICES", "SPY", "Comm Services"],
+    "META": ["09. COMM SERVICES", "QQQ", "Meta Platforms"],
+    "GOOGL": ["09. COMM SERVICES", "QQQ", "Alphabet Inc"],
+
+    # --- 10. HEALTH CARE ---
+    "XLV": ["10. HEALTH CARE", "SPY", "Health Care Sector"],
+    "IBB": ["10. HEALTH CARE", "SPY", "Biotech Core"],
+    "XBI": ["10. HEALTH CARE", "SPY", "Biotech SPDR"],
+    "PPH": ["10. HEALTH CARE", "SPY", "Pharma"],
+    "IHI": ["10. HEALTH CARE", "SPY", "Med Devices"],
+
+    # --- 11. CONS DISCRET ---
+    "XLY": ["11. CONS DISCRET", "SPY", "Cons Discret Sector"],
+    "AMZN": ["11. CONS DISCRET", "QQQ", "Amazon"],
+    "ITB": ["11. CONS DISCRET", "SPY", "Home Construction"],
+
+    # --- 12. CONS STAPLES ---
+    "XLP": ["12. CONS STAPLES", "SPY", "Cons Staples Sector"],
+    "MOO": ["12. CONS STAPLES", "SPY", "Agribusiness"],
+
+    # --- 13. UTILITIES / RE ---
+    "XLU": ["13. UTIL / RE", "SPY", "Utilities Sector"],
+    "XLRE": ["13. UTIL / RE", "SPY", "Real Estate Sector"],
+    
+    # --- 15. CANADA (HXT) ---
+    "CNQ.TO": ["15. CANADA (HXT)", "HXT.TO", "Cdn Natural Res"],
+    "CP.TO": ["15. CANADA (HXT)", "HXT.TO", "CP KC Rail"],
+    "WSP.TO": ["15. CANADA (HXT)", "HXT.TO", "WSP Global"],
+    "SHOP.TO": ["15. CANADA (HXT)", "HXT.TO", "Shopify"],
+    "CSU.TO": ["15. CANADA (HXT)", "HXT.TO", "Constellation Soft"],
+    "NTR.TO": ["15. CANADA (HXT)", "HXT.TO", "Nutrien"],
+    "TECK-B.TO": ["15. CANADA (HXT)", "HXT.TO", "Teck Resources"],
 
     # --- MANUAL ---
     "MANL": ["99. MANUAL", "SPY", "Manual / Spy Proxy"]
@@ -257,7 +262,6 @@ def color_action(val):
     if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
     return 'color: #ffffff'
 
-# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
@@ -726,11 +730,17 @@ if st.button("RUN ANALYSIS", type="primary"):
         # --- PASS 2: Build Results & Apply Sector Lock ---
         results = []
         for t in all_tickers:
+            # Skip checking against "99. DATA" here since we only want to show scanner items
+            # The 'is_scanner' logic uses DATA_MAP which includes 99. DATA for VIX
+            # We filter explicitly.
+            
+            cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
+            if "99. DATA" in cat_name: continue # Hide VIX/Data feeds from scanner table
+            
             is_scanner = t in DATA_MAP and (DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             if not is_scanner or t not in analysis_db: continue
             
             db = analysis_db[t]
-            cat_name = DATA_MAP[t][0]
             
             # SECTOR LOCK LOGIC
             final_decision = db['Decision']
@@ -783,9 +793,16 @@ if st.button("RUN ANALYSIS", type="primary"):
             # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
-                row_cad["Sector"] = "12. CANADA (HXT)"
+                row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
+            
+            # SECTOR DUPLICATION (For 02. SECTORS Summary)
+            if t in SECTOR_ETFS:
+                row_sec = row.copy()
+                row_sec["Sector"] = "02. SECTORS (SUMMARY)"
+                row_sec["Rank"] = 0
+                results.append(row_sec)
 
     if not pf_df.empty:
         open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
