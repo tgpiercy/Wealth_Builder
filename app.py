@@ -58,7 +58,7 @@ if st.sidebar.button("Log Out"):
     logout()
 
 st.title(f"🛡️ Titan Strategy v53.13 ({current_user.upper()})")
-st.caption("Institutional Protocol: Logic Gates Enforced")
+st.caption("Institutional Protocol: Fixed Table Styling")
 
 # --- GLOBAL SETTINGS ---
 st.sidebar.markdown("---")
@@ -263,17 +263,12 @@ def style_final(styler):
         vol = str(row.get('Volume', '')).upper()
         rsi_html = str(row.get('Dual RSI', ''))
         
-        # LOGIC GATE: If AVOID, do not highlight blue.
         if "AVOID" in action:
-             # Just leave it default (or whatever default logic applies)
-             # We do NOT want blue here.
-             pass
+             pass # Never highlight blue if avoided
         elif "00BFFF" in rsi_html and "SPIKE" in vol:
-             # ONLY highlight Blue Spike if NOT Avoid
              styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' 
              return styles
 
-        # STANDARD ACTION COLORS
         if "BUY" in action:
             styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' 
         elif "SCOUT" in action:
@@ -300,12 +295,17 @@ def style_final(styler):
       .hide(axis='index')
 
 def style_daily_health(styler):
+    def color_status(v):
+        if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
+        if "FAIL" in v or "PANIC" in v or "DEFENSIVE" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
+        return 'color: white; font-weight: bold'
+
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, 
          {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'border-color': '#444'})\
       .set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'})\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v else ('color: white; font-weight: bold' if "TOTAL" in v else 'color: #ff4444; font-weight: bold'))\
+      .map(color_status, subset=['Status'])\
       .hide(axis='index')
 
 def color_pl(val):
