@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v55.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Wilder's RSI (TradingView Match)")
+st.title(f"🛡️ Titan Strategy v55.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Precision RSI (TV Match)")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -206,20 +206,32 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
-# --- WILDER'S RSI (TradingView Match) ---
+# --- PRECISE TRADINGVIEW RSI ---
 def calc_rsi(series, length):
+    # This loop exactly replicates Pine Script's RMA logic
     delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
     
-    # Separate gains and losses
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
+    avg_gain = np.full_like(gain, np.nan)
+    avg_loss = np.full_like(loss, np.nan)
     
-    # Wilder's Smoothing (RMA)
-    avg_gain = gain.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
+    # 1. First value is SMA (Standard Wilder's Seed)
+    # We use length+1 because index 0 is NaN from diff
+    avg_gain[length] = gain[1:length+1].mean()
+    avg_loss[length] = loss[1:length+1].mean()
+    
+    # 2. Subsequent values use RMA: (prev * (len-1) + curr) / len
+    for i in range(length + 1, len(series)):
+        avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
+        avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
     
     rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    # Handle div by zero if loss is 0
+    rs = np.where(avg_loss == 0, 100, rs)
+    
+    rsi_vals = 100 - (100 / (1 + rs))
+    return pd.Series(rsi_vals, index=series.index)
 
 # --- ZIG ZAG STRUCTURE ENGINE (Live Leg) ---
 def calc_structure(df, deviation_pct=0.035):
@@ -954,7 +966,6 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 4. MARKET HEALTH
         # ----------------------------------------
         if spy is not None and ief is not None and vix is not None and rsp is not None:
-            # 1. VIX Score
             vix_c = vix.iloc[-1]['Close']
             if vix_c < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
             elif vix_c < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
@@ -963,7 +974,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             mkt_score += v_pts
             health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
             
-            # 2. SPY
             s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
             s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]
             s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
@@ -975,18 +985,15 @@ if st.button("RUN ANALYSIS", type="primary"):
             health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
             health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
             
-            # 3. RSP
             r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
             r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]
             r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
             r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
             if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
-            
             health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
             health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
             health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
             
-            # TOTAL
             if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
             elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
@@ -1010,23 +1017,8 @@ if st.button("RUN ANALYSIS", type="primary"):
         
         analysis_db = {}
         for t in all_tickers:
-            if t not in cache_d: 
-                try:
-                    fetch_sym = "SPY" if t == "MANL" else t
-                    tk = yf.Ticker(fetch_sym)
-                    df = tk.history(period="2y", interval="1d") 
-                    df.index = pd.to_datetime(df.index).tz_localize(None)
-                    if not df.empty and 'Close' in df.columns: 
-                        cache_d[t] = df
-                        df_d = df
-                    else: continue
-                except: continue
-            else:
-                df_d = cache_d[t].copy()
-
-            # --- DATA SAFETY CHECK ---
-            if len(df_d) < 20: continue
-
+            if t not in cache_d: continue
+            df_d = cache_d[t].copy()
             # Calculations
             df_d['SMA18'] = calc_sma(df_d['Close'], 18)
             df_d['SMA40'] = calc_sma(df_d['Close'], 40)
@@ -1040,10 +1032,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             logic = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
             df_w = df_d.resample('W-FRI').agg(logic)
-            
-            # --- WEEKLY DATA SAFETY CHECK ---
-            if len(df_w) < 2: continue
-            
             df_w.dropna(subset=['Close'], inplace=True)
             df_w['SMA8'] = calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = calc_sma(df_w['Close'], 18)
@@ -1058,9 +1046,6 @@ if st.button("RUN ANALYSIS", type="primary"):
                 mom_4w = f"{((curr/prev4)-1)*100:.1f}%"
 
             dc = df_d.iloc[-1]; dp = df_d.iloc[-2]; wc = df_w.iloc[-1]; wp = df_w.iloc[-2]
-            
-            # --- ZIG ZAG / INST ACTIVITY ---
-            inst_activity = calc_structure(df_d) # Use daily data for swing points
 
             bench_ticker = "SPY"
             if t in DATA_MAP: bench_ticker = DATA_MAP[t][1]
@@ -1089,28 +1074,6 @@ if st.button("RUN ANALYSIS", type="primary"):
             elif dp['Volume'] > (dp['VolSMA'] * 1.5): vol_msg = "SPIKE (Prev)"
             elif dc['Volume'] > dc['VolSMA']: vol_msg = "HIGH (Live)"
             elif dp['Volume'] > dp['VolSMA']: vol_msg = "HIGH (Prev)"
-            
-            # 3-FACTOR MODEL
-            r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
-            r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
-            is_rsi_rising = r5 > r5_prev
-
-            final_inst_msg = inst_activity # Default to just the structure (e.g. "HH")
-
-            if "SPIKE" in vol_msg:
-                if inst_activity == "HL":
-                    if is_rsi_rising: final_inst_msg = "ACCUMULATION (HL)"
-                
-                if inst_activity == "HH":
-                    if is_rsi_rising: final_inst_msg = "BREAKOUT (HH)"
-                    else: final_inst_msg = "DISTRIBUTION (HH)"
-
-                if inst_activity == "LL":
-                    if is_rsi_rising: final_inst_msg = "CAPITULATION (LL)"
-                    else: final_inst_msg = "LIQUIDATION (LL)"
-
-                if inst_activity == "LH":
-                     final_inst_msg = "SELLING (LH)"
 
             w_score = 0
             if wc['Close'] > wc['SMA18']: w_score += 1
@@ -1148,15 +1111,13 @@ if st.button("RUN ANALYSIS", type="primary"):
                 decision = "CAUTION"; reason = "VIX Lock"
 
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
-            
-            # --- SMART STOP CALCULATION IN SCANNER ---
-            raw_stop = dc['Close'] - (2.618 * atr)
-            smart_stop_val = round_to_03_07(raw_stop)
-            stop_dist = dc['Close'] - smart_stop_val
+            stop_dist = 2.618 * atr
+            stop_price = dc['Close'] - stop_dist
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
             # --- DUAL RSI LOGIC (HTML Construction) ---
-            # r5 already calculated above
+            r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
+            r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
             
             is_rising = r5 > r5_prev
@@ -1176,11 +1137,32 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
+            # --- INST ACTIVITY ---
+            inst_activity = calc_structure(df_d) # Use daily
+            final_inst_msg = inst_activity
+            if "SPIKE" in vol_msg:
+                if inst_activity == "HL":
+                    if is_rising: final_inst_msg = "ACCUMULATION (HL)"
+                if inst_activity == "HH":
+                    if is_rising: final_inst_msg = "BREAKOUT (HH)"
+                    else: final_inst_msg = "DISTRIBUTION (HH)"
+                if inst_activity == "LL":
+                    if is_rising: final_inst_msg = "CAPITULATION (LL)"
+                    else: final_inst_msg = "LIQUIDATION (LL)"
+                if inst_activity == "LH":
+                     final_inst_msg = "SELLING (LH)"
+
+            # Smart Stop Calc for Output
+            raw_stop = dc['Close'] - (2.618 * atr)
+            smart_stop_val = round_to_03_07(raw_stop)
+            stop_dist = dc['Close'] - smart_stop_val
+            stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
+
             analysis_db[t] = {
                 "Decision": decision,
                 "Reason": reason,
                 "Price": dc['Close'],
-                "Stop": smart_stop_val, # Use Smart Stop
+                "Stop": smart_stop_val,
                 "StopPct": stop_pct,
                 "ATR": atr,
                 "Mom4W": mom_4w,
@@ -1198,6 +1180,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
 
         # --- PASS 2: Build Results & Apply Sector Lock ---
+        results = []
         for t in all_tickers:
             cat_name = DATA_MAP[t][0] if t in DATA_MAP else "OTHER"
             if "99. DATA" in cat_name: continue 
@@ -1207,6 +1190,7 @@ if st.button("RUN ANALYSIS", type="primary"):
             
             db = analysis_db[t]
             
+            # SECTOR LOCK LOGIC
             final_decision = db['Decision']
             final_reason = db['Reason']
             
@@ -1217,20 +1201,25 @@ if st.button("RUN ANALYSIS", type="primary"):
                         final_decision = "AVOID"
                         final_reason = "Sector Lock"
 
+            # SORT RANKING
             sort_rank = 1
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC & BLUE SPIKE LOGIC
+            # SHARES CALC & BLUE SPIKE OVERRIDE
             rsi_html = db['RSI_Msg']
             vol_str = db['Vol_Msg']
             is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
             
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
+            
+            # Override Risk if Blue Spike
             if is_blue_spike: final_risk = risk_per_trade
 
             stop_dist_value = db['Price'] - db['Stop']
             
+            # If AVOID but NOT Blue Spike -> Hide Shares.
+            # If AVOID BUT IS Blue Spike -> Show Shares.
             if "AVOID" in final_decision and not is_blue_spike:
                 disp_stop = ""
                 disp_shares = ""
@@ -1260,12 +1249,14 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
+            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
+            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
