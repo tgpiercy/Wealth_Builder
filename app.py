@@ -57,8 +57,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v55.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Scanner Restoration & Precision RSI")
+st.title(f"🛡️ Titan Strategy v55.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Variable Scope Fixed")
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
@@ -215,11 +215,9 @@ def calc_rsi(series, length):
     avg_gain = np.full_like(gain, np.nan)
     avg_loss = np.full_like(loss, np.nan)
     
-    # 1. First value is SMA
     avg_gain[length] = gain[1:length+1].mean()
     avg_loss[length] = loss[1:length+1].mean()
     
-    # 2. Subsequent values use RMA
     for i in range(length + 1, len(series)):
         avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
         avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
@@ -1157,13 +1155,13 @@ if st.button("RUN ANALYSIS", type="primary"):
                 decision = "CAUTION"; reason = "VIX Lock"
 
             atr = calc_atr(df_d['High'], df_d['Low'], df_d['Close']).iloc[-1]
-            stop_dist = 2.618 * atr
-            stop_price = dc['Close'] - stop_dist
+            raw_stop = dc['Close'] - (2.618 * atr)
+            smart_stop_val = round_to_03_07(raw_stop)
+            stop_dist = dc['Close'] - smart_stop_val
             stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
             # --- DUAL RSI LOGIC (HTML Construction) ---
-            r5 = df_d['RSI5'].iloc[-1] if not pd.isna(df_d['RSI5'].iloc[-1]) else 50
-            r5_prev = df_d['RSI5'].iloc[-2] if len(df_d) > 1 and not pd.isna(df_d['RSI5'].iloc[-2]) else r5
+            # r5 already calculated above
             r20 = df_d['RSI20'].iloc[-1] if not pd.isna(df_d['RSI20'].iloc[-1]) else 50
             
             is_rising = r5 > r5_prev
@@ -1187,7 +1185,7 @@ if st.button("RUN ANALYSIS", type="primary"):
                 "Decision": decision,
                 "Reason": reason,
                 "Price": dc['Close'],
-                "Stop": smart_stop_val,
+                "Stop": smart_stop_val, # Use Smart Stop
                 "StopPct": stop_pct,
                 "ATR": atr,
                 "Mom4W": mom_4w,
@@ -1229,20 +1227,16 @@ if st.button("RUN ANALYSIS", type="primary"):
             if "00. INDICES" in cat_name: sort_rank = 0 
             elif t in ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLV", "XLY", "XLP", "XLU", "XLRE", "HXT.TO"]: sort_rank = 0 
 
-            # SHARES CALC & BLUE SPIKE OVERRIDE
+            # SHARES CALC & BLUE SPIKE LOGIC
             rsi_html = db['RSI_Msg']
             vol_str = db['Vol_Msg']
             is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
             
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
-            
-            # Override Risk if Blue Spike
             if is_blue_spike: final_risk = risk_per_trade
 
             stop_dist_value = db['Price'] - db['Stop']
             
-            # If AVOID but NOT Blue Spike -> Hide Shares.
-            # If AVOID BUT IS Blue Spike -> Show Shares.
             if "AVOID" in final_decision and not is_blue_spike:
                 disp_stop = ""
                 disp_shares = ""
@@ -1272,14 +1266,12 @@ if st.button("RUN ANALYSIS", type="primary"):
             }
             results.append(row)
             
-            # HXT.TO DUPLICATION
             if t == "HXT.TO":
                 row_cad = row.copy()
                 row_cad["Sector"] = "15. CANADA (HXT)"
                 row_cad["Rank"] = 0 
                 results.append(row_cad)
             
-            # SECTOR DUPLICATION (For 02. SECTORS Summary)
             if t in SECTOR_ETFS:
                 row_sec = row.copy()
                 row_sec["Sector"] = "02. SECTORS (SUMMARY)"
