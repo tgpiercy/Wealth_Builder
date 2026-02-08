@@ -8,23 +8,15 @@ CREDENTIALS = {
 
 # --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
-    "04. MATERIALS": "XLB",
-    "05. ENERGY": "XLE",
-    "06. FINANCIALS": "XLF",
-    "07. INDUSTRIALS": "XLI",
-    "08. TECHNOLOGY": "XLK",
-    "09. COMM SERVICES": "XLC",
-    "10. HEALTH CARE": "XLV",
-    "11. CONS DISCRET": "XLY",
-    "12. CONS STAPLES": "XLP",
-    "13. UTILITIES / RE": "XLU",
-    "15. CANADA (HXT)": "HXT.TO",
-    "03. THEMES": "SPY"
+    "04. MATERIALS": "XLB", "05. ENERGY": "XLE", "06. FINANCIALS": "XLF",
+    "07. INDUSTRIALS": "XLI", "08. TECHNOLOGY": "XLK", "09. COMM SERVICES": "XLC",
+    "10. HEALTH CARE": "XLV", "11. CONS DISCRET": "XLY", "12. CONS STAPLES": "XLP",
+    "13. UTILITIES / RE": "XLU", "15. CANADA (HXT)": "HXT.TO", "03. THEMES": "SPY"
 }
 
 SECTOR_ETFS = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
 
-# --- DATA MAP ---
+# --- DATA MAP (The missing link) ---
 DATA_MAP = {
     # INDICES
     "DIA": ["00. INDICES", "SPY", "Dow Jones"], "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
