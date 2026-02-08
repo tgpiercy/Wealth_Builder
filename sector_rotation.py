@@ -28,6 +28,8 @@ else:
     C_IMPROVING = "#0000FF" 
 
 # --- DATA UNIVERSE ---
+BENCHMARK = "SPY"  # <--- RESTORED THIS LINE
+
 # 1. Macro Sectors
 SECTORS = {
     "XLK": "Technology", "XLF": "Financials", "XLE": "Energy", "XLV": "Health Care", 
@@ -202,3 +204,33 @@ with tab2:
             
             # Fetch Data
             data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
+            
+            if not data.empty:
+                rat, mom = calculate_rrg(data, sel_benchmark)
+                
+                # Plot
+                fig = plot_rrg_chart(rat, mom, ind_map, f"Industry Rotation vs {sel_benchmark} ({SECTORS[sel_sector_key]})")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Data Table
+                st.divider()
+                st.caption(f"Raw Data (vs {sel_benchmark})")
+                latest_rat = rat.iloc[-1].to_dict()
+                latest_mom = mom.iloc[-1].to_dict()
+                
+                # Build simple table
+                tbl = []
+                for t, name in ind_map.items():
+                    if t in latest_rat:
+                        r = latest_rat[t]
+                        m = latest_mom[t]
+                        status = "LAGGING"
+                        if r > 100 and m > 100: status = "LEADING"
+                        elif r > 100 and m < 100: status = "WEAKENING"
+                        elif r < 100 and m > 100: status = "IMPROVING"
+                        tbl.append({"Ticker": t, "Name": name, "Status": status, "Trend": r, "Momentum": m})
+                
+                st.dataframe(pd.DataFrame(tbl).style.format({"Trend": "{:.2f}", "Momentum": "{:.2f}"}))
+                
+            else:
+                st.error(f"Could not fetch data for {sel_sector_key} components.")
