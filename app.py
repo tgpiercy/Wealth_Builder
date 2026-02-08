@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.2 Performance)
+#  TITAN STRATEGY APP (v58.3 Restored)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: High-Performance Caching")
+st.title(f"🛡️ Titan Strategy v58.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Logic Restored + Caching")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -147,8 +147,8 @@ def round_to_03_07(price):
     if not candidates: return price 
     return min(candidates, key=lambda x: abs(x - price))
 
-# --- CACHED DATA FETCHERS (THE FIX) ---
-@st.cache_data(ttl=900) # Cache for 15 mins
+# --- CACHED DATA FETCHERS ---
+@st.cache_data(ttl=900)
 def get_cached_scanner_data(ticker_list):
     data_map = {}
     for t in ticker_list:
@@ -162,7 +162,7 @@ def get_cached_scanner_data(ticker_list):
         except: continue
     return data_map
 
-@st.cache_data(ttl=3600) # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def get_cached_rrg_data(fetch_list):
     return yf.download(fetch_list, period="6mo", interval="1wk", progress=False)['Close']
 
@@ -441,13 +441,90 @@ if st.session_state.run_analysis:
         all_tickers = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         
         # --- CACHED SCANNER ENGINE ---
-        with st.spinner('Scanning Market...'):
+        with st.spinner('Checking Vitals...'):
             scanner_data = get_cached_scanner_data(all_tickers)
             
-            # --- MARKET HEALTH (Optimized) ---
-            spy = scanner_data.get("SPY"); vix = scanner_data.get("^VIX"); rsp = scanner_data.get("RSP")
-            mkt_score = 0; health_rows = []
+            spy = scanner_data.get("SPY"); ief = scanner_data.get("IEF"); vix = scanner_data.get("^VIX")
+            rsp = scanner_data.get("RSP"); cad = scanner_data.get("CAD=X")
+            cad_rate = cad.iloc[-1]['Close'] if cad is not None else 1.40 
+
+            # ----------------------------------------
+            # 1. BUILD ACTIVE HOLDINGS (RESTORED)
+            # ----------------------------------------
+            open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
+            eq_val = 0.0; total_cost_basis = 0.0; pf_rows = []
             
+            if not open_pos.empty:
+                # Use scanner_data instead of re-fetching
+                for idx, row in open_pos.iterrows():
+                    t = row['Ticker']; shares = row['Shares']; cost = row['Cost_Basis']
+                    curr_price = cost 
+                    if t in scanner_data and not scanner_data[t].empty: curr_price = scanner_data[t]['Close'].iloc[-1]
+                    pos_val = shares * curr_price; eq_val += pos_val
+                    total_cost_basis += (shares * cost)
+                    pf_rows.append({
+                        "Ticker": t, "Shares": int(shares), 
+                        "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
+                        "Gain/Loss ($)": f"${(pos_val - (shares * cost)):+.2f}", "% Return": f"{((curr_price - cost) / cost) * 100:+.2f}%",
+                        "Audit Action": "HOLD"
+                    })
+            
+            total_net_worth = current_cash + eq_val
+            total_nw_cad = total_net_worth * cad_rate
+            open_pl_val = eq_val - total_cost_basis
+            open_pl_cad = open_pl_val * cad_rate
+            
+            st.subheader("💼 Active Holdings")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Net Worth (CAD)", f"${total_nw_cad:,.2f}", fmt_delta(open_pl_cad))
+            c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", fmt_delta(open_pl_val))
+            c3.metric("Cash", f"${current_cash:,.2f}"); c4.metric("Equity", f"${eq_val:,.2f}")
+            
+            if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
+            else: st.info("No active trades.")
+            st.write("---")
+
+            # ----------------------------------------
+            # 2. CLOSED PERFORMANCE (RESTORED)
+            # ----------------------------------------
+            closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
+            if not closed_trades.empty:
+                st.subheader("📜 Closed Performance")
+                wins = closed_trades[closed_trades['Return'] > 0]
+                win_rate = (len(wins) / len(closed_trades)) * 100
+                total_pl = closed_trades['Realized_PL'].sum()
+                c1, c2 = st.columns(2)
+                c1.metric("Win Rate", f"{win_rate:.0f}%"); c2.metric("Total P&L", f"${total_pl:,.2f}")
+                
+                hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
+                hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
+                hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
+                hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
+                hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
+                st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
+                st.write("---")
+
+            # ----------------------------------------
+            # 3. BENCHMARK TRACKER (RESTORED)
+            # ----------------------------------------
+            st.subheader("📈 Performance vs SPY Benchmark")
+            shadow_shares_total = pf_df['Shadow_SPY'].sum()
+            if spy is not None:
+                curr_spy = spy['Close'].iloc[-1]
+                bench_val = shadow_shares_total * curr_spy
+                alpha = total_net_worth - bench_val
+                alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
+                c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
+                c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
+            else: st.warning("Waiting for SPY data...")
+            st.write("---")
+
+            # ----------------------------------------
+            # 4. MARKET HEALTH (RESTORED V57.2 LOGIC)
+            # ----------------------------------------
+            mkt_score = 0; health_rows = []
             if spy is not None:
                 if vix is not None:
                     vix_c = vix.iloc[-1]['Close']
@@ -457,19 +534,39 @@ if st.session_state.run_analysis:
                     else: v_pts=0; v_s="<span style='color:#ff4444'>PANIC</span>"
                     mkt_score += v_pts
                     health_rows.append({"Indicator": f"VIX Level ({vix_c:.2f})", "Status": v_s})
-                
+                else:
+                    health_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
+
                 s_c = spy.iloc[-1]['Close']; s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
                 s_18c = s_sma18.iloc[-1]; s_18p = s_sma18.iloc[-2]; s_8c = s_sma8.iloc[-1]; s_8p = s_sma8.iloc[-2]
-                if s_c > s_18c: mkt_score += 1
-                if s_18c >= s_18p: mkt_score += 1 # Split points logic match
-                if s_8c > s_8p: mkt_score += 1
+                cond1 = s_c > s_18c; cond2 = s_18c >= s_18p; cond3 = s_8c > s_8p
+                if cond1 and cond2 and cond3: mkt_score += 1
                 
-                health_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if s_c > s_18c else "<span style='color:#ff4444'>FAIL</span>"})
-                health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s_18c >= s_18p else "<span style='color:#ff4444'>FALLING</span>"})
+                s_p = "<span style='color:#00ff00'>PASS</span>"; s_f = "<span style='color:#ff4444'>FAIL</span>"
+                s_r = "<span style='color:#00ff00'>RISING</span>"; s_d = "<span style='color:#ff4444'>FALLING</span>"
+                health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_p if cond1 else s_f})
+                health_rows.append({"Indicator": "SPY SMA18 Rising", "Status": s_r if cond2 else s_d})
+                health_rows.append({"Indicator": "SPY SMA8 Rising", "Status": s_r if cond3 else s_d})
                 
-                if mkt_score >= 10: msg="AGGRESSIVE"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
-                elif mkt_score >= 8: msg="CAUTIOUS BUY"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
-                else: msg="DEFENSIVE"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
+                if rsp is not None:
+                    r_c = rsp.iloc[-1]['Close']; r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
+                    r_18c = r_sma18.iloc[-1]; r_18p = r_sma18.iloc[-2]; r_8c = r_sma8.iloc[-1]; r_8p = r_sma8.iloc[-2]
+                    r_cond1 = r_c > r_18c; r_cond2 = r_18c >= r_18p; r_cond3 = r_8c > r_8p
+                    if r_cond1 and r_cond2 and r_cond3: mkt_score += 1
+                    health_rows.append({"Indicator": "RSP Price > SMA18", "Status": s_p if r_cond1 else s_f})
+                    health_rows.append({"Indicator": "RSP SMA18 Rising", "Status": s_r if r_cond2 else s_d})
+                    health_rows.append({"Indicator": "RSP SMA8 Rising", "Status": s_r if r_cond3 else s_d})
+                else:
+                    health_rows.append({"Indicator": "RSP Breadth", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
+                
+                if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
+                elif mkt_score >= 8: msg="CAUTIOUS BUY (100%)"; cl="#00ff00"; risk_per_trade=RISK_UNIT_BASE
+                elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"; risk_per_trade=RISK_UNIT_BASE*0.5
+                else: msg="CASH / SAFETY (0%)"; cl="#ff4444"; risk_per_trade=0
+                
+                tc_col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
+                health_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{tc_col}; font-weight:bold'>TOTAL: {mkt_score}/11</span>"})
+                health_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{cl}; font-weight:bold'>{msg}</span>"})
                 
                 st.subheader("🏥 Daily Market Health")
                 st.markdown(pd.DataFrame(health_rows)[["Indicator", "Status"]].style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
