@@ -24,7 +24,7 @@ SECTOR_PARENTS = {
 
 SECTOR_ETFS = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
 
-# --- DATA MAP (Full Universe) ---
+# --- DATA MAP (Extracted from your backup) ---
 DATA_MAP = {
     # INDICES
     "DIA": ["00. INDICES", "SPY", "Dow Jones"], "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
