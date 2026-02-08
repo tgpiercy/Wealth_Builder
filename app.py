@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v59.0 Persistence)
+#  TITAN STRATEGY APP (v59.1 Scope Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v59.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Persistent State & Fixed Navigation")
+st.title(f"🛡️ Titan Strategy v59.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Robust Scope & Navigation")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -120,7 +120,6 @@ def round_to_03_07(price):
 @st.cache_data(ttl=3600) 
 def fetch_master_data(ticker_list):
     """Downloads daily data for ALL tickers once."""
-    # SORTING IS CRITICAL FOR CACHE HITS
     unique_tickers = sorted(list(set(ticker_list))) 
     data_map = {}
     for t in unique_tickers:
@@ -395,7 +394,7 @@ if st.session_state.run_analysis:
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     
-    # MASTER LIST
+    # MASTER LIST (Duplicates removed automatically by set)
     all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys())
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
@@ -403,7 +402,7 @@ if st.session_state.run_analysis:
     with st.spinner('Downloading Unified Market Data...'):
         master_data = fetch_master_data(all_tickers)
 
-    # --- STATE-BASED NAVIGATION (THE FIX) ---
+    # --- STATE-BASED NAVIGATION ---
     mode = st.radio("Navigation", ["Scanner", "Sector Rotation"], horizontal=True, key="main_nav")
     
     if mode == "Scanner":
@@ -526,11 +525,13 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP
+        # 5. SCANNER LOOP (THE FIX: Safe Initialization)
+        # --- INITIALIZE DATABASE BEFORE LOOP ---
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
-        analysis_db = {}
+        analysis_db = {} 
         
+        # PASS 1: Calculate Everything
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
@@ -608,10 +609,18 @@ if st.session_state.run_analysis:
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
+        # PASS 2: Build Results & Apply Sector Locks
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
             if "99. DATA" in cat_name: continue
-            if not is_scanner or t not in analysis_db: continue
+            
+            # --- SCOPE SAFETY CHECK ---
+            if t not in analysis_db: continue
+            # --------------------------
+            
+            is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
+            if not is_scanner: continue
+            
             db = analysis_db[t]
             
             final_decision = db['Decision']; final_reason = db['Reason']
@@ -653,12 +662,10 @@ if st.session_state.run_analysis:
 
     if mode == "Sector Rotation":
         st.subheader("🔄 Relative Rotation Graphs (RRG)")
-        
         is_dark = st.toggle("🌙 Dark Mode", value=True)
-        # Using Radio for persistent sub-navigation
         rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
         
-        # PERSISTENT GRAPHING LOGIC (The Fix)
+        # PERSISTENT GRAPHING LOGIC
         if rrg_mode == "Indices":
             c1, c2 = st.columns([1,3])
             with c1: bench_sel = st.selectbox("Benchmark", ["SPY", "IEF"], key="bench_idx")
