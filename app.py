@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 try:
     import titan_config as tc
 except ImportError:
-    st.error("⚠️ CRITICAL ERROR: `titan_config.py` is missing.")
+    st.error("⚠️ CRITICAL ERROR: `titan_config.py` is missing. Please create it.")
     st.stop()
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
 
-# --- AUTHENTICATION LOGIC ---
+# --- AUTHENTICATION ---
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
@@ -23,7 +23,6 @@ if 'authenticated' not in st.session_state:
 def check_login():
     username = st.session_state.username_input
     password = st.session_state.password_input
-    
     if username in tc.CREDENTIALS and tc.CREDENTIALS[username] == password:
         st.session_state.authenticated = True
         st.session_state.user = username
@@ -35,7 +34,6 @@ def logout():
     st.session_state.user = None
     st.rerun()
 
-# --- LOGIN SCREEN ---
 if not st.session_state.authenticated:
     st.title("🛡️ Titan Strategy Login")
     with st.form("login_form"):
@@ -45,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v56.1 Modular + Restored)
+#  TITAN STRATEGY APP (v56.1 Restored)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -82,150 +80,98 @@ def calc_atr(high, low, close, length=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
 
-# --- PRECISE TRADINGVIEW RSI ---
 def calc_rsi(series, length):
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    
     avg_gain = np.full_like(gain, np.nan)
     avg_loss = np.full_like(loss, np.nan)
-    
     avg_gain[length] = gain[1:length+1].mean()
     avg_loss[length] = loss[1:length+1].mean()
-    
     for i in range(length + 1, len(series)):
         avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
         avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
-    
     rs = avg_gain / avg_loss
     rs = np.where(avg_loss == 0, 100, rs)
-    
     rsi_vals = 100 - (100 / (1 + rs))
     return pd.Series(rsi_vals, index=series.index)
 
-# --- ZIG ZAG STRUCTURE ENGINE (Live Leg) ---
+# --- ZIG ZAG STRUCTURE ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = [] 
-    trend = 1 
-    last_pivot_val = df['Close'].iloc[0]
-    pivots.append((0, last_pivot_val, 1)) 
+    pivots = []; trend = 1; last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1)) 
     
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_pivot_val:
-                last_pivot_val = price
+            if price > last_val:
+                last_val = price
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
-            elif price < last_pivot_val * (1 - deviation_pct):
+            elif price < last_val * (1 - deviation_pct):
                 trend = -1
-                last_pivot_val = price
+                last_val = price
                 pivots.append((i, price, -1))
         else:
-            if price < last_pivot_val:
-                last_pivot_val = price
+            if price < last_val:
+                last_val = price
                 if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
                 else: pivots.append((i, price, -1))
-            elif price > last_pivot_val * (1 + deviation_pct):
+            elif price > last_val * (1 + deviation_pct):
                 trend = 1
-                last_pivot_val = price
+                last_val = price
                 pivots.append((i, price, 1))
 
     if len(pivots) < 3: return "Range"
-    
     curr_pivot = pivots[-1]
     prev_same = pivots[-3]
-    
     if curr_pivot[2] == 1: 
-        if curr_pivot[1] > prev_same[1]: return "HH"
-        else: return "LH"
+        return "HH" if curr_pivot[1] > prev_same[1] else "LH"
     else:
-        if curr_pivot[1] < prev_same[1]: return "LL"
-        else: return "HL"
+        return "LL" if curr_pivot[1] < prev_same[1] else "HL"
 
-# --- SMART STOP HELPER ---
+# --- HELPER: SMART STOP ---
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
     whole = int(price)
-    c1 = whole + 0.03
-    c2 = whole + 0.07
-    c3 = (whole - 1) + 0.97 if whole > 0 else 0.0
-    c4 = (whole - 1) + 0.93 if whole > 0 else 0.0
-    
-    candidates = [c1, c2, c3, c4]
-    candidates = [c for c in candidates if c > 0]
-    
+    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     if not candidates: return price 
-    best_c = min(candidates, key=lambda x: abs(x - price))
-    return best_c
+    return min(candidates, key=lambda x: abs(x - price))
 
 # --- STYLING ---
 def style_final(styler):
     def color_pct(val):
         if isinstance(val, str) and '%' in val:
-            try:
-                num = float(val.strip('%'))
-                return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff0000; font-weight: bold'
+            try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%')) >= 0 else 'color: #ff0000; font-weight: bold'
             except: return ''
         return ''
-
+    
     def color_rsi(val):
         try:
             parts = val.split()
             if len(parts) < 2: return ''
-            nums = parts[0].split('/')
-            r5 = float(nums[0])
-            r20 = float(nums[1])
-            arrow = parts[1]
+            r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
             is_rising = (arrow == "↑")
-            
             if r5 >= r20:
-                if r20 > 50:
-                    if is_rising: return 'color: #00BFFF; font-weight: bold' 
-                    else: return 'color: #FF4444; font-weight: bold' 
-                else:
-                    return 'color: #00FF00; font-weight: bold' 
-            elif r20 > 50:
-                return 'color: #FFA500; font-weight: bold' 
-            else:
-                return 'color: #FF4444; font-weight: bold' 
-        except:
-            return ''
-            
-    def color_inst(val):
-        if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
-        if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
-        if "DISTRIBUTION" in val or "LIQUIDATION" in val: return 'color: #FF4444; font-weight: bold' 
-        if "SELLING" in val: return 'color: #FFA500; font-weight: bold'      
-        if "HH" in val: return 'color: #CCFFCC'
-        if "LL" in val: return 'color: #FFCCCC'
-        return 'color: #888888'
+                return 'color: #00BFFF; font-weight: bold' if (r20 > 50 and is_rising) else ('color: #00FF00; font-weight: bold' if is_rising else 'color: #FF4444; font-weight: bold')
+            elif r20 > 50: return 'color: #FFA500; font-weight: bold'
+            return 'color: #FF4444; font-weight: bold'
+        except: return ''
 
-    # ROW-WISE TICKER HIGHLIGHTING
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
-        
-        ticker_idx = row.index.get_loc('Ticker')
-        action = str(row.get('Action', '')).upper()
+        idx = row.index.get_loc('Ticker')
+        act = str(row.get('Action', '')).upper()
         vol = str(row.get('Volume', '')).upper()
-        rsi_html = str(row.get('Dual RSI', ''))
+        rsi = str(row.get('Dual RSI', ''))
         
-        if "AVOID" in action:
-             pass 
-        elif "00BFFF" in rsi_html and "SPIKE" in vol:
-             styles[ticker_idx] = 'background-color: #0044CC; color: white; font-weight: bold' 
-             return styles
-
-        if "BUY" in action:
-            styles[ticker_idx] = 'background-color: #006600; color: white; font-weight: bold' 
-        elif "SCOUT" in action:
-            styles[ticker_idx] = 'background-color: #005555; color: white; font-weight: bold' 
-        elif "SOON" in action or "CAUTION" in action:
-            styles[ticker_idx] = 'background-color: #CC5500; color: white; font-weight: bold' 
-            
+        if "AVOID" in act: pass
+        elif "00BFFF" in rsi and "SPIKE" in vol: styles[idx] = 'background-color: #0044CC; color: white; font-weight: bold'
+        elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
+        elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
+        elif "SOON" in act or "CAUTION" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         return styles
 
     return styler.set_table_styles([
