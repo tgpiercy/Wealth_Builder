@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v57.0 Robust)
+#  TITAN STRATEGY APP (v56.7 Styling Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -53,8 +53,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v57.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Robust Data Handling")
+st.title(f"🛡️ Titan Strategy v56.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Logic | Modular Config")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -159,6 +159,17 @@ def style_final(styler):
             return 'color: #FF4444; font-weight: bold'
         except: return ''
 
+    # --- RESTORED MISSING FUNCTION ---
+    def color_inst(val):
+        if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
+        if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
+        if "DISTRIBUTION" in val or "LIQUIDATION" in val: return 'color: #FF4444; font-weight: bold' 
+        if "SELLING" in val: return 'color: #FFA500; font-weight: bold'      
+        if "HH" in val: return 'color: #CCFFCC'
+        if "LL" in val: return 'color: #FFCCCC'
+        return 'color: #888888'
+    # ---------------------------------
+
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
@@ -193,8 +204,8 @@ def style_final(styler):
 
 def style_daily_health(styler):
     def color_status(v):
-        if "PASS" in v or "NORMAL" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
-        if "FAIL" in v or "PANIC" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
+        if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
+        if "FAIL" in v or "PANIC" in v or "DEFENSIVE" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
         return 'color: white; font-weight: bold'
 
     return styler.set_table_styles([
