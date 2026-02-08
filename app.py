@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.8 State Fix)
+#  TITAN STRATEGY APP (v58.9 Syntax Patch)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.8 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Navigation & State")
+st.title(f"🛡️ Titan Strategy v58.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: Fixed Zig Zag Engine")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -88,20 +88,44 @@ def calc_rsi(series, length):
     rs = avg_gain / avg_loss; rs = np.where(avg_loss == 0, 100, rs)
     return pd.Series(100 - (100 / (1 + rs)), index=series.index)
 
-# --- ZIG ZAG ENGINE ---
+# --- ZIG ZAG ENGINE (Corrected Logic) ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
+    pivots = []
+    trend = 1
+    last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1))
+    
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_val: last_val = price; (pivots[-1] = (i, price, 1)) if pivots[-1][2] == 1 else pivots.append((i, price, 1))
-            elif price < last_val * (1 - deviation_pct): trend = -1; last_val = price; pivots.append((i, price, -1))
+            if price > last_val:
+                last_val = price
+                if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
+                else: pivots.append((i, price, 1))
+            elif price < last_val * (1 - deviation_pct):
+                trend = -1
+                last_val = price
+                pivots.append((i, price, -1))
         else:
-            if price < last_val: last_val = price; (pivots[-1] = (i, price, -1)) if pivots[-1][2] == -1 else pivots.append((i, price, -1))
-            elif price > last_val * (1 + deviation_pct): trend = 1; last_val = price; pivots.append((i, price, 1))
+            if price < last_val:
+                last_val = price
+                if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
+                else: pivots.append((i, price, -1))
+            elif price > last_val * (1 + deviation_pct):
+                trend = 1
+                last_val = price
+                pivots.append((i, price, 1))
+
     if len(pivots) < 3: return "Range"
-    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
+    
+    curr = pivots[-1]
+    prev = pivots[-3]
+    
+    if curr[2] == 1:
+        return "HH" if curr[1] > prev[1] else "LH"
+    else:
+        return "LL" if curr[1] < prev[1] else "HL"
 
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
@@ -344,11 +368,36 @@ with tab4:
         except: st.error("Error")
 
 with tab5:
+    st.write("### 🛠️ Data Management")
     if os.path.exists(PORTFOLIO_FILE):
-        with open(PORTFOLIO_FILE, "rb") as f: st.download_button("Download CSV", f, PORTFOLIO_FILE)
-    up = st.file_uploader("Restore", type=["csv"])
-    if up and st.button("Restore"): pd.read_csv(up).to_csv(PORTFOLIO_FILE, index=False); st.rerun()
-    if st.button("Factory Reset"): os.remove(PORTFOLIO_FILE); st.rerun()
+        with open(PORTFOLIO_FILE, "rb") as file:
+            st.download_button("Download Portfolio CSV", file, PORTFOLIO_FILE, "text/csv")
+    else: st.warning("No portfolio file found.")
+    st.write("---")
+    uploaded_file = st.file_uploader("Restore .csv", type=["csv"])
+    if uploaded_file is not None and st.button("CONFIRM RESTORE"):
+        try:
+            pd.read_csv(uploaded_file).to_csv(PORTFOLIO_FILE, index=False)
+            st.success("Data Restored!"); st.rerun()
+        except: st.error("Error")
+    st.write("---")
+    
+    action_type = st.radio("Advanced Tools", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
+    if action_type == "⚠️ FACTORY RESET" and st.button("CONFIRM RESET"):
+        if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
+        st.success("Reset!"); st.rerun()
+    elif action_type == "Rebuild Benchmark History" and st.button("RUN REBUILD"):
+         with st.spinner("Rebuilding..."):
+             try:
+                 spy_hist = yf.Ticker("SPY").history(period="10y")
+                 for idx, row in pf_df.iterrows():
+                     if row['Type'] == 'TRANSFER' and row['Ticker'] == 'CASH':
+                         t_date = pd.to_datetime(row['Date'])
+                         idx_loc = spy_hist.index.searchsorted(t_date)
+                         price = spy_hist.iloc[idx_loc]['Close'] if idx_loc < len(spy_hist) else spy_hist.iloc[-1]['Close']
+                         if price > 0: pf_df.at[idx, 'Shadow_SPY'] = float(row['Shares']) / price
+                 save_portfolio(pf_df); st.success("Done!"); st.rerun()
+             except: st.error("Error")
 
 # --- MAIN EXECUTION ---
 if "run_analysis" not in st.session_state: st.session_state.run_analysis = False
@@ -440,10 +489,11 @@ if st.session_state.run_analysis:
         else: st.warning("Waiting for SPY data...")
         st.write("---")
 
-        # 4. MARKET HEALTH
+        # 4. MARKET HEALTH (Restored Full Logic)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
+            # 1. VIX Score
             if vix is not None:
                 v = vix.iloc[-1]['Close']
                 if v < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
@@ -452,41 +502,64 @@ if st.session_state.run_analysis:
                 else: v_pts=0; v_s="<span style='color:#ff4444'>PANIC</span>"
                 mkt_score += v_pts
                 h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": v_s})
-            else: h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
-            
-            sc = spy.iloc[-1]['Close']; s18 = calc_sma(spy['Close'], 18).iloc[-1]; s8 = calc_sma(spy['Close'], 8).iloc[-1]
-            s18_prev = calc_sma(spy['Close'], 18).iloc[-2]
-            if sc > s18: mkt_score += 1
-            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span style='color:#ff4444'>FAIL</span>"})
-            
-            if s18 >= s18_prev: mkt_score += 1
-            if s8 > calc_sma(spy['Close'], 8).iloc[-2]: mkt_score += 1
+            else:
+                h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
 
+            # 2. SPY Checks
+            s_c = spy.iloc[-1]['Close']
+            s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
+            s18c = s_sma18.iloc[-1]; s18p = s_sma18.iloc[-2]
+            s8c = s_sma8.iloc[-1]; s8p = s_sma8.iloc[-2]
+            
+            c1 = s_c > s18c; c2 = s18c >= s18p; c3 = s8c > s8p
+            if c1 and c2 and c3: mkt_score += 1
+            
+            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if c1 else "<span style='color:#ff4444'>FAIL</span>"})
+            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c2 else "<span style='color:#ff4444'>FALLING</span>"})
+            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c3 else "<span style='color:#ff4444'>FALLING</span>"})
+
+            # 3. RSP Checks
             if rsp is not None:
-                rc = rsp.iloc[-1]['Close']; r18 = calc_sma(rsp['Close'], 18).iloc[-1]
-                if rc > r18: mkt_score += 1 
+                r_c = rsp.iloc[-1]['Close']
+                r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
+                r18c = r_sma18.iloc[-1]; r18p = r_sma18.iloc[-2]
+                r8c = r_sma8.iloc[-1]; r8p = r_sma8.iloc[-2]
+                
+                rc1 = r_c > r18c; rc2 = r18c >= r18p; rc3 = r8c > r8p
+                if rc1 and rc2 and rc3: mkt_score += 1
+                
+                h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc1 else "<span style='color:#ff4444'>FAIL</span>"})
+                h_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc2 else "<span style='color:#ff4444'>FALLING</span>"})
+                h_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc3 else "<span style='color:#ff4444'>FALLING</span>"})
+            else:
+                h_rows.append({"Indicator": "RSP Breadth", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
 
-            col = "#00ff00" if mkt_score >= 8 else "#ff4444"
+            # Scoring
+            col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
             risk_per_trade = RISK_UNIT_BASE if mkt_score >= 8 else (RISK_UNIT_BASE * 0.5 if mkt_score >= 5 else 0)
-            msg = "AGGRESSIVE" if mkt_score >= 10 else ("CAUTIOUS" if mkt_score >= 8 else "DEFENSIVE")
+            msg = "AGGRESSIVE (100%)" if mkt_score >= 10 else ("CAUTIOUS BUY (100%)" if mkt_score >= 8 else ("DEFENSIVE (50%)" if mkt_score >= 5 else "CASH (0%)"))
             
             h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
             h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
-            st.subheader("🏥 Market Health")
+            
+            st.subheader("🏥 Daily Market Health")
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP
+        # 5. SCANNER LOOP (THE FIX: Two-Pass Architecture)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
-        analysis_db = {}
+        analysis_db = {} # 1. Initialize DB FIRST!
         
+        # PASS 1: Calculate Everything
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
+            # ... (Calculations) ...
             df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             df['AD_SMA18'] = calc_sma(df['AD'], 18); df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
             
+            # Weekly
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
@@ -527,6 +600,7 @@ if st.session_state.run_analysis:
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
+            # Daily Score
             d_chk = 0
             if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1
             if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1
@@ -558,9 +632,12 @@ if st.session_state.run_analysis:
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
+        # PASS 2: Build Results & Apply Sector Locks (Now Safe)
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
             if "99. DATA" in cat_name: continue
+            
+            is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             if not is_scanner or t not in analysis_db: continue
             db = analysis_db[t]
             
@@ -602,65 +679,36 @@ if st.session_state.run_analysis:
             st.warning("Scanner returned no results.")
 
     with tab_rrg:
-        st.subheader("🔄 Relative Rotation Graphs (RRG)")
-        
         is_dark = st.toggle("🌙 Dark Mode", value=True)
-        # REPLACED TABS WITH RADIO FOR PERSISTENCE
-        rrg_mode = st.radio("Select View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
+        sub1, sub2, sub3, sub4 = st.tabs(["Indices", "Sectors", "Drill-Down", "Themes"])
         
-        # INSTANT RENDERING (Using Master Data)
-        if rrg_mode == "Indices":
-            c1, c2 = st.columns([1,3])
-            with c1: bench_sel = st.selectbox("Benchmark", ["SPY", "IEF"], key="bench_idx")
-            tgt = "IEF" if bench_sel == "IEF" else "SPY"
-            idx_list = list(tc.RRG_INDICES.keys())
-            if tgt == "IEF": idx_list.append("SPY")
-            elif "SPY" in idx_list: idx_list.remove("SPY")
-            
-            if st.button("Run Indices"):
-                wide_df = prepare_rrg_inputs(master_data, idx_list, tgt)
-                r, m = calculate_rrg_math(wide_df, tgt)
-                fig = plot_rrg_chart(r, m, tc.RRG_INDICES, f"Indices vs {tgt}", is_dark)
-                st.session_state['fig_idx'] = fig
-            
-            if 'fig_idx' in st.session_state: st.plotly_chart(st.session_state['fig_idx'], use_container_width=True)
+        def render_rrg(ticker_subset, bench, title):
+            if st.button(f"Run {title}", key=f"btn_{title}"):
+                # Use master_data directly - NO DOWNLOAD (Fix)
+                wide_df = prepare_rrg_inputs(master_data, ticker_subset, bench)
+                if not wide_df.empty:
+                    r, m = calculate_rrg_math(wide_df, bench)
+                    labels = {t:t for t in ticker_subset}
+                    
+                    # Enhanced Labels (from config)
+                    for t in ticker_subset:
+                        if t in tc.RRG_SECTORS: labels[t] = tc.RRG_SECTORS[t]
+                        elif t in tc.RRG_INDICES: labels[t] = tc.RRG_INDICES[t]
+                        elif t in tc.RRG_THEMES: labels[t] = tc.RRG_THEMES[t]
+                        else:
+                            for k, v in tc.RRG_INDUSTRY_MAP.items():
+                                if t in v: labels[t] = v[t]
 
-        elif rrg_mode == "Sectors":
-            if st.button("Run Sectors"):
-                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_SECTORS.keys()), "SPY")
-                r, m = calculate_rrg_math(wide_df, "SPY")
-                fig = plot_rrg_chart(r, m, tc.RRG_SECTORS, "Sectors vs SPY", is_dark)
-                st.session_state['fig_sec'] = fig
-            
-            if 'fig_sec' in st.session_state: st.plotly_chart(st.session_state['fig_sec'], use_container_width=True)
+                    fig = plot_rrg_chart(r, m, labels, title, is_dark)
+                    st.plotly_chart(fig, use_container_width=True)
+                else: st.error("Data insufficient. Check benchmark/ticker availability.")
 
-        elif rrg_mode == "Drill-Down":
-            c1, c2 = st.columns([1,3])
-            with c1:
-                def fmt(x): return f"{x} - {tc.RRG_SECTORS[x]}" if x in tc.RRG_SECTORS else x
-                opts = list(tc.RRG_SECTORS.keys()) + ["Canada (TSX)"]
-                sec_key = st.selectbox("Select Sector", opts, format_func=fmt, key="dd_sel")
-            
-            if sec_key == "Canada (TSX)": bench_dd = "HXT.TO"; name_dd = "Canadian Titans"
-            else: bench_dd = sec_key; name_dd = tc.RRG_SECTORS[sec_key]
-            
-            if st.button(f"Run {name_dd}"):
-                comp_list = list(tc.RRG_INDUSTRY_MAP.get(sec_key, {}).keys())
-                wide_df = prepare_rrg_inputs(master_data, comp_list, bench_dd)
-                r, m = calculate_rrg_math(wide_df, bench_dd)
-                
-                # Combine Labels
-                all_labels = {**tc.RRG_INDUSTRY_MAP.get(sec_key, {}), **tc.RRG_SECTORS}
-                fig = plot_rrg_chart(r, m, all_labels, f"{name_dd} vs {bench_dd}", is_dark)
-                st.session_state['fig_dd'] = fig
-            
-            if 'fig_dd' in st.session_state: st.plotly_chart(st.session_state['fig_dd'], use_container_width=True)
-
-        elif rrg_mode == "Themes":
-            if st.button("Run Themes"):
-                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_THEMES.keys()), "SPY")
-                r, m = calculate_rrg_math(wide_df, "SPY")
-                fig = plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
-                st.session_state['fig_thm'] = fig
-            
-            if 'fig_thm' in st.session_state: st.plotly_chart(st.session_state['fig_thm'], use_container_width=True)
+        with sub1:
+            render_rrg(list(tc.RRG_INDICES.keys()), "SPY", "Indices")
+        with sub2:
+            render_rrg(list(tc.RRG_SECTORS.keys()), "SPY", "Sectors")
+        with sub3:
+            s_key = st.selectbox("Sector", list(tc.RRG_SECTORS.keys()))
+            render_rrg(list(tc.RRG_INDUSTRY_MAP.get(s_key, {}).keys()), s_key, f"{tc.RRG_SECTORS[s_key]} Industries")
+        with sub4:
+            render_rrg(list(tc.RRG_THEMES.keys()), "SPY", "Themes")
