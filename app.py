@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 try:
     import titan_config as tc
 except ImportError:
-    st.error("⚠️ CRITICAL ERROR: `titan_config.py` is missing or corrupt.")
+    st.error("⚠️ CRITICAL ERROR: `titan_config.py` is missing. Please create it.")
     st.stop()
 
 # --- PAGE CONFIGURATION ---
@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v56.3 Data Repair)
+#  TITAN STRATEGY APP (v56.4 UI Restoration)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -53,8 +53,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v56.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Data Repair Active")
+st.title(f"🛡️ Titan Strategy v56.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: UI Restored | Data Fixed")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -122,7 +122,7 @@ def round_to_03_07(price):
     if not candidates: return price 
     return min(candidates, key=lambda x: abs(x - price))
 
-# --- STYLING ---
+# --- STYLING (Restored v55.9 Logic) ---
 def style_final(styler):
     def color_pct(val):
         if isinstance(val, str) and '%' in val:
@@ -158,7 +158,8 @@ def style_final(styler):
         return styles
 
     return styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}
+        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]},
+        {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
     ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
       .apply(highlight_ticker_row, axis=1)\
       .map(color_pct, subset=["4W %", "2W %"])\
@@ -167,10 +168,17 @@ def style_final(styler):
 
 def style_daily_health(styler):
     def color_status(v):
-        if "PASS" in v or "NORMAL" in v or "RISING" in v: return 'color: #00ff00; font-weight: bold'
-        if "FAIL" in v or "PANIC" in v or "FALLING" in v: return 'color: #ff4444; font-weight: bold'
-        return 'color: white'
-    return styler.map(color_status, subset=['Status']).hide(axis='index')
+        if "PASS" in v or "NORMAL" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
+        if "FAIL" in v or "PANIC" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
+        return 'color: white; font-weight: bold'
+
+    return styler.set_table_styles([
+         {'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, 
+         {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}
+    ]).set_properties(**{'background-color': '#222', 'border-color': '#444'})\
+      .set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'})\
+      .map(color_status, subset=['Status'])\
+      .hide(axis='index')
 
 def style_portfolio(styler):
     def color_pl(val):
@@ -188,7 +196,7 @@ def style_history(styler):
 
 def fmt_delta(val): return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 
-# --- PORTFOLIO ENGINE (Patched for Shadow_SPY) ---
+# --- PORTFOLIO ENGINE (With Data Repair) ---
 def load_portfolio():
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
     
@@ -197,12 +205,11 @@ def load_portfolio():
     
     df = pd.read_csv(PORTFOLIO_FILE)
     
-    # 1. AUTO-ADD MISSING COLUMNS (The Fix)
+    # 1. AUTO-ADD MISSING COLUMNS
     for c in cols:
-        if c not in df.columns:
-            df[c] = None
+        if c not in df.columns: df[c] = None
     
-    # 2. RENAME LEGACY COLUMNS
+    # 2. RENAME LEGACY
     if 'Cost' in df.columns and 'Cost_Basis' not in df.columns: df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
     
     # 3. FILL DEFAULTS
@@ -216,20 +223,12 @@ def load_portfolio():
 def save_portfolio(df):
     dollar_cols = ['Cost_Basis', 'Exit_Price', 'Realized_PL', 'Return', 'SPY_Return']
     for col in dollar_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
-            
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
     def clean_shares(row):
         val = row['Shares']
         if pd.isna(val): return 0
-        if row['Ticker'] == 'CASH':
-            return round(val, 2)
-        else:
-            return int(val) 
-            
-    if not df.empty:
-        df['Shares'] = df.apply(clean_shares, axis=1)
-
+        return round(val, 2) if row['Ticker'] == 'CASH' else int(val)
+    if not df.empty: df['Shares'] = df.apply(clean_shares, axis=1)
     df.to_csv(PORTFOLIO_FILE, index=False)
 
 # --- SIDEBAR MANAGER ---
@@ -367,24 +366,114 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 3. BENCHMARK
         st.subheader("📈 Performance vs SPY")
         if spy is not None:
-            # FIX: Ensure Shadow_SPY exists (handled by load_portfolio, but safe access here)
             if 'Shadow_SPY' in pf_df.columns:
                 bench_val = pf_df['Shadow_SPY'].sum() * spy['Close'].iloc[-1]
                 st.metric("Alpha", f"${(total_nw - bench_val):,.2f}")
             else:
-                st.warning("Benchmark data missing. Please reload page.")
+                st.warning("Benchmark initialized. Reload to see Alpha.")
         st.write("---")
 
-        # 4. HEALTH
-        if spy is not None and vix is not None:
+        # 4. HEALTH (Restored List-of-Dicts UI)
+        if spy is not None and vix is not None and rsp is not None:
             v_cur = vix.iloc[-1]['Close']; s_cur = spy.iloc[-1]['Close']
             s_sma = calc_sma(spy['Close'], 20).iloc[-1]
-            score = 0; rows = []
-            if v_cur < 20: score += 1; rows.append(["VIX", f"{v_cur:.2f}", "PASS"])
-            else: rows.append(["VIX", f"{v_cur:.2f}", "FAIL"])
             
-            if s_cur > s_sma: score += 1; rows.append(["SPY Trend", "BULLISH", "PASS"])
-            else: rows.append(["SPY Trend", "BEARISH", "FAIL"])
+            mkt_score = 0
+            health_rows = []
+            
+            # VIX
+            if v_cur < 17: v_stat = "<span style='color:#00ff00'>NORMAL</span>"; mkt_score += 9
+            elif v_cur < 20: v_stat = "<span style='color:#00ff00'>CAUTIOUS</span>"; mkt_score += 6
+            elif v_cur < 25: v_stat = "<span style='color:#ffaa00'>DEFENSIVE</span>"; mkt_score += 3
+            else: v_stat = "<span style='color:#ff4444'>PANIC</span>"
+            health_rows.append({"Indicator": f"VIX Level ({v_cur:.2f})", "Status": v_stat})
+            
+            # SPY Trend
+            if s_cur > s_sma: 
+                s_stat = "<span style='color:#00ff00'>PASS</span>"; mkt_score += 1
+            else: 
+                s_stat = "<span style='color:#ff4444'>FAIL</span>"
+            health_rows.append({"Indicator": "SPY Price > SMA18", "Status": s_stat})
+            
+            # RSP Trend
+            r_cur = rsp.iloc[-1]['Close']; r_sma = calc_sma(rsp['Close'], 20).iloc[-1]
+            if r_cur > r_sma:
+                r_stat = "<span style='color:#00ff00'>PASS</span>"; mkt_score += 1
+            else:
+                r_stat = "<span style='color:#ff4444'>FAIL</span>"
+            health_rows.append({"Indicator": "RSP Price > SMA18", "Status": r_stat})
+            
+            # TOTAL
+            if mkt_score >= 10: msg="AGGRESSIVE (100%)"; cl="#00ff00"
+            elif mkt_score >= 8: msg="CAUTIOUS (100%)"; cl="#00ff00"
+            elif mkt_score >= 5: msg="DEFENSIVE (50%)"; cl="#ffaa00"
+            else: msg="CASH (0%)"; cl="#ff4444"
+            
+            health_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{cl}; font-weight:bold'>{msg}</span>"})
             
             st.subheader("🏥 Market Health")
-            st.markdown
+            st.markdown(pd.DataFrame(health_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
+            st.write("---")
+
+    # 5. SCANNER
+    with st.spinner('Running Scanner...'):
+        all_tickers = list(set(list(tc.DATA_MAP.keys()) + [x for x in pf_tickers if x != "CASH"]))
+        
+        for t in all_tickers:
+            if t not in cache_d:
+                try: cache_d[t] = yf.Ticker("SPY" if t=="MANL" else t).history(period="2y")
+                except: pass
+        
+        results = []
+        for t in all_tickers:
+            if t not in cache_d or len(cache_d[t]) < 20: continue
+            df = cache_d[t]
+            
+            df['SMA18'] = calc_sma(df['Close'], 18)
+            df['SMA50'] = calc_sma(df['Close'], 50)
+            df['ATR'] = calc_atr(df['High'], df['Low'], df['Close'])
+            df['VolSMA'] = calc_sma(df['Volume'], 18)
+            df['RSI5'] = calc_rsi(df['Close'], 5)
+            df['RSI20'] = calc_rsi(df['Close'], 20)
+            
+            curr = df['Close'].iloc[-1]
+            sma18 = df['SMA18'].iloc[-1]; sma50 = df['SMA50'].iloc[-1]
+            cld = calc_ichimoku(df['High'], df['Low'], df['Close'])[0].iloc[-1]
+            struct = calc_structure(df)
+            
+            score = 0
+            if curr > sma18: score += 1
+            if sma18 > sma50: score += 1
+            if curr > cld: score += 1
+            
+            action = "AVOID"
+            if score == 3: action = "BUY" if struct in ["HH", "HL"] else "SCOUT"
+            elif score == 2: action = "WATCH"
+            
+            smart_stop = round_to_03_07(curr - (2.618 * df['ATR'].iloc[-1]))
+            
+            r5 = df['RSI5'].iloc[-1]; r20 = df['RSI20'].iloc[-1]
+            arrow = "↑" if r5 > df['RSI5'].iloc[-2] else "↓"
+            rsi_html = f"{int(r5)}/{int(r20)} {arrow}"
+            
+            vol_msg = "NORMAL"
+            if df['Volume'].iloc[-1] > (df['VolSMA'].iloc[-1] * 1.5): vol_msg = "SPIKE (Live)"
+            
+            cat = tc.DATA_MAP[t][0] if t in tc.DATA_MAP else "OTHER"
+            if "99. DATA" in cat: continue
+            
+            results.append({
+                "Sector": cat, "Ticker": t, "Action": action, 
+                "Weekly<br>Score": score, "Structure": struct,
+                "Stop Price": f"${smart_stop:.2f}",
+                "Dual RSI": rsi_html, "Volume": vol_msg,
+                "4W %": f"{((curr/df['Close'].iloc[-20])-1)*100:.1f}%",
+                "2W %": f"{((curr/df['Close'].iloc[-10])-1)*100:.1f}%"
+            })
+            
+        if results:
+            df_final = pd.DataFrame(results).sort_values(["Sector", "Weekly<br>Score"], ascending=[True, False])
+            cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>Score", "Structure", "Volume", "Dual RSI", "Action", "Stop Price"]
+            st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
+        else:
+            st.warning("Scanner returned no results.")
