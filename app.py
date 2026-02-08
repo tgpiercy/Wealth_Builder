@@ -2,41 +2,60 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- SAFE IMPORTS ---
 try:
     import yfinance as yf
 except ImportError:
-    st.error("⚠️ YFinance missing. Run: pip install yfinance")
+    st.error("⚠️ YFinance missing. pip install yfinance")
     st.stop()
 
-# --- IMPORT CONFIG ---
+# --- IMPORT CONFIG (Modularization) ---
 try:
     import titan_config as tc
 except ImportError:
-    st.error("⚠️ titan_config.py is missing! Please create it with the ticker lists.")
-    st.stop()
+    # Fallback if config file is missing (Safe Mode)
+    st.warning("⚠️ titan_config.py missing. Using internal backup.")
+    class tc:
+        BENCHMARK_US = "SPY"
+        BENCHMARK_CA = "HXT.TO"
+        INDICES = {"QQQ":"Nasdaq", "SPY":"S&P500", "IWM":"Russell2000"}
+        SECTORS = {"XLK":"Tech", "XLF":"Financials"}
+        THEMES = {"BOTZ":"AI", "GDX":"Gold"}
+        INDUSTRY_MAP = {"XLK": {"NVDA":"Nvidia", "MSFT":"Microsoft"}}
 
-# --- SETUP ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
 CREDENTIALS = {"dad": "1234", "son": "1234"}
-PORTFOLIO_FILE = f"portfolio_{st.session_state.get('user', 'dad')}.csv"
+
+# --- AUTHENTICATION ---
+if 'authenticated' not in st.session_state: st.session_state.authenticated = False
+if not st.session_state.authenticated:
+    st.title("🛡️ Titan Strategy Login")
+    with st.form("login"):
+        u = st.text_input("Username"); p = st.text_input("Password", type="password")
+        if st.form_submit_button("Login"):
+            if u in CREDENTIALS and CREDENTIALS[u] == p:
+                st.session_state.authenticated = True; st.session_state.user = u; st.rerun()
+            else: st.error("Access Denied")
+    st.stop()
+
+user = st.session_state.user
+PORTFOLIO_FILE = f"portfolio_{user}.csv"
 
 # ==============================================================================
-#  HELPER FUNCTIONS (Robust Data & Logic)
+#  HELPER FUNCTIONS (Core Logic)
 # ==============================================================================
 
 def safe_download(tickers, period):
-    """Robust downloader that handles yfinance MultiIndex issues"""
     try:
         data = yf.download(tickers, period=period, group_by='ticker', progress=False)
-        if len(tickers) == 1: return {tickers[0]: data} # Standarize single ticker
+        if len(tickers) == 1: return {tickers[0]: data}
         return data
     except: return pd.DataFrame()
 
 def get_price_series(data, ticker):
-    """Extracts Close price safely from complex structures"""
     try:
         if isinstance(data, pd.DataFrame):
             if isinstance(data.columns, pd.MultiIndex) and ticker in data.columns.levels[0]:
@@ -48,6 +67,14 @@ def get_price_series(data, ticker):
     return pd.Series(dtype=float)
 
 def calc_sma(s, l): return s.rolling(l).mean()
+
+def calc_atr(high, low, close, length=14):
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(length).mean()
+
 def calc_rsi(series, length=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=length).mean()
@@ -85,6 +112,13 @@ def calc_structure(df, deviation_pct=0.035):
     if curr[2] == 1: return "HH" if curr[1] > prev[1] else "LH"
     return "LL" if curr[1] < prev[1] else "HL"
 
+def calc_ad(high, low, close, volume):
+    mfm = ((close - low) - (high - close)) / (high - low)
+    mfm = mfm.fillna(0)
+    mfv = mfm * volume
+    return mfv.cumsum()
+
+# --- STYLING ---
 def style_portfolio(styler):
     def color_pl(val):
         if isinstance(val, str):
@@ -101,31 +135,22 @@ def style_scanner(styler):
         return ''
     return styler.map(color_action, subset=["Action"])
 
+def style_daily_health(styler):
+    def color_status(v):
+        if "PASS" in v or "NORMAL" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
+        if "FAIL" in v or "PANIC" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
+        return 'color: white; font-weight: bold'
+    return styler.map(color_status, subset=['Status']).hide(axis='index')
+
 # ==============================================================================
 #  MAIN APP
 # ==============================================================================
 
-# --- AUTH ---
-if 'authenticated' not in st.session_state: st.session_state.authenticated = False
-if not st.session_state.authenticated:
-    st.title("🛡️ Titan Strategy Login")
-    with st.form("login"):
-        u = st.text_input("Username"); p = st.text_input("Password", type="password")
-        if st.form_submit_button("Login"):
-            if u in CREDENTIALS and CREDENTIALS[u] == p:
-                st.session_state.authenticated = True; st.session_state.user = u; st.rerun()
-            else: st.error("Access Denied")
-    st.stop()
-
-user = st.session_state.user
-PORTFOLIO_FILE = f"portfolio_{user}.csv"
-
-# --- SIDEBAR ---
 st.sidebar.write(f"👤 **{user.upper()}**")
 if st.sidebar.button("Logout"): st.session_state.authenticated = False; st.rerun()
 
-st.title(f"🛡️ Titan Strategy v58.2")
-st.caption("Powered by `titan_config.py` | Full Logic Restored")
+st.title(f"🛡️ Titan Strategy v55.9 (Modular)")
+st.caption("Institutional Protocol | ATR & 3-Factor Model Active")
 
 tab1, tab2, tab3 = st.tabs(["💼 Portfolio Manager", "🏥 Market Health", "🔍 Deep Scanner"])
 
@@ -135,33 +160,26 @@ with tab1:
         pd.DataFrame(columns=["ID","Ticker","Date","Shares","Cost_Basis","Status"]).to_csv(PORTFOLIO_FILE, index=False)
     pf_df = pd.read_csv(PORTFOLIO_FILE)
     
-    # FIX: Auto-Correct 'Cost' to 'Cost_Basis' if mismatched
-    if 'Cost' in pf_df.columns and 'Cost_Basis' not in pf_df.columns:
-        pf_df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
+    # Auto-Fix Columns
+    if 'Cost' in pf_df.columns and 'Cost_Basis' not in pf_df.columns: pf_df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
     if 'Cost_Basis' not in pf_df.columns: pf_df['Cost_Basis'] = 0.0
 
     # 1. Active Holdings
     active_rows = []; total_equity = 0.0; total_cost = 0.0
-    
     open_pos = pf_df[(pf_df['Status']=='OPEN') & (pf_df['Ticker']!='CASH')]
+    
     if not open_pos.empty:
         tickers = open_pos['Ticker'].unique().tolist()
         try:
             prices_data = safe_download(tickers, "1d")
             for idx, row in open_pos.iterrows():
-                t = row['Ticker']
-                shares = float(row['Shares'])
-                cost_base = float(row['Cost_Basis'])
-                
-                # Get Price Safely
+                t = row['Ticker']; shares = float(row['Shares']); cost_base = float(row['Cost_Basis'])
                 curr_p = cost_base
                 p_ser = get_price_series(prices_data, t)
                 if not p_ser.empty: curr_p = float(p_ser.iloc[-1])
 
-                val = shares * curr_p
-                cost = shares * cost_base
-                total_equity += val
-                total_cost += cost
+                val = shares * curr_p; cost = shares * cost_base
+                total_equity += val; total_cost += cost
                 pl = val - cost
                 pl_pct = (pl / cost) * 100 if cost != 0 else 0
                 
@@ -170,11 +188,10 @@ with tab1:
                     "Avg Cost": f"${cost_base:.2f}", "Current": f"${curr_p:.2f}",
                     "Gain/Loss ($)": f"${pl:+.2f}", "% Return": f"{pl_pct:+.2f}%"
                 })
-        except Exception as e: st.error(f"Price Error: {e}")
+        except: pass
 
     # Cash & Metrics
     cash_bal = pf_df[(pf_df['Ticker']=='CASH') & (pf_df['Status']=='OPEN')]['Shares'].sum()
-    
     c1, c2, c3 = st.columns(3)
     c1.metric("Net Worth", f"${(cash_bal + total_equity):,.2f}")
     c2.metric("Cash Available", f"${cash_bal:,.2f}")
@@ -183,9 +200,9 @@ with tab1:
     if active_rows:
         st.subheader("Active Holdings")
         st.dataframe(pd.DataFrame(active_rows).style.pipe(style_portfolio), use_container_width=True)
-    else: st.info("No active stock positions.")
+    else: st.info("No active positions.")
 
-    # 2. Buy Form (Uses Data Map)
+    # 2. Buy Logic
     with st.expander("➕ Record Trade"):
         with st.form("trade"):
             # Build Ticker List from Config
@@ -200,7 +217,6 @@ with tab1:
                 nid = pf_df['ID'].max() + 1 if not pf_df.empty else 1
                 r1 = {"ID":nid, "Ticker":t_tk, "Date":str(datetime.now().date()), "Shares":t_sh, "Cost_Basis":t_pr, "Status":"OPEN", "Type":"STOCK"}
                 r2 = {"ID":nid+1, "Ticker":"CASH", "Date":str(datetime.now().date()), "Shares":-(t_sh*t_pr), "Cost_Basis":1, "Status":"OPEN", "Type":"DEBIT"}
-                
                 pf_df = pd.concat([pf_df, pd.DataFrame([r1, r2])], ignore_index=True)
                 pf_df.to_csv(PORTFOLIO_FILE, index=False)
                 st.success(f"Bought {t_tk}")
@@ -219,8 +235,7 @@ with tab2:
                 s_cur = spy.iloc[-1]
                 s_sma = calc_sma(spy, 20).iloc[-1]
                 
-                score = 0
-                sigs = []
+                score = 0; sigs = []
                 
                 if v_cur < 20: 
                     score += 1; sigs.append(["Volatility", f"{v_cur:.2f}", "✅ PASS (<20)"])
@@ -234,12 +249,13 @@ with tab2:
                 elif score == 1: st.warning("🟡 MARKET YELLOW (Caution)")
                 else: st.error("🔴 MARKET RED (Cash/Defensive)")
                 
-                st.table(pd.DataFrame(sigs, columns=["Metric", "Level", "Status"]))
+                st.table(pd.DataFrame(sigs, columns=["Metric", "Level", "Status"]).style.pipe(style_daily_health))
 
-# --- TAB 3: DEEP SCANNER ---
+# --- TAB 3: DEEP SCANNER (Legacy Logic Restored) ---
 with tab3:
-    st.write("Full Titan Logic (ZigZag, Impulse, Cloud)")
-    # Build Scan List from Config
+    st.write("Full Titan Logic (ZigZag, Impulse, Cloud, ATR)")
+    
+    # 1. Build Scan List from Config
     scan_list = []
     for k,v in tc.INDICES.items(): scan_list.append((k, "INDEX", "SPY"))
     for k,v in tc.SECTORS.items(): scan_list.append((k, "SECTOR", "SPY"))
@@ -252,7 +268,7 @@ with tab3:
         tickers = [x[0] for x in scan_list]
         meta = {x[0]: {'cat': x[1]} for x in scan_list}
         
-        # Batch Fetch
+        # 2. Batch Processing
         batch_size = 20
         prog_bar = st.progress(0)
         
@@ -266,14 +282,16 @@ with tab3:
                     prices = get_price_series(data, tk).dropna()
                     if len(prices) < 60: continue
                     
-                    # Logic
+                    # 3. Calculations
                     curr = prices.iloc[-1]
                     sma18 = calc_sma(prices, 18).iloc[-1]
                     sma50 = calc_sma(prices, 50).iloc[-1]
                     rsi = calc_rsi(prices, 5).iloc[-1]
-                    cloud = calc_ichimoku(prices, prices).iloc[-1] # Approx
+                    cloud = calc_ichimoku(prices, prices).iloc[-1]
                     struct = calc_structure(prices.to_frame(name='Close'))
+                    atr = calc_atr(prices, prices, prices).iloc[-1]
                     
+                    # 4. Scoring Logic (3-Factor)
                     score = 0
                     if curr > sma18: score += 1
                     if sma18 > sma50: score += 1
@@ -287,9 +305,10 @@ with tab3:
                     
                     results.append({
                         "Category": meta[tk]['cat'], "Ticker": tk, "Price": curr,
-                        "Action": action, "Structure": struct, "Score": f"{score}/3"
+                        "Action": action, "Structure": struct, "Score": f"{score}/3",
+                        "ATR": f"{atr:.2f}"
                     })
-            except Exception as e: print(e)
+            except: pass
             
         prog_bar.empty()
         if results:
