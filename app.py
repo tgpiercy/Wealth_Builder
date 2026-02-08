@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v56.7 Styling Fix)
+#  TITAN STRATEGY APP (v57.1 Data Safety)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -53,8 +53,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v56.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Full Logic | Modular Config")
+st.title(f"🛡️ Titan Strategy v57.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Data Export Enabled")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -159,7 +159,6 @@ def style_final(styler):
             return 'color: #FF4444; font-weight: bold'
         except: return ''
 
-    # --- RESTORED MISSING FUNCTION ---
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
         if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
@@ -168,7 +167,6 @@ def style_final(styler):
         if "HH" in val: return 'color: #CCFFCC'
         if "LL" in val: return 'color: #FFCCCC'
         return 'color: #888888'
-    # ---------------------------------
 
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
@@ -485,7 +483,24 @@ with tab4:
         except: st.error("Could not fetch ticker data.")
 
 with tab5:
+    st.write("### 🛠️ Maintenance & Safety")
+    
+    # --- DATA EXPORT BUTTON (The Fix) ---
+    if os.path.exists(PORTFOLIO_FILE):
+        with open(PORTFOLIO_FILE, "rb") as file:
+            st.download_button(
+                label="💾 Download Portfolio CSV (Save Data)",
+                data=file,
+                file_name=PORTFOLIO_FILE,
+                mime="text/csv"
+            )
+    else:
+        st.warning("No portfolio file found to download.")
+    # ------------------------------------
+
+    st.write("---")
     action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
+    
     if action_type == "⚠️ FACTORY RESET":
         st.error("This will permanently delete all data.")
         if st.button("CONFIRM RESET"):
