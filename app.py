@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v56.1 Restored)
+#  TITAN STRATEGY APP (v56.1 Modular)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -96,7 +96,7 @@ def calc_rsi(series, length):
     rsi_vals = 100 - (100 / (1 + rs))
     return pd.Series(rsi_vals, index=series.index)
 
-# --- ZIG ZAG STRUCTURE ENGINE ---
+# --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
     pivots = []; trend = 1; last_val = df['Close'].iloc[0]
