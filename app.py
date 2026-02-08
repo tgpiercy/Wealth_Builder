@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v59.5 The Compass)
+#  TITAN STRATEGY APP (v60.0 Pine Parity)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,32 +61,51 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v59.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sector Rotation Integration")
+st.title(f"🛡️ Titan Strategy v60.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Pine Script v2.8 Logic Match")
 
-# --- CALCULATIONS ---
-def calc_sma(series, length): return series.rolling(window=length).mean()
+# --- CALCULATIONS (PINE SCRIPT MATCHING) ---
+def calc_sma(series, length): 
+    return series.rolling(window=length).mean()
+
 def calc_ad(high, low, close, volume):
-    mfm = ((close - low) - (high - close)) / (high - low); mfm = mfm.fillna(0); mfv = mfm * volume
+    """Matches Pine Script ta.accdist"""
+    mfm = ((close - low) - (high - close)) / (high - low)
+    mfm = mfm.fillna(0.0) # Handle divide by zero
+    mfv = mfm * volume
     return mfv.cumsum()
+
 def calc_ichimoku(high, low, close):
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a = ((tenkan + kijun) / 2).shift(26); span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    span_a = ((tenkan + kijun) / 2).shift(26)
+    span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
     return span_a, span_b
+
 def calc_atr(high, low, close, length=14):
-    tr1 = high - low; tr2 = abs(high - close.shift(1)); tr3 = abs(low - close.shift(1))
+    """Wilder's Smoothing for ATR to match Pine Script"""
+    tr1 = high - low
+    tr2 = abs(high - close.shift(1))
+    tr3 = abs(low - close.shift(1))
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(length).mean()
-def calc_rsi(series, length):
-    delta = series.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
-    avg_gain = np.full_like(gain, np.nan); avg_loss = np.full_like(loss, np.nan)
-    avg_gain[length] = gain[1:length+1].mean(); avg_loss[length] = loss[1:length+1].mean()
-    for i in range(length + 1, len(series)):
-        avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
-        avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
-    rs = avg_gain / avg_loss; rs = np.where(avg_loss == 0, 100, rs)
-    return pd.Series(100 - (100 / (1 + rs)), index=series.index)
+    # Use EWM with com=length-1 for Wilder's Smoothing
+    return tr.ewm(alpha=1/length, adjust=False).mean()
+
+def calc_rsi(series, length=14):
+    """
+    Exact Pine Script Match: Uses Wilder's Smoothing (RMA).
+    Pandas 'ewm' with com=length-1 is mathematically equivalent to Pine 'rma'.
+    """
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    
+    avg_gain = gain.ewm(com=length-1, adjust=False).mean()
+    avg_loss = loss.ewm(com=length-1, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss
+    rs = rs.fillna(0) # Safety
+    return 100 - (100 / (1 + rs))
 
 # --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
@@ -144,7 +163,7 @@ def prepare_rrg_inputs(data_map, tickers, benchmark):
             df_wide[t] = w_df['Close']
     return df_wide.dropna()
 
-# --- RRG LOGIC (Global & Per-Ticker) ---
+# --- RRG LOGIC ---
 def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
     df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
@@ -162,32 +181,21 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
 
 def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
-    """Calculates RRG Status for ALL tickers in data_map against SPY"""
-    # 1. Create Wide DataFrame of Weekly Closes
     all_tickers = list(data_map.keys())
     if benchmark not in all_tickers: return {}
-    
     wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
     if wide_df.empty: return {}
-    
-    # 2. Run Math
     r, m = calculate_rrg_math(wide_df, benchmark)
     if r.empty or m.empty: return {}
-    
-    # 3. Create Status Map (Last valid date)
     status_map = {}
     last_idx = r.index[-1]
-    
     for t in r.columns:
-        val_r = r.at[last_idx, t]
-        val_m = m.at[last_idx, t]
-        
+        val_r = r.at[last_idx, t]; val_m = m.at[last_idx, t]
         if val_r > 100 and val_m > 100: status = "LEADING"
         elif val_r > 100 and val_m < 100: status = "WEAKENING"
         elif val_r < 100 and val_m < 100: status = "LAGGING"
         else: status = "IMPROVING"
         status_map[t] = status
-        
     return status_map
 
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
@@ -235,7 +243,6 @@ def style_final(styler):
         if "LAGGING" in val: return 'color: #FF4444; font-weight: bold'
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
-
     def color_rsi(val):
         try:
             parts = val.split(); r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
@@ -511,7 +518,7 @@ if st.session_state.run_analysis:
             c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
             st.write("---")
 
-        # 4. MARKET HEALTH
+        # 4. MARKET HEALTH (PINE SCRIPT PARITY)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
@@ -546,7 +553,7 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (CACHED)
+        # 5. SCANNER LOOP (CACHED + PINE LOGIC)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {}
@@ -554,8 +561,41 @@ if st.session_state.run_analysis:
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
-            df['AD_SMA18'] = calc_sma(df['AD'], 18); df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
+            df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40)
+            df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
+            # Soft Distribution Check (Pine Logic)
+            ad_sma18 = calc_sma(df['AD'], 18); ad_sma40 = calc_sma(df['AD'], 40)
+            df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
+            
+            # --- RS CALC (Stability Band 0.5%) ---
+            bench_ticker = "SPY" # Default
+            if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
+            
+            rs_score_ok = False
+            if bench_ticker in master_data:
+                bench_series = master_data[bench_ticker]['Close']
+                # Align dates
+                common_idx = df.index.intersection(bench_series.index)
+                rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
+                rs_sma18 = calc_sma(rs_series, 18)
+                
+                curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
+                prev_rs_sma = rs_sma18.iloc[-2]
+                
+                # Logic: RS > SMA18 (Strong) OR (RS within +/- 0.5% AND SMA18 Rising)
+                upper_band = curr_rs_sma * 1.005
+                lower_band = curr_rs_sma * 0.995
+                
+                rs_strong = curr_rs > upper_band
+                rs_stable = (curr_rs <= upper_band) and (curr_rs >= lower_band)
+                rs_not_down = curr_rs_sma >= prev_rs_sma
+                
+                if rs_strong: rs_score_ok = True
+                elif rs_stable and rs_not_down: rs_score_ok = True
+            else:
+                rs_score_ok = True # Fallback if no benchmark
+            
+            # Weekly
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
@@ -565,9 +605,13 @@ if st.session_state.run_analysis:
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
             inst_activity = calc_structure(df)
             
-            ad_pass = False
-            if len(df) > 2 and not pd.isna(df['AD_SMA18'].iloc[-1]):
-                 ad_pass = (df['AD'].iloc[-1] >= df['AD_SMA18'].iloc[-1] * 0.995) and (df['AD_SMA18'].iloc[-1] >= df['AD_SMA18'].iloc[-2])
+            # --- A/D WEAK DISTRIBUTION CHECK (Pine Match) ---
+            ad_val = df['AD'].iloc[-1]
+            ad18 = ad_sma18.iloc[-1]; ad18_prev = ad_sma18.iloc[-2]
+            ad40 = ad_sma40.iloc[-1]
+            
+            ad_weak_distrib = (ad_val < ad18 and ad18 <= ad18_prev) or (ad18 < ad40 and ad18 < ad18_prev)
+            ad_score_ok = not ad_weak_distrib
             
             vol_msg = "NORMAL"
             if df['Volume'].iloc[-1] > (df['VolSMA'].iloc[-1] * 1.5): vol_msg = "SPIKE (Live)"
@@ -591,19 +635,21 @@ if st.session_state.run_analysis:
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
+            # --- DAILY SCORE (5 Pts) ---
             d_chk = 0
+            if ad_score_ok: d_chk += 1
+            if rs_score_ok: d_chk += 1
             if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1
-            if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1
-            if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1
-            if ad_pass: d_chk += 1
+            if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1 # 18 Rising
+            if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 # Structure
             
             w_pulse = "GOOD" if (wc['Close'] > wc['SMA18']) and (dc['Close'] > df['SMA18'].iloc[-1]) else "NO"
 
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
-                if d_chk == 4: decision = "BUY"; reason = "Score 5/5"
-                elif d_chk == 3: decision = "SCOUT"; reason = "D-Score 4"
-                elif d_chk == 2: decision = "SCOUT"; reason = "Dip Buy"
+                if d_chk == 5: decision = "BUY"; reason = "Score 5/5" # MATCH
+                elif d_chk == 4: decision = "SCOUT"; reason = "D-Score 4"
+                elif d_chk == 3: decision = "SCOUT"; reason = "Dip Buy"
                 else: decision = "WATCH"; reason = "Daily Weak"
             else: decision = "AVOID"; reason = "Weekly Weak"
 
@@ -623,7 +669,7 @@ if st.session_state.run_analysis:
             # --- PHASE INJECTION ---
             rrg_phase = rrg_snapshot.get(t, "unknown").upper()
             
-            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
