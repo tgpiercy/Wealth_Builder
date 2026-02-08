@@ -38,10 +38,14 @@ SECTORS = {
     "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"
 }
 
-# 2. Major Indices
+# 2. Major Indices (Restored IWC & VIX)
 INDICES = {
-    "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", 
-    "MDY": "Mid-Cap 400", "RSP": "S&P Equal Wgt",
+    "QQQ": "Nasdaq 100", 
+    "DIA": "Dow Jones", 
+    "IWM": "Russell 2000", 
+    "IWC": "Micro-Cap",        # <--- RESTORED
+    "MDY": "Mid-Cap 400", 
+    "RSP": "S&P Equal Wgt",
     "HXT.TO": "TSX 60 (Canada)", 
     "EFA": "Foreign Dev (EAFE)", 
     "EEM": "Emerging Mkts"
@@ -49,17 +53,27 @@ INDICES = {
 
 # 3. Structural Themes & Commodities
 THEMES = {
-    "BOTZ": "Robotics & AI", "AIQ": "Artificial Intel", "ARKG": "Genomics",
-    "ICLN": "Clean Energy", "TAN": "Solar Energy", "NLR": "Nuclear",
-    "URA": "Uranium", "GDX": "Gold Miners", "SILJ": "Silver Jnrs",
-    "COPX": "Copper", "REMX": "Rare Earths", "PAVE": "Infrastructure",
-    "SMH": "Semiconductors", "IGV": "Software", "CIBR": "CyberSecurity",
-    "GLD": "Gold Bullion", "SLV": "Silver Bullion"
+    # Tech / Growth
+    "BOTZ": "Robotics & AI", "AIQ": "Artificial Intel", "SMH": "Semiconductors", 
+    "IGV": "Software", "CIBR": "CyberSecurity", "ARKG": "Genomics",
+    # Energy / Industrial
+    "ICLN": "Clean Energy", "TAN": "Solar Energy", "NLR": "Nuclear", 
+    "URA": "Uranium", "PAVE": "Infrastructure",
+    # Commodities / Metals
+    "GLD": "Gold Bullion", "SLV": "Silver Bullion", "GDX": "Gold Miners", 
+    "SILJ": "Silver Jnrs", "COPX": "Copper", "REMX": "Rare Earths",
+    "MOO": "Agriculture", "SLX": "Steel" # <--- ADDED FROM FILE
 }
 
-# 4. Micro Industries (US & Canada)
+# 4. Micro Industries (Merged List)
 INDUSTRY_MAP = {
-    "XLK": {"SMH": "Semis", "IGV": "Software", "CIBR": "CyberSec", "AAPL": "Apple", "MSFT": "Microsoft"},
+    # US SECTORS
+    "XLK": {
+        "SMH": "Semis", "NVDA": "Nvidia",          # <--- ADDED NVDA
+        "IGV": "Software", "MSFT": "Microsoft", 
+        "CIBR": "CyberSec", "AAPL": "Apple",
+        "SMCI": "Servers (AI)", "ANET": "Networking" # <--- ADDED HARDWARE
+    },
     "XLF": {"KBE": "Banks", "KRE": "Reg. Banks", "IAI": "Brokers", "IAK": "Insurance", "XP": "Fintech"},
     "XLE": {"XOP": "Exploration", "OIH": "Oil Svcs", "CRAK": "Refiners", "XOM": "Exxon", "CVX": "Chevron"},
     "XLV": {"IBB": "Biotech", "IHI": "Med Devices", "PPH": "Pharma", "XHE": "Equipment", "UNH": "UnitedHealth"},
@@ -67,10 +81,18 @@ INDUSTRY_MAP = {
     "XLP": {"PBJ": "Food/Bev", "KXI": "Global Stapl", "COST": "Costco", "PG": "Procter", "WMT": "Walmart"},
     "XLI": {"ITA": "Aerospace", "IYT": "Transport", "JETS": "Airlines", "PAVE": "Infrastruct", "CAT": "Caterpillar"},
     "XLC": {"SOCL": "Social", "PBS": "Media", "GOOGL": "Google", "META": "Meta", "NFLX": "Netflix"},
-    "XLB": {"GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", "REMX": "Rare Earth", "COPX": "Copper"},
+    "XLB": {"GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", "REMX": "Rare Earth", "COPX": "Copper", "MOO": "Agricul", "SLX": "Steel"},
     "XLU": {"IDU": "US Util", "VPU": "Vanguard Util", "NEE": "NextEra", "DUK": "Duke Energy"},
     "XLRE": {"REZ": "Resid. RE", "BBRE": "BetaBuilders", "PLD": "Prologis", "AMT": "Am. Tower"},
-    "Canada (TSX)": {"XEG.TO": "Energy", "XFN.TO": "Financials", "XIT.TO": "Tech", "XRE.TO": "REITs", "XGD.TO": "Gold", "XUT.TO": "Utilities", "XST.TO": "Staples", "XBM.TO": "Base Metals"}
+    
+    # CANADA (TSX TITANS) - Switched to Stocks from File
+    "Canada (TSX)": {
+        "RY.TO": "Royal Bank", "BN.TO": "Brookfield", 
+        "CNQ.TO": "Cdn Natural", "CP.TO": "CP Rail", 
+        "WSP.TO": "WSP Global", "SHOP.TO": "Shopify", 
+        "CSU.TO": "Constellation", "NTR.TO": "Nutrien",
+        "TECK-B.TO": "Teck Res"
+    }
 }
 
 # --- CALCULATION ENGINE ---
@@ -81,13 +103,17 @@ def calculate_rrg(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_
     for col in price_data.columns:
         if col != benchmark_col:
             rs = price_data[col] / price_data[benchmark_col]
+            # RS-Ratio (Normalized Trend vs Benchmark)
+            # Centered at 100
             ratio = 100 + ((rs - rs.rolling(window_rs).mean()) / rs.rolling(window_rs).std()) * 1.5 
             df_ratio[col] = ratio
 
     for col in df_ratio.columns:
+        # RS-Momentum (Velocity of the Ratio)
         mom = 100 + (df_ratio[col] - df_ratio[col].rolling(window=window_mom).mean()) * 2
         df_mom[col] = mom
         
+    # Smoothing
     df_ratio = df_ratio.rolling(window=smooth_factor).mean()
     df_mom = df_mom.rolling(window=smooth_factor).mean()
         
@@ -103,6 +129,7 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
     for ticker in labels_map.keys():
         if ticker not in ratios.columns: continue
         
+        # Trail Data
         x_trail = ratios[ticker].tail(tail_len)
         y_trail = momentums[ticker].tail(tail_len)
         
@@ -114,18 +141,21 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
         curr_x = x_trail.iloc[-1]
         curr_y = y_trail.iloc[-1]
         
+        # Phase Logic
         color = "gray"
         if curr_x > 100 and curr_y > 100: color = C_LEADING
         elif curr_x > 100 and curr_y < 100: color = C_WEAKENING
         elif curr_x < 100 and curr_y < 100: color = C_LAGGING
         elif curr_x < 100 and curr_y > 100: color = C_IMPROVING
 
+        # Draw Trail
         fig.add_trace(go.Scatter(
             x=x_trail, y=y_trail, mode='lines',
             line=dict(color=color, width=2, shape='spline'),
             opacity=0.6, showlegend=False, hoverinfo='skip'
         ))
         
+        # Draw Head
         text_col = C_TEXT if not is_dark else "white"
         fig.add_trace(go.Scatter(
             x=[curr_x], y=[curr_y], mode='markers+text',
@@ -136,6 +166,7 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
             hovertemplate=f"<b>{labels_map[ticker]}</b><br>Trend: %{{x:.2f}}<br>Mom: %{{y:.2f}}"
         ))
 
+    # Dynamic Scaling
     if not all_x: return go.Figure()
     
     x_min, x_max = min(all_x), max(all_x)
@@ -145,12 +176,14 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
     x_min = min(x_min, 98); x_max = max(x_max, 102)
     y_min = min(y_min, 98); y_max = max(y_max, 102)
 
+    # Background Quadrants
     bg_opacity = 0.1 if is_dark else 0.05
     fig.add_shape(type="rect", x0=100, y0=100, x1=x_max+pad, y1=y_max+pad, fillcolor=f"rgba(0, 255, 0, {bg_opacity})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=100, y0=y_min-pad, x1=x_max+pad, y1=100, fillcolor=f"rgba(255, 255, 0, {bg_opacity})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=x_min-pad, y0=y_min-pad, x1=100, y1=100, fillcolor=f"rgba(255, 0, 0, {bg_opacity})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=x_min-pad, y0=100, x1=100, y1=y_max+pad, fillcolor=f"rgba(0, 0, 255, {bg_opacity})", layer="below", line_width=0)
 
+    # Crosshair
     axis_col = "gray" if is_dark else "black"
     fig.add_hline(y=100, line_dash="dot", line_color=axis_col)
     fig.add_vline(x=100, line_dash="dot", line_color=axis_col)
@@ -163,6 +196,7 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
         showlegend=False
     )
     
+    # Labels
     fig.add_annotation(x=x_max, y=y_max, text="LEADING", showarrow=False, font=dict(size=16, color=C_LEADING), xanchor="right", yanchor="top")
     fig.add_annotation(x=x_max, y=y_min, text="WEAKENING", showarrow=False, font=dict(size=16, color=C_WEAKENING), xanchor="right", yanchor="bottom")
     fig.add_annotation(x=x_min, y=y_min, text="LAGGING", showarrow=False, font=dict(size=16, color=C_LAGGING), xanchor="left", yanchor="bottom")
