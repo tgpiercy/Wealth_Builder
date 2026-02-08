@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v60.0 Pine Parity)
+#  TITAN STRATEGY APP (v60.1 Stability Patch)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,17 +61,17 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v60.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Pine Script v2.8 Logic Match")
+st.title(f"🛡️ Titan Strategy v60.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Pine Parity + Safety Limits")
 
-# --- CALCULATIONS (PINE SCRIPT MATCHING) ---
+# --- ROBUST CALCULATIONS (Pine Script Parity) ---
 def calc_sma(series, length): 
     return series.rolling(window=length).mean()
 
 def calc_ad(high, low, close, volume):
-    """Matches Pine Script ta.accdist"""
+    # Matches Pine Script ta.accdist
     mfm = ((close - low) - (high - close)) / (high - low)
-    mfm = mfm.fillna(0.0) # Handle divide by zero
+    mfm = mfm.fillna(0.0) 
     mfv = mfm * volume
     return mfv.cumsum()
 
@@ -83,34 +83,38 @@ def calc_ichimoku(high, low, close):
     return span_a, span_b
 
 def calc_atr(high, low, close, length=14):
-    """Wilder's Smoothing for ATR to match Pine Script"""
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    # Use EWM with com=length-1 for Wilder's Smoothing
-    return tr.ewm(alpha=1/length, adjust=False).mean()
+    # Wilder's Smoothing (Pine Script standard)
+    try:
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.ewm(com=length-1, adjust=False).mean()
+    except:
+        return pd.Series(0, index=close.index)
 
 def calc_rsi(series, length=14):
-    """
-    Exact Pine Script Match: Uses Wilder's Smoothing (RMA).
-    Pandas 'ewm' with com=length-1 is mathematically equivalent to Pine 'rma'.
-    """
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    
-    avg_gain = gain.ewm(com=length-1, adjust=False).mean()
-    avg_loss = loss.ewm(com=length-1, adjust=False).mean()
-    
-    rs = avg_gain / avg_loss
-    rs = rs.fillna(0) # Safety
-    return 100 - (100 / (1 + rs))
+    # Wilder's Smoothing (Pine Script standard)
+    try:
+        delta = series.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(com=length-1, adjust=False).mean()
+        avg_loss = loss.ewm(com=length-1, adjust=False).mean()
+        rs = avg_gain / avg_loss
+        rs = rs.fillna(0)
+        return 100 - (100 / (1 + rs))
+    except:
+        return pd.Series(50, index=series.index)
 
 # --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
+    pivots = []
+    trend = 1
+    last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1))
+    
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
@@ -119,20 +123,32 @@ def calc_structure(df, deviation_pct=0.035):
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
             elif price < last_val * (1 - deviation_pct):
-                trend = -1; last_val = price; pivots.append((i, price, -1))
+                trend = -1
+                last_val = price
+                pivots.append((i, price, -1))
         else:
             if price < last_val:
                 last_val = price
                 if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
                 else: pivots.append((i, price, -1))
             elif price > last_val * (1 + deviation_pct):
-                trend = 1; last_val = price; pivots.append((i, price, 1))
+                trend = 1
+                last_val = price
+                pivots.append((i, price, 1))
+
     if len(pivots) < 3: return "Range"
-    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
+    curr = pivots[-1]
+    prev = pivots[-3]
+    
+    if curr[2] == 1:
+        return "HH" if curr[1] > prev[1] else "LH"
+    else:
+        return "LL" if curr[1] < prev[1] else "HL"
 
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
-    whole = int(price); candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
+    whole = int(price)
+    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     return min(candidates, key=lambda x: abs(x - price)) if candidates else price
 
 # --- UNIFIED DATA ENGINE ---
@@ -163,7 +179,7 @@ def prepare_rrg_inputs(data_map, tickers, benchmark):
             df_wide[t] = w_df['Close']
     return df_wide.dropna()
 
-# --- RRG LOGIC ---
+# --- RRG LOGIC (Global & Per-Ticker) ---
 def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
     df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
@@ -181,22 +197,35 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
 
 def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
-    all_tickers = list(data_map.keys())
-    if benchmark not in all_tickers: return {}
-    wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
-    if wide_df.empty: return {}
-    r, m = calculate_rrg_math(wide_df, benchmark)
-    if r.empty or m.empty: return {}
-    status_map = {}
-    last_idx = r.index[-1]
-    for t in r.columns:
-        val_r = r.at[last_idx, t]; val_m = m.at[last_idx, t]
-        if val_r > 100 and val_m > 100: status = "LEADING"
-        elif val_r > 100 and val_m < 100: status = "WEAKENING"
-        elif val_r < 100 and val_m < 100: status = "LAGGING"
-        else: status = "IMPROVING"
-        status_map[t] = status
-    return status_map
+    """Calculates RRG Status for ALL tickers in data_map against SPY"""
+    try:
+        all_tickers = list(data_map.keys())
+        if benchmark not in all_tickers: return {}
+        
+        wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
+        if wide_df.empty: return {}
+        
+        r, m = calculate_rrg_math(wide_df, benchmark)
+        if r.empty or m.empty: return {}
+        
+        status_map = {}
+        last_idx = r.index[-1]
+        
+        for t in r.columns:
+            try:
+                val_r = r.at[last_idx, t]
+                val_m = m.at[last_idx, t]
+                
+                if val_r > 100 and val_m > 100: status = "LEADING"
+                elif val_r > 100 and val_m < 100: status = "WEAKENING"
+                elif val_r < 100 and val_m < 100: status = "LAGGING"
+                else: status = "IMPROVING"
+                status_map[t] = status
+            except: continue
+            
+        return status_map
+    except:
+        return {}
 
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
@@ -388,7 +417,7 @@ with tab4:
             d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
             stop = round_to_03_07(c - 2.618*atr)
             if c > stop:
-                sh = int(RISK_UNIT_BASE / (c - stop)) 
+                sh = int(RISK_UNIT_BASE / (c - stop))
                 st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
         except: st.error("Error")
 
@@ -487,23 +516,6 @@ if st.session_state.run_analysis:
         else: st.info("No active trades.")
         st.write("---")
 
-        # 2. CLOSED PERFORMANCE
-        closed_trades = pf_df[(pf_df['Status'] == 'CLOSED') & (pf_df['Ticker'] != 'CASH')]
-        if not closed_trades.empty:
-            st.subheader("📜 Closed Performance")
-            wins = closed_trades[closed_trades['Return'] > 0]
-            win_rate = (len(wins) / len(closed_trades)) * 100
-            total_pl = closed_trades['Realized_PL'].sum()
-            c1, c2 = st.columns(2)
-            c1.metric("Win Rate", f"{win_rate:.0f}%"); c2.metric("Total P&L", f"${total_pl:,.2f}")
-            hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
-            hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
-            hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
-            hist_view["P/L"] = hist_view["Realized_PL"].apply(lambda x: f"${x:,.2f}" if x >= 0 else f"-${abs(x):,.2f}")
-            hist_view["% Return"] = hist_view["Return"].apply(lambda x: f"{x:+.2f}%")
-            st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
-            st.write("---")
-
         # 3. BENCHMARK
         shadow_shares_total = pf_df['Shadow_SPY'].sum()
         spy_data = master_data.get("SPY")
@@ -518,7 +530,7 @@ if st.session_state.run_analysis:
             c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
             st.write("---")
 
-        # 4. MARKET HEALTH (PINE SCRIPT PARITY)
+        # 4. MARKET HEALTH (RESTORED FULL)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
@@ -553,7 +565,7 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (CACHED + PINE LOGIC)
+        # 5. SCANNER LOOP (CACHED)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {}
@@ -561,39 +573,37 @@ if st.session_state.run_analysis:
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40)
-            df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
-            # Soft Distribution Check (Pine Logic)
+            df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
+            # Pine Parity: Soft Distribution Check
             ad_sma18 = calc_sma(df['AD'], 18); ad_sma40 = calc_sma(df['AD'], 40)
             df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
             
             # --- RS CALC (Stability Band 0.5%) ---
-            bench_ticker = "SPY" # Default
+            bench_ticker = "SPY"
             if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
             
             rs_score_ok = False
             if bench_ticker in master_data:
                 bench_series = master_data[bench_ticker]['Close']
-                # Align dates
                 common_idx = df.index.intersection(bench_series.index)
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = calc_sma(rs_series, 18)
                 
-                curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
-                prev_rs_sma = rs_sma18.iloc[-2]
-                
-                # Logic: RS > SMA18 (Strong) OR (RS within +/- 0.5% AND SMA18 Rising)
-                upper_band = curr_rs_sma * 1.005
-                lower_band = curr_rs_sma * 0.995
-                
-                rs_strong = curr_rs > upper_band
-                rs_stable = (curr_rs <= upper_band) and (curr_rs >= lower_band)
-                rs_not_down = curr_rs_sma >= prev_rs_sma
-                
-                if rs_strong: rs_score_ok = True
-                elif rs_stable and rs_not_down: rs_score_ok = True
+                if len(rs_series) > 2 and len(rs_sma18) > 2:
+                    curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
+                    prev_rs_sma = rs_sma18.iloc[-2]
+                    
+                    upper_band = curr_rs_sma * 1.005
+                    lower_band = curr_rs_sma * 0.995
+                    
+                    rs_strong = curr_rs > upper_band
+                    rs_stable = (curr_rs <= upper_band) and (curr_rs >= lower_band)
+                    rs_not_down = curr_rs_sma >= prev_rs_sma
+                    
+                    if rs_strong: rs_score_ok = True
+                    elif rs_stable and rs_not_down: rs_score_ok = True
             else:
-                rs_score_ok = True # Fallback if no benchmark
+                rs_score_ok = True 
             
             # Weekly
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
@@ -606,12 +616,13 @@ if st.session_state.run_analysis:
             inst_activity = calc_structure(df)
             
             # --- A/D WEAK DISTRIBUTION CHECK (Pine Match) ---
-            ad_val = df['AD'].iloc[-1]
-            ad18 = ad_sma18.iloc[-1]; ad18_prev = ad_sma18.iloc[-2]
-            ad40 = ad_sma40.iloc[-1]
-            
-            ad_weak_distrib = (ad_val < ad18 and ad18 <= ad18_prev) or (ad18 < ad40 and ad18 < ad18_prev)
-            ad_score_ok = not ad_weak_distrib
+            ad_score_ok = False
+            if len(ad_sma18) > 2:
+                ad_val = df['AD'].iloc[-1]
+                ad18 = ad_sma18.iloc[-1]; ad18_prev = ad_sma18.iloc[-2]
+                ad40 = ad_sma40.iloc[-1]
+                ad_weak_distrib = (ad_val < ad18 and ad18 <= ad18_prev) or (ad18 < ad40 and ad18 < ad18_prev)
+                ad_score_ok = not ad_weak_distrib
             
             vol_msg = "NORMAL"
             if df['Volume'].iloc[-1] > (df['VolSMA'].iloc[-1] * 1.5): vol_msg = "SPIKE (Live)"
@@ -635,7 +646,7 @@ if st.session_state.run_analysis:
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
-            # --- DAILY SCORE (5 Pts) ---
+            # --- DAILY SCORE (5 Pts - Pine Parity) ---
             d_chk = 0
             if ad_score_ok: d_chk += 1
             if rs_score_ok: d_chk += 1
@@ -647,7 +658,7 @@ if st.session_state.run_analysis:
 
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
-                if d_chk == 5: decision = "BUY"; reason = "Score 5/5" # MATCH
+                if d_chk == 5: decision = "BUY"; reason = "Score 5/5" 
                 elif d_chk == 4: decision = "SCOUT"; reason = "D-Score 4"
                 elif d_chk == 3: decision = "SCOUT"; reason = "Dip Buy"
                 else: decision = "WATCH"; reason = "Daily Weak"
@@ -666,8 +677,7 @@ if st.session_state.run_analysis:
             arrow_col = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
             rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
-            # --- PHASE INJECTION ---
-            rrg_phase = rrg_snapshot.get(t, "unknown").upper()
+            rrg_phase = rrg_snapshot.get(t, "—").upper()
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
