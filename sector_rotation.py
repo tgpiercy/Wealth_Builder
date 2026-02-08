@@ -38,17 +38,18 @@ SECTORS = {
     "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"
 }
 
-# 2. Major Indices (Restored IWC & VIX)
+# 2. Major Indices (Restored from File)
 INDICES = {
     "QQQ": "Nasdaq 100", 
     "DIA": "Dow Jones", 
     "IWM": "Russell 2000", 
-    "IWC": "Micro-Cap",        # <--- RESTORED
+    "IWC": "Micro-Cap", 
     "MDY": "Mid-Cap 400", 
     "RSP": "S&P Equal Wgt",
     "HXT.TO": "TSX 60 (Canada)", 
     "EFA": "Foreign Dev (EAFE)", 
-    "EEM": "Emerging Mkts"
+    "EEM": "Emerging Mkts",
+    "^VIX": "Volatility (VIX)"
 }
 
 # 3. Structural Themes & Commodities
@@ -62,17 +63,18 @@ THEMES = {
     # Commodities / Metals
     "GLD": "Gold Bullion", "SLV": "Silver Bullion", "GDX": "Gold Miners", 
     "SILJ": "Silver Jnrs", "COPX": "Copper", "REMX": "Rare Earths",
-    "MOO": "Agriculture", "SLX": "Steel" # <--- ADDED FROM FILE
+    "MOO": "Agribusiness", "SLX": "Steel"
 }
 
-# 4. Micro Industries (Merged List)
+# 4. Micro Industries (Updated from File)
 INDUSTRY_MAP = {
     # US SECTORS
     "XLK": {
-        "SMH": "Semis", "NVDA": "Nvidia",          # <--- ADDED NVDA
+        "SMH": "Semis", "NVDA": "Nvidia", 
         "IGV": "Software", "MSFT": "Microsoft", 
         "CIBR": "CyberSec", "AAPL": "Apple",
-        "SMCI": "Servers (AI)", "ANET": "Networking" # <--- ADDED HARDWARE
+        "SMCI": "Servers (AI)", "DELL": "Dell Tech",
+        "ANET": "Networking", "WDC": "Storage"
     },
     "XLF": {"KBE": "Banks", "KRE": "Reg. Banks", "IAI": "Brokers", "IAK": "Insurance", "XP": "Fintech"},
     "XLE": {"XOP": "Exploration", "OIH": "Oil Svcs", "CRAK": "Refiners", "XOM": "Exxon", "CVX": "Chevron"},
@@ -81,11 +83,15 @@ INDUSTRY_MAP = {
     "XLP": {"PBJ": "Food/Bev", "KXI": "Global Stapl", "COST": "Costco", "PG": "Procter", "WMT": "Walmart"},
     "XLI": {"ITA": "Aerospace", "IYT": "Transport", "JETS": "Airlines", "PAVE": "Infrastruct", "CAT": "Caterpillar"},
     "XLC": {"SOCL": "Social", "PBS": "Media", "GOOGL": "Google", "META": "Meta", "NFLX": "Netflix"},
-    "XLB": {"GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", "REMX": "Rare Earth", "COPX": "Copper", "MOO": "Agricul", "SLX": "Steel"},
+    "XLB": {
+        "GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", 
+        "REMX": "Rare Earth", "COPX": "Copper", 
+        "MOO": "Agricul", "SLX": "Steel", "AA": "Alcoa", "DD": "DuPont"
+    },
     "XLU": {"IDU": "US Util", "VPU": "Vanguard Util", "NEE": "NextEra", "DUK": "Duke Energy"},
     "XLRE": {"REZ": "Resid. RE", "BBRE": "BetaBuilders", "PLD": "Prologis", "AMT": "Am. Tower"},
     
-    # CANADA (TSX TITANS) - Switched to Stocks from File
+    # CANADA (TSX TITANS) - Updated to Stocks
     "Canada (TSX)": {
         "RY.TO": "Royal Bank", "BN.TO": "Brookfield", 
         "CNQ.TO": "Cdn Natural", "CP.TO": "CP Rail", 
