@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v59.4 Variable Patch)
+#  TITAN STRATEGY APP (v59.5 The Compass)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v59.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Variable Scope Fixed")
+st.title(f"🛡️ Titan Strategy v59.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Rotation Integration")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -144,7 +144,7 @@ def prepare_rrg_inputs(data_map, tickers, benchmark):
             df_wide[t] = w_df['Close']
     return df_wide.dropna()
 
-# --- RRG LOGIC ---
+# --- RRG LOGIC (Global & Per-Ticker) ---
 def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
     df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
@@ -153,12 +153,42 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
             try:
                 rs = price_data[col] / price_data[benchmark_col]
                 mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
-                df_ratio[col] = 100 + ((rs - mean) / std) * 1.5
+                ratio = 100 + ((rs - mean) / std) * 1.5
+                df_ratio[col] = ratio
             except: continue
     for col in df_ratio.columns:
         try: df_mom[col] = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
         except: continue
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
+
+def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
+    """Calculates RRG Status for ALL tickers in data_map against SPY"""
+    # 1. Create Wide DataFrame of Weekly Closes
+    all_tickers = list(data_map.keys())
+    if benchmark not in all_tickers: return {}
+    
+    wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
+    if wide_df.empty: return {}
+    
+    # 2. Run Math
+    r, m = calculate_rrg_math(wide_df, benchmark)
+    if r.empty or m.empty: return {}
+    
+    # 3. Create Status Map (Last valid date)
+    status_map = {}
+    last_idx = r.index[-1]
+    
+    for t in r.columns:
+        val_r = r.at[last_idx, t]
+        val_m = m.at[last_idx, t]
+        
+        if val_r > 100 and val_m > 100: status = "LEADING"
+        elif val_r > 100 and val_m < 100: status = "WEAKENING"
+        elif val_r < 100 and val_m < 100: status = "LAGGING"
+        else: status = "IMPROVING"
+        status_map[t] = status
+        
+    return status_map
 
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
@@ -199,9 +229,13 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
 
 # --- STYLING ---
 def style_final(styler):
-    def color_pct(val):
-        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%')) >= 0 else 'color: #ff0000; font-weight: bold'
-        except: return ''
+    def color_rotation(val):
+        if "LEADING" in val: return 'color: #00FF00; font-weight: bold'
+        if "WEAKENING" in val: return 'color: #FFFF00; font-weight: bold'
+        if "LAGGING" in val: return 'color: #FF4444; font-weight: bold'
+        if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
+        return ''
+
     def color_rsi(val):
         try:
             parts = val.split(); r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
@@ -224,7 +258,7 @@ def style_final(styler):
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
         elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         return styles
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_pct, subset=["4W %", "2W %"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
 def style_daily_health(styler):
     def color_status(v):
@@ -341,14 +375,13 @@ with tab3:
             save_portfolio(pf_df); st.success("Done"); st.rerun()
 
 with tab4:
-    # --- FIXED VARIABLE NAME HERE ---
     st.subheader("Calculator"); RISK_UNIT_BASE = st.number_input("Risk Unit", 100, value=2300); tk = st.text_input("Ticker").upper()
     if tk:
         try:
             d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
             stop = round_to_03_07(c - 2.618*atr)
             if c > stop:
-                sh = int(RISK_UNIT_BASE / (c - stop)) # Fixed usage
+                sh = int(RISK_UNIT_BASE / (c - stop)) 
                 st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
         except: st.error("Error")
 
@@ -403,9 +436,10 @@ if st.session_state.run_analysis:
     all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X"] 
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
-    # --- MASTER DATA FETCH ---
+    # --- MASTER DATA FETCH & RRG CALC ---
     with st.spinner('Downloading Unified Market Data...'):
         master_data = fetch_master_data(all_tickers)
+        rrg_snapshot = generate_full_rrg_snapshot(master_data, "SPY")
 
     # --- STATE-BASED NAVIGATION ---
     mode = st.radio("Navigation", ["Scanner", "Sector Rotation"], horizontal=True, key="main_nav")
@@ -425,8 +459,6 @@ if st.session_state.run_analysis:
                 pf_rows.append({"Ticker": t, "Shares": int(shares), "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}", "Gain/Loss ($)": f"${(pos_val - (shares * cost)):+.2f}", "% Return": f"{((curr_price - cost) / cost) * 100:+.2f}%", "Audit Action": "HOLD"})
         
         total_net_worth = current_cash + eq_val
-        
-        # --- CAD CORRECTION ---
         cad_data = master_data.get("CAD=X")
         if cad_data is not None and not cad_data.empty:
             rate = cad_data['Close'].iloc[-1]
@@ -479,7 +511,7 @@ if st.session_state.run_analysis:
             c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
             st.write("---")
 
-        # 4. MARKET HEALTH (RESTORED FULL)
+        # 4. MARKET HEALTH
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
@@ -529,11 +561,6 @@ if st.session_state.run_analysis:
             if len(df_w) < 5: continue
             df_w['SMA8'] = calc_sma(df_w['Close'], 8); df_w['SMA18'] = calc_sma(df_w['Close'], 18); df_w['SMA40'] = calc_sma(df_w['Close'], 40)
             span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close']); df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
-
-            mom_4w = ""; mom_2w = ""
-            if len(df_w) >= 5:
-                curr = df_w.iloc[-1]['Close']; prev2 = df_w.iloc[-3]['Close']; prev4 = df_w.iloc[-5]['Close']
-                mom_2w = f"{((curr/prev2)-1)*100:.1f}%"; mom_4w = f"{((curr/prev4)-1)*100:.1f}%"
 
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
             inst_activity = calc_structure(df)
@@ -593,7 +620,10 @@ if st.session_state.run_analysis:
             arrow_col = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
             rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
-            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+            # --- PHASE INJECTION ---
+            rrg_phase = rrg_snapshot.get(t, "unknown").upper()
+            
+            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
@@ -620,7 +650,7 @@ if st.session_state.run_analysis:
                 disp_stop = f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)"; disp_shares = f"{shares} shares"
 
             row = {
-                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "4W %": db['Mom4W'], "2W %": db['Mom2W'],
+                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": db['RRG'],
                 "Weekly<br>SMA8": "PASS" if db['W_SMA8_Pass'] else "FAIL", "Weekly<br>Impulse": db['W_Pulse'], 
                 "Weekly<br>Score": db['W_Score'], "Daily<br>Score": db['D_Score'],
                 "Structure": "ABOVE 18" if db['D_Chk_Price'] else "BELOW 18",
@@ -635,7 +665,7 @@ if st.session_state.run_analysis:
         if results:
             df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
+            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
             st.warning("Scanner returned no results.")
