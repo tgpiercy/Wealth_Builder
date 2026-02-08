@@ -21,18 +21,12 @@ except ImportError:
 # --- SETUP ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
 CREDENTIALS = {"dad": "1234", "son": "1234"}
-PORTFOLIO_FILE = "portfolio_user.csv" # Simplified for demo
 
 # --- HELPER: BUILD DATA MAP FROM CONFIG ---
-# This converts the config lists into the format the Scanner expects
 DATA_MAP = {}
-# 1. Indices
 for k, v in tc.INDICES.items(): DATA_MAP[k] = ["00. INDICES", "SPY", v]
-# 2. Sectors
 for k, v in tc.SECTORS.items(): DATA_MAP[k] = ["01. SECTORS", "SPY", v]
-# 3. Themes
 for k, v in tc.THEMES.items(): DATA_MAP[k] = ["02. THEMES", "SPY", v]
-# 4. Industries
 for sec, ind_dict in tc.INDUSTRY_MAP.items():
     bench = tc.BENCHMARK_CA if "Canada" in sec else "SPY"
     cat = "04. CANADA" if "Canada" in sec else f"03. {sec} IND"
@@ -40,7 +34,6 @@ for sec, ind_dict in tc.INDUSTRY_MAP.items():
         DATA_MAP[k] = [cat, bench, v]
 
 # --- HELPER: CALCULATIONS ---
-def calc_sma(s, l): return s.rolling(l).mean()
 def calc_rsi(series, length=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=length).mean()
@@ -67,36 +60,61 @@ PORTFOLIO_FILE = f"portfolio_{user}.csv"
 st.sidebar.write(f"👤 **{user.upper()}**")
 if st.sidebar.button("Logout"): st.session_state.authenticated = False; st.rerun()
 
-st.title(f"🛡️ Titan Strategy v58.0")
-st.caption("Modularized Engine | Powered by titan_config.py")
+st.title(f"🛡️ Titan Strategy v58.1")
+st.caption("Modularized Engine | Auto-Fix Enabled")
 
 tab1, tab2, tab3 = st.tabs(["💼 Portfolio", "🏥 Market Health", "🔍 Scanner"])
 
 # --- TAB 1: PORTFOLIO ---
 with tab1:
+    # 1. Load or Create File
     if not os.path.exists(PORTFOLIO_FILE):
-        pd.DataFrame(columns=["ID","Ticker","Shares","Cost","Date","Status"]).to_csv(PORTFOLIO_FILE, index=False)
-    pf = pd.read_csv(PORTFOLIO_FILE)
+        # Default to 'Cost_Basis' for compatibility
+        pd.DataFrame(columns=["ID","Ticker","Shares","Cost_Basis","Date","Status"]).to_csv(PORTFOLIO_FILE, index=False)
     
-    # Simple Buy Logic
+    pf = pd.read_csv(PORTFOLIO_FILE)
+
+    # 2. DATA REPAIR (Fixes the KeyError)
+    # If the file has 'Cost' but not 'Cost_Basis', rename it
+    if 'Cost' in pf.columns and 'Cost_Basis' not in pf.columns:
+        pf.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
+        pf.to_csv(PORTFOLIO_FILE, index=False)
+    
+    # If 'Cost_Basis' is missing entirely, create it
+    if 'Cost_Basis' not in pf.columns:
+        pf['Cost_Basis'] = 0.0
+
+    # 3. Buy Logic
     with st.expander("➕ Record Trade"):
         with st.form("buy"):
             tk = st.selectbox("Ticker", list(DATA_MAP.keys()))
             sh = st.number_input("Shares", min_value=1)
             pr = st.number_input("Price", min_value=0.01)
             if st.form_submit_button("Execute"):
-                new_row = pd.DataFrame([{"ID": len(pf)+1, "Ticker": tk, "Shares": sh, "Cost": pr, "Date": str(datetime.now().date()), "Status": "OPEN"}])
+                new_row = pd.DataFrame([{
+                    "ID": len(pf)+1, 
+                    "Ticker": tk, 
+                    "Shares": sh, 
+                    "Cost_Basis": pr, # Use consistent name
+                    "Date": str(datetime.now().date()), 
+                    "Status": "OPEN"
+                }])
                 pf = pd.concat([pf, new_row], ignore_index=True)
                 pf.to_csv(PORTFOLIO_FILE, index=False)
                 st.success(f"Added {tk}")
                 st.rerun()
     
-    # Display
+    # 4. Display Active Positions
     active = pf[pf['Status']=="OPEN"]
     if not active.empty:
-        st.dataframe(active)
-        val = (active['Shares'] * active['Cost']).sum()
-        st.metric("Total Equity Cost", f"${val:,.2f}")
+        # Calculate Value safely
+        active['Shares'] = pd.to_numeric(active['Shares'], errors='coerce').fillna(0)
+        active['Cost_Basis'] = pd.to_numeric(active['Cost_Basis'], errors='coerce').fillna(0)
+        
+        val = (active['Shares'] * active['Cost_Basis']).sum()
+        
+        st.metric("Total Invested Capital", f"${val:,.2f}")
+        st.dataframe(active[["ID", "Ticker", "Shares", "Cost_Basis", "Date"]])
     else:
         st.info("Portfolio Empty")
 
@@ -104,18 +122,24 @@ with tab1:
 with tab2:
     if st.button("Check Vitals"):
         with st.spinner("Checking VIX & SPY..."):
-            vix = yf.Ticker("^VIX").history(period="5d")['Close'].iloc[-1]
-            spy = yf.Ticker("SPY").history(period="1mo")['Close']
-            sma = spy.rolling(20).mean().iloc[-1]
-            curr = spy.iloc[-1]
-            
-            c1, c2 = st.columns(2)
-            c1.metric("VIX Level", f"{vix:.2f}", delta="-Bullish" if vix < 20 else "+Bearish", delta_color="inverse")
-            c2.metric("SPY vs 20SMA", f"${curr:.2f}", delta=f"{curr-sma:.2f}")
-            
-            if vix < 20 and curr > sma: st.success("✅ MARKET STATUS: GREEN LIGHT")
-            elif vix > 25 or curr < sma: st.error("🛑 MARKET STATUS: RED LIGHT (CASH/DEFENSE)")
-            else: st.warning("⚠️ MARKET STATUS: CAUTION")
+            try:
+                vix = yf.Ticker("^VIX").history(period="5d")['Close'].iloc[-1]
+                spy = yf.Ticker("SPY").history(period="1mo")['Close']
+                if not spy.empty:
+                    sma = spy.rolling(20).mean().iloc[-1]
+                    curr = spy.iloc[-1]
+                    
+                    c1, c2 = st.columns(2)
+                    c1.metric("VIX Level", f"{vix:.2f}", delta="-Bullish" if vix < 20 else "+Bearish", delta_color="inverse")
+                    c2.metric("SPY vs 20SMA", f"${curr:.2f}", delta=f"{curr-sma:.2f}")
+                    
+                    if vix < 20 and curr > sma: st.success("✅ MARKET STATUS: GREEN LIGHT")
+                    elif vix > 25 or curr < sma: st.error("🛑 MARKET STATUS: RED LIGHT (CASH/DEFENSE)")
+                    else: st.warning("⚠️ MARKET STATUS: CAUTION")
+                else:
+                    st.error("Could not fetch SPY data.")
+            except Exception as e:
+                st.error(f"Data Error: {e}")
 
 # --- TAB 3: SCANNER ---
 with tab3:
@@ -123,17 +147,16 @@ with tab3:
     if st.button("Run Full Scan"):
         with st.spinner(f"Scanning {len(DATA_MAP)} Tickers..."):
             results = []
-            # Batch fetch for speed
             tickers = list(DATA_MAP.keys())
-            # Fetch small batches to prevent memory crash
             batch_size = 20
+            
+            # Batch Processing
             for i in range(0, len(tickers), batch_size):
                 batch = tickers[i:i+batch_size]
                 try:
                     data = yf.download(batch, period="6mo", progress=False)['Close']
                     if data.empty: continue
                     
-                    # Process Batch
                     for tk in batch:
                         if tk not in data.columns: continue
                         prices = data[tk].dropna()
@@ -144,7 +167,6 @@ with tab3:
                         sma50 = prices.rolling(50).mean().iloc[-1]
                         rsi = calc_rsi(prices).iloc[-1]
                         
-                        # Logic
                         action = "WAIT"
                         if curr > sma20 and sma20 > sma50: action = "BUY"
                         if rsi < 30: action = "OVERSOLD"
