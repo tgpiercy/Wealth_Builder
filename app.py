@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (Modular Engine)
+#  TITAN STRATEGY APP (v56.3 Data Repair)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -53,8 +53,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v56.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fully Synchronized")
+st.title(f"🛡️ Titan Strategy v56.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Data Repair Active")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -188,18 +188,49 @@ def style_history(styler):
 
 def fmt_delta(val): return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 
-# --- PORTFOLIO ENGINE ---
+# --- PORTFOLIO ENGINE (Patched for Shadow_SPY) ---
 def load_portfolio():
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
+    
     if not os.path.exists(PORTFOLIO_FILE):
         pd.DataFrame(columns=cols).to_csv(PORTFOLIO_FILE, index=False)
+    
     df = pd.read_csv(PORTFOLIO_FILE)
+    
+    # 1. AUTO-ADD MISSING COLUMNS (The Fix)
+    for c in cols:
+        if c not in df.columns:
+            df[c] = None
+    
+    # 2. RENAME LEGACY COLUMNS
     if 'Cost' in df.columns and 'Cost_Basis' not in df.columns: df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
+    
+    # 3. FILL DEFAULTS
     if 'Cost_Basis' not in df.columns: df['Cost_Basis'] = 0.0
+    df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
+    
     if "ID" not in df.columns or df["ID"].isnull().all(): df["ID"] = range(1, len(df) + 1)
+    
     return df
 
-def save_portfolio(df): df.to_csv(PORTFOLIO_FILE, index=False)
+def save_portfolio(df):
+    dollar_cols = ['Cost_Basis', 'Exit_Price', 'Realized_PL', 'Return', 'SPY_Return']
+    for col in dollar_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
+            
+    def clean_shares(row):
+        val = row['Shares']
+        if pd.isna(val): return 0
+        if row['Ticker'] == 'CASH':
+            return round(val, 2)
+        else:
+            return int(val) 
+            
+    if not df.empty:
+        df['Shares'] = df.apply(clean_shares, axis=1)
+
+    df.to_csv(PORTFOLIO_FILE, index=False)
 
 # --- SIDEBAR MANAGER ---
 st.sidebar.header("💼 Portfolio Manager")
@@ -336,8 +367,12 @@ if st.button("RUN ANALYSIS", type="primary"):
         # 3. BENCHMARK
         st.subheader("📈 Performance vs SPY")
         if spy is not None:
-            bench_val = pf_df['Shadow_SPY'].sum() * spy['Close'].iloc[-1]
-            st.metric("Alpha", f"${(total_nw - bench_val):,.2f}")
+            # FIX: Ensure Shadow_SPY exists (handled by load_portfolio, but safe access here)
+            if 'Shadow_SPY' in pf_df.columns:
+                bench_val = pf_df['Shadow_SPY'].sum() * spy['Close'].iloc[-1]
+                st.metric("Alpha", f"${(total_nw - bench_val):,.2f}")
+            else:
+                st.warning("Benchmark data missing. Please reload page.")
         st.write("---")
 
         # 4. HEALTH
@@ -352,73 +387,4 @@ if st.button("RUN ANALYSIS", type="primary"):
             else: rows.append(["SPY Trend", "BEARISH", "FAIL"])
             
             st.subheader("🏥 Market Health")
-            st.markdown(pd.DataFrame(rows, columns=["Metric", "Level", "Status"]).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
-            st.write("---")
-
-    # 5. SCANNER
-    with st.spinner('Running Scanner...'):
-        all_tickers = list(set(list(tc.DATA_MAP.keys()) + [x for x in pf_tickers if x != "CASH"]))
-        
-        # Batch Fetch
-        for t in all_tickers:
-            if t not in cache_d:
-                try: cache_d[t] = yf.Ticker("SPY" if t=="MANL" else t).history(period="2y")
-                except: pass
-        
-        results = []
-        for t in all_tickers:
-            if t not in cache_d or len(cache_d[t]) < 20: continue
-            df = cache_d[t]
-            
-            # Calcs
-            df['SMA18'] = calc_sma(df['Close'], 18)
-            df['SMA50'] = calc_sma(df['Close'], 50)
-            df['ATR'] = calc_atr(df['High'], df['Low'], df['Close'])
-            df['VolSMA'] = calc_sma(df['Volume'], 18)
-            df['RSI5'] = calc_rsi(df['Close'], 5)
-            df['RSI20'] = calc_rsi(df['Close'], 20)
-            
-            # Logic
-            curr = df['Close'].iloc[-1]; prev = df['Close'].iloc[-2]
-            sma18 = df['SMA18'].iloc[-1]; sma50 = df['SMA50'].iloc[-1]
-            cld = calc_ichimoku(df['High'], df['Low'], df['Close'])[0].iloc[-1]
-            struct = calc_structure(df)
-            
-            score = 0
-            if curr > sma18: score += 1
-            if sma18 > sma50: score += 1
-            if curr > cld: score += 1
-            
-            action = "AVOID"
-            if score == 3: action = "BUY" if struct in ["HH", "HL"] else "SCOUT"
-            elif score == 2: action = "WATCH"
-            
-            smart_stop = round_to_03_07(curr - (2.618 * df['ATR'].iloc[-1]))
-            
-            # RSI HTML
-            r5 = df['RSI5'].iloc[-1]; r20 = df['RSI20'].iloc[-1]
-            arrow = "↑" if r5 > df['RSI5'].iloc[-2] else "↓"
-            rsi_html = f"{int(r5)}/{int(r20)} {arrow}"
-            
-            # Volume
-            vol_msg = "NORMAL"
-            if df['Volume'].iloc[-1] > (df['VolSMA'].iloc[-1] * 1.5): vol_msg = "SPIKE (Live)"
-            
-            cat = tc.DATA_MAP[t][0] if t in tc.DATA_MAP else "OTHER"
-            if "99. DATA" in cat: continue
-            
-            results.append({
-                "Sector": cat, "Ticker": t, "Action": action, 
-                "Weekly<br>Score": score, "Structure": struct,
-                "Stop Price": f"${smart_stop:.2f}",
-                "Dual RSI": rsi_html, "Volume": vol_msg,
-                "4W %": f"{((curr/df['Close'].iloc[-20])-1)*100:.1f}%",
-                "2W %": f"{((curr/df['Close'].iloc[-10])-1)*100:.1f}%"
-            })
-            
-        if results:
-            df_final = pd.DataFrame(results).sort_values(["Sector", "Weekly<br>Score"], ascending=[True, False])
-            cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>Score", "Structure", "Volume", "Dual RSI", "Action", "Stop Price"]
-            st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
-        else:
-            st.warning("Scanner returned no results.")
+            st.markdown
