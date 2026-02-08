@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.5 Syntax Fixed)
+#  TITAN STRATEGY APP (v58.6 Fixed & Verified)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Unified Data Engine")
+st.title(f"🛡️ Titan Strategy v58.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Market Health & RRG")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -92,82 +92,66 @@ def calc_rsi(series, length):
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    
     avg_gain = np.full_like(gain, np.nan)
     avg_loss = np.full_like(loss, np.nan)
-    
     avg_gain[length] = gain[1:length+1].mean()
     avg_loss[length] = loss[1:length+1].mean()
-    
     for i in range(length + 1, len(series)):
         avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
         avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
-    
     rs = avg_gain / avg_loss
     rs = np.where(avg_loss == 0, 100, rs)
-    
     rsi_vals = 100 - (100 / (1 + rs))
     return pd.Series(rsi_vals, index=series.index)
 
-# --- ZIG ZAG ENGINE (Fixed Syntax) ---
+# --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = [] 
-    trend = 1 
-    last_pivot_val = df['Close'].iloc[0]
-    pivots.append((0, last_pivot_val, 1)) 
+    pivots = []
+    trend = 1
+    last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1))
     
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_pivot_val:
-                last_pivot_val = price
-                if pivots[-1][2] == 1: 
-                    pivots[-1] = (i, price, 1)
-                else: 
-                    pivots.append((i, price, 1))
-            elif price < last_pivot_val * (1 - deviation_pct):
+            if price > last_val:
+                last_val = price
+                if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
+                else: pivots.append((i, price, 1))
+            elif price < last_val * (1 - deviation_pct):
                 trend = -1
-                last_pivot_val = price
+                last_val = price
                 pivots.append((i, price, -1))
         else:
-            if price < last_pivot_val:
-                last_pivot_val = price
-                if pivots[-1][2] == -1: 
-                    pivots[-1] = (i, price, -1)
-                else: 
-                    pivots.append((i, price, -1))
-            elif price > last_pivot_val * (1 + deviation_pct):
+            if price < last_val:
+                last_val = price
+                if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
+                else: pivots.append((i, price, -1))
+            elif price > last_val * (1 + deviation_pct):
                 trend = 1
-                last_pivot_val = price
+                last_val = price
                 pivots.append((i, price, 1))
 
     if len(pivots) < 3: return "Range"
     
-    curr_pivot = pivots[-1]
-    prev_same = pivots[-3]
+    curr = pivots[-1]
+    prev = pivots[-3]
     
-    if curr_pivot[2] == 1: 
-        if curr_pivot[1] > prev_same[1]: return "HH"
+    if curr[2] == 1:
+        if curr[1] > prev[1]: return "HH"
         else: return "LH"
     else:
-        if curr_pivot[1] < prev_same[1]: return "LL"
+        if curr[1] < prev[1]: return "LL"
         else: return "HL"
 
 # --- HELPER: SMART STOP ---
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
     whole = int(price)
-    c1 = whole + 0.03
-    c2 = whole + 0.07
-    c3 = (whole - 1) + 0.97 if whole > 0 else 0.0
-    c4 = (whole - 1) + 0.93 if whole > 0 else 0.0
-    
-    candidates = [c for c in [c1, c2, c3, c4] if c > 0]
-    
+    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     if not candidates: return price 
-    best_c = min(candidates, key=lambda x: abs(x - price))
-    return best_c
+    return min(candidates, key=lambda x: abs(x - price))
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=1800) # Cache for 30 mins
@@ -415,10 +399,7 @@ def style_history(styler):
 
     return styler.set_table_styles([
          {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
-         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return"])\
-      .map(color_pl_dol, subset=["P/L"])\
-      .hide(axis='index')
+         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["P/L"]).hide(axis='index')
 
 def fmt_delta(val):
     return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
@@ -682,30 +663,13 @@ if st.session_state.run_analysis:
     if st.button("⬅️ Back to Menu"): st.session_state.run_analysis = False; st.rerun()
     
     # --- UNIFIED LIST GENERATION ---
-    SECTORS = {"XLK": "Technology", "XLF": "Financials", "XLE": "Energy", "XLV": "Health Care", "XLY": "Cons. Discret", "XLP": "Cons. Staples", "XLI": "Industrials", "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"}
-    INDICES = {"QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", "IWC": "Micro-Cap", "RSP": "S&P Equal Wgt", "^VIX": "Volatility (VIX)", "HXT.TO": "TSX 60 (Canada)", "EFA": "Foreign Dev", "EEM": "Emerging Mkts"}
-    THEMES = {"BOTZ": "Robotics/AI", "AIQ": "Artificial Intel", "SMH": "Semiconductors", "IGV": "Software", "CIBR": "CyberSec", "ARKG": "Genomics", "ICLN": "Clean Energy", "TAN": "Solar", "URA": "Uranium", "PAVE": "Infrastructure", "GLD": "Gold", "SLV": "Silver", "GDX": "Gold Miners", "COPX": "Copper", "MOO": "Agribusiness", "SLX": "Steel", "REMX": "Rare Earths"}
-    INDUSTRY_MAP = {
-        "XLK": {"SMH": "Semis", "NVDA": "Nvidia", "IGV": "Software", "MSFT": "Microsoft", "CIBR": "CyberSec", "AAPL": "Apple", "SMCI": "Servers (AI)", "DELL": "Dell", "ANET": "Networking", "WDC": "Storage"},
-        "XLF": {"KBE": "Banks", "KRE": "Reg. Banks", "IAI": "Brokers", "IAK": "Insurance", "XP": "Fintech"},
-        "XLE": {"XOP": "Exploration", "OIH": "Oil Svcs", "CRAK": "Refiners", "XOM": "Exxon", "CVX": "Chevron"},
-        "XLV": {"IBB": "Biotech", "IHI": "Med Devices", "PPH": "Pharma", "UNH": "UnitedHealth"},
-        "XLY": {"XRT": "Retail", "ITB": "Homebuild", "PEJ": "Leisure", "AMZN": "Amazon", "TSLA": "Tesla"},
-        "XLP": {"PBJ": "Food/Bev", "KXI": "Global Stapl", "COST": "Costco", "PG": "Procter", "WMT": "Walmart"},
-        "XLI": {"ITA": "Aerospace", "IYT": "Transport", "JETS": "Airlines", "PAVE": "Infrastruct", "CAT": "Caterpillar"},
-        "XLC": {"SOCL": "Social", "PBS": "Media", "GOOGL": "Google", "META": "Meta", "NFLX": "Netflix"},
-        "XLB": {"GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", "REMX": "Rare Earth", "COPX": "Copper", "MOO": "Agricul", "SLX": "Steel", "AA": "Alcoa", "DD": "DuPont"},
-        "XLU": {"IDU": "US Util", "VPU": "Vanguard Util", "NEE": "NextEra", "DUK": "Duke Energy"},
-        "XLRE": {"REZ": "Resid. RE", "BBRE": "BetaBuilders", "PLD": "Prologis", "AMT": "Am. Tower"},
-        "Canada (TSX)": {"RY.TO": "Royal Bank", "BN.TO": "Brookfield", "CNQ.TO": "Cdn Natural", "CP.TO": "CP Rail", "WSP.TO": "WSP Global", "SHOP.TO": "Shopify", "CSU.TO": "Constell", "NTR.TO": "Nutrien", "TECK-B.TO": "Teck Res"}
-    }
-
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     
     # MASTER LIST (Duplicates removed automatically by set)
-    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(SECTORS.keys()) + list(INDICES.keys()) + list(THEMES.keys())
-    for v in INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
+    # Using 'tc' references to pull from config
+    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys())
+    for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
     # --- MASTER DATA FETCH ---
     with st.spinner('Downloading Unified Market Data...'):
@@ -782,36 +746,60 @@ if st.session_state.run_analysis:
         else: st.warning("Waiting for SPY data...")
         st.write("---")
 
-        # 4. MARKET HEALTH
+        # 4. MARKET HEALTH (Restored Full Logic)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
+            # 1. VIX Score
             if vix is not None:
-                v = vix.iloc[-1]['Close']; s = "<span style='color:#00ff00'>NORMAL</span>" if v < 17 else "<span style='color:#ff4444'>PANIC</span>"
-                mkt_score += 9 if v < 17 else 0; h_rows.append({"Indicator": f"VIX ({v:.2f})", "Status": s})
-            else: h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
-            
-            sc = spy.iloc[-1]['Close']; s18 = calc_sma(spy['Close'], 18).iloc[-1]; s8 = calc_sma(spy['Close'], 8).iloc[-1]
-            s18_prev = calc_sma(spy['Close'], 18).iloc[-2]
-            if sc > s18: mkt_score += 1
-            h_rows.append({"Indicator": "SPY > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span style='color:#ff4444'>FAIL</span>"})
-            
-            # Add missing SPY indicators to match score logic
-            if s18 >= s18_prev: mkt_score += 1
-            if s8 > calc_sma(spy['Close'], 8).iloc[-2]: mkt_score += 1
+                v = vix.iloc[-1]['Close']
+                if v < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
+                elif v < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
+                elif v < 25: v_pts=3; v_s="<span style='color:#ffaa00'>DEFENSIVE</span>"
+                else: v_pts=0; v_s="<span style='color:#ff4444'>PANIC</span>"
+                mkt_score += v_pts
+                h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": v_s})
+            else:
+                h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
 
+            # 2. SPY Checks
+            s_c = spy.iloc[-1]['Close']
+            s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
+            s18c = s_sma18.iloc[-1]; s18p = s_sma18.iloc[-2]
+            s8c = s_sma8.iloc[-1]; s8p = s_sma8.iloc[-2]
+            
+            c1 = s_c > s18c; c2 = s18c >= s18p; c3 = s8c > s8p
+            if c1 and c2 and c3: mkt_score += 1
+            
+            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if c1 else "<span style='color:#ff4444'>FAIL</span>"})
+            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c2 else "<span style='color:#ff4444'>FALLING</span>"})
+            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c3 else "<span style='color:#ff4444'>FALLING</span>"})
+
+            # 3. RSP Checks
             if rsp is not None:
-                rc = rsp.iloc[-1]['Close']; r18 = calc_sma(rsp['Close'], 18).iloc[-1]
-                if rc > r18: mkt_score += 1 
-                # (Simplified logic for brevity, full logic implies more checks)
+                r_c = rsp.iloc[-1]['Close']
+                r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
+                r18c = r_sma18.iloc[-1]; r18p = r_sma18.iloc[-2]
+                r8c = r_sma8.iloc[-1]; r8p = r_sma8.iloc[-2]
+                
+                rc1 = r_c > r18c; rc2 = r18c >= r18p; rc3 = r8c > r8p
+                if rc1 and rc2 and rc3: mkt_score += 1
+                
+                h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc1 else "<span style='color:#ff4444'>FAIL</span>"})
+                h_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc2 else "<span style='color:#ff4444'>FALLING</span>"})
+                h_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc3 else "<span style='color:#ff4444'>FALLING</span>"})
+            else:
+                h_rows.append({"Indicator": "RSP Data", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
 
-            col = "#00ff00" if mkt_score >= 8 else "#ff4444"
+            # Scoring
+            col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
             risk_per_trade = RISK_UNIT_BASE if mkt_score >= 8 else (RISK_UNIT_BASE * 0.5 if mkt_score >= 5 else 0)
-            msg = "AGGRESSIVE" if mkt_score >= 10 else ("CAUTIOUS" if mkt_score >= 8 else "DEFENSIVE")
+            msg = "AGGRESSIVE (100%)" if mkt_score >= 10 else ("CAUTIOUS BUY (100%)" if mkt_score >= 8 else ("DEFENSIVE (50%)" if mkt_score >= 5 else "CASH (0%)"))
             
             h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
             h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
-            st.subheader("🏥 Market Health")
+            
+            st.subheader("🏥 Daily Market Health")
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
@@ -903,8 +891,9 @@ if st.session_state.run_analysis:
             
             final_decision = decision
             if cat_name in tc.SECTOR_PARENTS:
-                # Add sector parent logic here if needed (simplified for restoration speed)
-                pass
+                parent = tc.SECTOR_PARENTS[cat_name]
+                if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
+                    if t != parent: final_decision = "AVOID"; final_reason = "Sector Lock"
 
             is_blue_spike = ("00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
@@ -942,21 +931,31 @@ if st.session_state.run_analysis:
         
         def render_rrg(ticker_subset, bench, title):
             if st.button(f"Run {title}", key=f"btn_{title}"):
-                # Use master_data directly - NO DOWNLOAD
+                # Use master_data directly - NO DOWNLOAD (Fix)
                 wide_df = prepare_rrg_inputs(master_data, ticker_subset, bench)
                 if not wide_df.empty:
                     r, m = calculate_rrg_math(wide_df, bench)
                     labels = {t:t for t in ticker_subset}
+                    
+                    # Enhanced Labels (from config)
+                    for t in ticker_subset:
+                        if t in tc.RRG_SECTORS: labels[t] = tc.RRG_SECTORS[t]
+                        elif t in tc.RRG_INDICES: labels[t] = tc.RRG_INDICES[t]
+                        elif t in tc.RRG_THEMES: labels[t] = tc.RRG_THEMES[t]
+                        else:
+                            for k, v in tc.RRG_INDUSTRY_MAP.items():
+                                if t in v: labels[t] = v[t]
+
                     fig = plot_rrg_chart(r, m, labels, title, is_dark)
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.error("Data insufficient")
+                else: st.error("Data insufficient. Check benchmark/ticker availability.")
 
         with sub1:
-            render_rrg(list(INDICES.keys()), "SPY", "Indices")
+            render_rrg(list(tc.RRG_INDICES.keys()), "SPY", "Indices")
         with sub2:
-            render_rrg(list(SECTORS.keys()), "SPY", "Sectors")
+            render_rrg(list(tc.RRG_SECTORS.keys()), "SPY", "Sectors")
         with sub3:
-            s_key = st.selectbox("Sector", list(SECTORS.keys()))
-            render_rrg(list(INDUSTRY_MAP.get(s_key, {}).keys()), s_key, f"{SECTORS[s_key]} Industries")
+            s_key = st.selectbox("Sector", list(tc.RRG_SECTORS.keys()))
+            render_rrg(list(tc.RRG_INDUSTRY_MAP.get(s_key, {}).keys()), s_key, f"{tc.RRG_SECTORS[s_key]} Industries")
         with sub4:
-            render_rrg(list(THEMES.keys()), "SPY", "Themes")
+            render_rrg(list(tc.RRG_THEMES.keys()), "SPY", "Themes")
