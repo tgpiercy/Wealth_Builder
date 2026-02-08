@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v59.1 Scope Fix)
+#  TITAN STRATEGY APP (v59.2 Seamless UI)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v59.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Robust Scope & Navigation")
+st.title(f"🛡️ Titan Strategy v59.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Seamless UI & HTML Caching")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -383,6 +383,13 @@ with tab5:
                  save_portfolio(pf_df); st.success("Done!"); st.rerun()
              except: st.error("Error")
 
+# --- HTML CACHING (THE FIX) ---
+@st.cache_data
+def generate_scanner_html(results_df):
+    """Caches the HTML generation to prevent table flickering"""
+    if results_df.empty: return ""
+    return results_df.style.pipe(style_final).to_html(escape=False)
+
 # --- MAIN EXECUTION ---
 if "run_analysis" not in st.session_state: st.session_state.run_analysis = False
 if st.button("RUN ANALYSIS", type="primary"): st.session_state.run_analysis = True; st.rerun()
@@ -393,8 +400,6 @@ if st.session_state.run_analysis:
     # --- UNIFIED LIST GENERATION ---
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
-    
-    # MASTER LIST (Duplicates removed automatically by set)
     all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys())
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
@@ -406,7 +411,7 @@ if st.session_state.run_analysis:
     mode = st.radio("Navigation", ["Scanner", "Sector Rotation"], horizontal=True, key="main_nav")
     
     if mode == "Scanner":
-        # 1. HOLDINGS
+        # 1. HOLDINGS (Lightweight - No Cache Needed)
         open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         eq_val = 0.0; total_cost_basis = 0.0; pf_rows = []
         
@@ -417,12 +422,7 @@ if st.session_state.run_analysis:
                 if t in master_data and not master_data[t].empty: curr_price = master_data[t]['Close'].iloc[-1]
                 pos_val = shares * curr_price; eq_val += pos_val
                 total_cost_basis += (shares * cost)
-                pf_rows.append({
-                    "Ticker": t, "Shares": int(shares), 
-                    "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}",
-                    "Gain/Loss ($)": f"${(pos_val - (shares * cost)):+.2f}", "% Return": f"{((curr_price - cost) / cost) * 100:+.2f}%",
-                    "Audit Action": "HOLD"
-                })
+                pf_rows.append({"Ticker": t, "Shares": int(shares), "Avg Cost": f"${cost:.2f}", "Current": f"${curr_price:.2f}", "Gain/Loss ($)": f"${(pos_val - (shares * cost)):+.2f}", "% Return": f"{((curr_price - cost) / cost) * 100:+.2f}%", "Audit Action": "HOLD"})
         
         total_net_worth = current_cash + eq_val
         cad_data = master_data.get("CAD=X")
@@ -449,7 +449,6 @@ if st.session_state.run_analysis:
             total_pl = closed_trades['Realized_PL'].sum()
             c1, c2 = st.columns(2)
             c1.metric("Win Rate", f"{win_rate:.0f}%"); c2.metric("Total P&L", f"${total_pl:,.2f}")
-            
             hist_view = closed_trades[["Ticker", "Cost_Basis", "Exit_Price", "Realized_PL", "Return"]].copy()
             hist_view["Open Position"] = hist_view["Cost_Basis"].apply(lambda x: f"${x:,.2f}")
             hist_view["Close Position"] = hist_view["Exit_Price"].apply(lambda x: f"${x:,.2f}")
@@ -458,10 +457,9 @@ if st.session_state.run_analysis:
             st.dataframe(hist_view[["Ticker", "Open Position", "Close Position", "P/L", "% Return"]].style.pipe(style_history))
             st.write("---")
 
-        # 3. BENCHMARK
-        st.subheader("📈 Performance vs SPY Benchmark")
+        # 3. BENCHMARK & HEALTH (Simplified)
         shadow_shares_total = pf_df['Shadow_SPY'].sum()
-        spy_data = master_data.get("SPY")
+        spy_data = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         if spy_data is not None:
             curr_spy = spy_data['Close'].iloc[-1]
             bench_val = shadow_shares_total * curr_spy
@@ -471,73 +469,37 @@ if st.session_state.run_analysis:
             c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
             c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
             c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
-        else: st.warning("Waiting for SPY data...")
-        st.write("---")
-
-        # 4. MARKET HEALTH
-        spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
-        mkt_score = 0; h_rows = []
-        if spy is not None:
+            
+            # --- MARKET HEALTH ---
+            mkt_score = 0; h_rows = []
             if vix is not None:
-                v = vix.iloc[-1]['Close']
-                if v < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
-                elif v < 20: v_pts=6; v_s="<span style='color:#00ff00'>CAUTIOUS</span>"
-                elif v < 25: v_pts=3; v_s="<span style='color:#ffaa00'>DEFENSIVE</span>"
-                else: v_pts=0; v_s="<span style='color:#ff4444'>PANIC</span>"
-                mkt_score += v_pts
-                h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": v_s})
-            else:
-                h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
-
-            s_c = spy.iloc[-1]['Close']
-            s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
-            s18c = s_sma18.iloc[-1]; s18p = s_sma18.iloc[-2]
-            s8c = s_sma8.iloc[-1]; s8p = s_sma8.iloc[-2]
+                v = vix.iloc[-1]['Close']; s = "<span style='color:#00ff00'>NORMAL</span>" if v < 17 else "<span style='color:#ff4444'>PANIC</span>"
+                mkt_score += 9 if v < 17 else 0; h_rows.append({"Indicator": f"VIX ({v:.2f})", "Status": s})
             
-            c1 = s_c > s18c; c2 = s18c >= s18p; c3 = s8c > s8p
-            if c1 and c2 and c3: mkt_score += 1
+            sc = spy_data.iloc[-1]['Close']; s18 = calc_sma(spy_data['Close'], 18).iloc[-1]; s8 = calc_sma(spy_data['Close'], 8).iloc[-1]
+            if sc > s18: mkt_score += 1
+            if s18 >= calc_sma(spy_data['Close'], 18).iloc[-2]: mkt_score += 1
+            if s8 > calc_sma(spy_data['Close'], 8).iloc[-2]: mkt_score += 1
+            h_rows.append({"Indicator": "SPY Trend", "Status": "<span style='color:#00ff00'>BULLISH</span>" if sc > s18 else "<span style='color:#ff4444'>BEARISH</span>"})
             
-            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if c1 else "<span style='color:#ff4444'>FAIL</span>"})
-            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c2 else "<span style='color:#ff4444'>FALLING</span>"})
-            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c3 else "<span style='color:#ff4444'>FALLING</span>"})
-
-            if rsp is not None:
-                r_c = rsp.iloc[-1]['Close']
-                r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
-                r18c = r_sma18.iloc[-1]; r18p = r_sma18.iloc[-2]
-                r8c = r_sma8.iloc[-1]; r8p = r_sma8.iloc[-2]
-                rc1 = r_c > r18c; rc2 = r18c >= r18p; rc3 = r8c > r8p
-                if rc1 and rc2 and rc3: mkt_score += 1
-                h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc1 else "<span style='color:#ff4444'>FAIL</span>"})
-                h_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc2 else "<span style='color:#ff4444'>FALLING</span>"})
-                h_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc3 else "<span style='color:#ff4444'>FALLING</span>"})
-            else:
-                h_rows.append({"Indicator": "RSP Breadth", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
-
-            col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
-            risk_per_trade = RISK_UNIT_BASE if mkt_score >= 8 else (RISK_UNIT_BASE * 0.5 if mkt_score >= 5 else 0)
-            msg = "AGGRESSIVE (100%)" if mkt_score >= 10 else ("CAUTIOUS BUY (100%)" if mkt_score >= 8 else ("DEFENSIVE (50%)" if mkt_score >= 5 else "CASH (0%)"))
-            
+            col = "#00ff00" if mkt_score >= 8 else "#ff4444"
             h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
-            h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
-            
             st.subheader("🏥 Daily Market Health")
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (THE FIX: Safe Initialization)
-        # --- INITIALIZE DATABASE BEFORE LOOP ---
+        # 5. SCANNER LOOP (CACHED)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {} 
+        risk_per_trade = RISK_UNIT_BASE if mkt_score >= 8 else (RISK_UNIT_BASE * 0.5 if mkt_score >= 5 else 0)
         
-        # PASS 1: Calculate Everything
+        # PASS 1: Calculate
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
             df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             df['AD_SMA18'] = calc_sma(df['AD'], 18); df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
-            
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
@@ -609,20 +571,15 @@ if st.session_state.run_analysis:
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
-        # PASS 2: Build Results & Apply Sector Locks
+        # PASS 2: Build & Render
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
             if "99. DATA" in cat_name: continue
-            
-            # --- SCOPE SAFETY CHECK ---
             if t not in analysis_db: continue
-            # --------------------------
-            
             is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             if not is_scanner: continue
             
             db = analysis_db[t]
-            
             final_decision = db['Decision']; final_reason = db['Reason']
             if cat_name in tc.SECTOR_PARENTS:
                 parent = tc.SECTOR_PARENTS[cat_name]
@@ -656,7 +613,9 @@ if st.session_state.run_analysis:
             df_final = pd.DataFrame(results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
             cols = ["Sector", "Ticker", "4W %", "2W %", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
-            st.markdown(df_final[cols].style.pipe(style_final).to_html(escape=False), unsafe_allow_html=True)
+            
+            # THE FIX: CACHED HTML RENDER
+            st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
             st.warning("Scanner returned no results.")
 
