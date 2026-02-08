@@ -38,10 +38,16 @@ SECTORS = {
     "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"
 }
 
-# 2. Major Indices (Base List)
+# 2. Major Indices (Updated with Canada & Foreign)
 INDICES = {
-    "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", 
-    "IWC": "Micro-Cap", "MDY": "Mid-Cap 400", "RSP": "S&P Equal Wgt"
+    "QQQ": "Nasdaq 100", 
+    "DIA": "Dow Jones", 
+    "IWM": "Russell 2000", 
+    "MDY": "Mid-Cap 400", 
+    "RSP": "S&P Equal Wgt",
+    "HXT.TO": "TSX 60 (Canada)",   # <--- Added
+    "EFA": "Foreign Dev (EAFE)",   # <--- Added (Europe/Asia/Far East)
+    "EEM": "Emerging Mkts"         # <--- Added (China/India/Brazil etc)
 }
 
 # 3. Micro Industries (US & Canada)
@@ -242,7 +248,7 @@ with tab3:
         def format_sector_label(option):
             if option in SECTORS:
                 return f"{option} - {SECTORS[option]}"
-            return option # For Canada or others
+            return option 
             
         all_options = list(SECTORS.keys()) + ["Canada (TSX)"]
         sel_sector_key = st.selectbox("Select Sector:", all_options, format_func=format_sector_label)
