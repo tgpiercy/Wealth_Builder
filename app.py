@@ -43,7 +43,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v57.1 Data Safety)
+#  TITAN STRATEGY APP (v57.2 Data Restore)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -53,8 +53,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v57.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Data Export Enabled")
+st.title(f"🛡️ Titan Strategy v57.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Import/Export Enabled")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -483,23 +483,42 @@ with tab4:
         except: st.error("Could not fetch ticker data.")
 
 with tab5:
-    st.write("### 🛠️ Maintenance & Safety")
+    st.write("### 🛠️ Data Management")
     
-    # --- DATA EXPORT BUTTON (The Fix) ---
+    # 1. EXPORT (Save)
+    st.write("#### 💾 Save to PC")
     if os.path.exists(PORTFOLIO_FILE):
         with open(PORTFOLIO_FILE, "rb") as file:
             st.download_button(
-                label="💾 Download Portfolio CSV (Save Data)",
+                label="Download Portfolio CSV",
                 data=file,
                 file_name=PORTFOLIO_FILE,
                 mime="text/csv"
             )
     else:
         st.warning("No portfolio file found to download.")
-    # ------------------------------------
+    
+    st.write("---")
+    
+    # 2. IMPORT (Restore) - THE NEW FEATURE
+    st.write("#### 📤 Restore from PC")
+    uploaded_file = st.file_uploader("Upload .csv to Restore", type=["csv"])
+    if uploaded_file is not None:
+        if st.button("CONFIRM RESTORE (Overwrites Current Data)"):
+            try:
+                # Validate it's a CSV by reading it first
+                test_df = pd.read_csv(uploaded_file)
+                # If valid, save it to the server
+                test_df.to_csv(PORTFOLIO_FILE, index=False)
+                st.success("Data Restored Successfully! Reloading...")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error restoring file: {e}")
 
     st.write("---")
-    action_type = st.radio("Mode", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
+    
+    # 3. OTHER TOOLS
+    action_type = st.radio("Advanced Tools", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
     
     if action_type == "⚠️ FACTORY RESET":
         st.error("This will permanently delete all data.")
