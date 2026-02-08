@@ -1,30 +1,16 @@
 # titan_config.py
 
-# --- SECURITY ---
-CREDENTIALS = {
-    "dad": "1234",
-    "son": "1234"
-}
+CREDENTIALS = {"dad": "1234", "son": "1234"}
 
-# --- SECTOR PARENT MAP ---
 SECTOR_PARENTS = {
-    "04. MATERIALS": "XLB",
-    "05. ENERGY": "XLE",
-    "06. FINANCIALS": "XLF",
-    "07. INDUSTRIALS": "XLI",
-    "08. TECHNOLOGY": "XLK",
-    "09. COMM SERVICES": "XLC",
-    "10. HEALTH CARE": "XLV",
-    "11. CONS DISCRET": "XLY",
-    "12. CONS STAPLES": "XLP",
-    "13. UTILITIES / RE": "XLU",
-    "15. CANADA (HXT)": "HXT.TO",
-    "03. THEMES": "SPY"
+    "04. MATERIALS": "XLB", "05. ENERGY": "XLE", "06. FINANCIALS": "XLF",
+    "07. INDUSTRIALS": "XLI", "08. TECHNOLOGY": "XLK", "09. COMM SERVICES": "XLC",
+    "10. HEALTH CARE": "XLV", "11. CONS DISCRET": "XLY", "12. CONS STAPLES": "XLP",
+    "13. UTILITIES / RE": "XLU", "15. CANADA (HXT)": "HXT.TO", "03. THEMES": "SPY"
 }
 
 SECTOR_ETFS = ["XLB", "XLE", "XLF", "XLI", "XLK", "XLC", "XLV", "XLY", "XLP", "XLU", "XLRE"]
 
-# --- DATA MAP (Extracted from your backup) ---
 DATA_MAP = {
     # INDICES
     "DIA": ["00. INDICES", "SPY", "Dow Jones"], "QQQ": ["00. INDICES", "SPY", "Nasdaq 100"],
