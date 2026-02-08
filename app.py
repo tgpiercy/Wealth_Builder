@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v60.2 RSI Logic Patch)
+#  TITAN STRATEGY APP (v60.3 Split RSI Color)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,38 +61,57 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v60.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Dual RSI Coloration")
+st.title(f"🛡️ Titan Strategy v60.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Split RSI Coloring (Arrow vs Trend)")
 
 # --- CALCULATIONS ---
-def calc_sma(series, length): return series.rolling(window=length).mean()
+def calc_sma(series, length): 
+    return series.rolling(window=length).mean()
+
 def calc_ad(high, low, close, volume):
-    mfm = ((close - low) - (high - close)) / (high - low); mfm = mfm.fillna(0.0); mfv = mfm * volume
+    mfm = ((close - low) - (high - close)) / (high - low)
+    mfm = mfm.fillna(0.0)
+    mfv = mfm * volume
     return mfv.cumsum()
+
 def calc_ichimoku(high, low, close):
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a = ((tenkan + kijun) / 2).shift(26); span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    span_a = ((tenkan + kijun) / 2).shift(26)
+    span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
     return span_a, span_b
+
 def calc_atr(high, low, close, length=14):
     try:
-        tr1 = high - low; tr2 = abs(high - close.shift(1)); tr3 = abs(low - close.shift(1))
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         return tr.ewm(com=length-1, adjust=False).mean()
-    except: return pd.Series(0, index=close.index)
+    except:
+        return pd.Series(0, index=close.index)
+
 def calc_rsi(series, length=14):
     try:
-        delta = series.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+        delta = series.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
         avg_gain = gain.ewm(com=length-1, adjust=False).mean()
         avg_loss = loss.ewm(com=length-1, adjust=False).mean()
-        rs = avg_gain / avg_loss; rs = rs.fillna(0)
+        rs = avg_gain / avg_loss
+        rs = rs.fillna(0)
         return 100 - (100 / (1 + rs))
-    except: return pd.Series(50, index=series.index)
+    except:
+        return pd.Series(50, index=series.index)
 
 # --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
+    pivots = []
+    trend = 1
+    last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1))
+    
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
@@ -101,20 +120,32 @@ def calc_structure(df, deviation_pct=0.035):
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
             elif price < last_val * (1 - deviation_pct):
-                trend = -1; last_val = price; pivots.append((i, price, -1))
+                trend = -1
+                last_val = price
+                pivots.append((i, price, -1))
         else:
             if price < last_val:
                 last_val = price
                 if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
                 else: pivots.append((i, price, -1))
             elif price > last_val * (1 + deviation_pct):
-                trend = 1; last_val = price; pivots.append((i, price, 1))
+                trend = 1
+                last_val = price
+                pivots.append((i, price, 1))
+
     if len(pivots) < 3: return "Range"
-    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
+    curr = pivots[-1]
+    prev = pivots[-3]
+    
+    if curr[2] == 1:
+        return "HH" if curr[1] > prev[1] else "LH"
+    else:
+        return "LL" if curr[1] < prev[1] else "HL"
 
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
-    whole = int(price); candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
+    whole = int(price)
+    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     return min(candidates, key=lambda x: abs(x - price)) if candidates else price
 
 # --- UNIFIED DATA ENGINE ---
@@ -230,38 +261,6 @@ def style_final(styler):
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
     
-    # --- CORRECTED RSI COLORING LOGIC ---
-    def color_rsi(val):
-        try:
-            # val is clean text: "65/55 ↑"
-            parts = val.split()
-            if len(parts) < 2: return ''
-            r5 = float(parts[0].split('/')[0])
-            r20 = float(parts[0].split('/')[1])
-            arrow = parts[1]
-            
-            # CASE 1: FAST DOMINATING (Cross Over)
-            if r5 >= r20:
-                # BLUE SPIKE: Trend Bullish (>50) AND Rising
-                if r20 > 50 and arrow == "↑":
-                    return 'color: #00BFFF; font-weight: bold'
-                # GREEN BUILD: Trend Weak (<=50) BUT Rising
-                elif arrow == "↑":
-                    return 'color: #00FF00; font-weight: bold'
-                # RED ROLLOVER: Fast is high, but falling (Danger)
-                else:
-                    return 'color: #FF4444; font-weight: bold'
-            
-            # CASE 2: FAST LOSING (Cross Under)
-            else:
-                # ORANGE WEAKENING: Trend still Bullish (>50) but mom lost
-                if r20 > 50:
-                    return 'color: #FFA500; font-weight: bold'
-                # RED BEARISH: Trend Dead
-                else:
-                    return 'color: #FF4444; font-weight: bold'
-        except: return ''
-
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
         if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
@@ -272,16 +271,14 @@ def style_final(styler):
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
-        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper(); rsi = str(row.get('Dual RSI', ''))
-        # Check colors inside the RSI string is tricky here since we stripped HTML.
-        # We rely on Action/Vol now.
+        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper()
         if "AVOID" in act: pass
         elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
         elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         return styles
 
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
 def style_daily_health(styler):
     def color_status(v):
@@ -624,7 +621,21 @@ if st.session_state.run_analysis:
             num_col = "#FF4444"
             if r5 >= r20: num_col = "#00BFFF" if (r20 > 50 and is_rising) else "#00FF00"
             arrow_col = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
-            rsi_msg = f"{int(r5)}/{int(r20)} {arrow}" # REMOVED HTML HERE
+            
+            # --- SPLIT COLORING (FIX) ---
+            # Num Color
+            if r5 >= r20:
+                if r20 > 50 and is_rising: n_c = "#00BFFF" # Blue Spike
+                elif is_rising: n_c = "#00FF00" # Green Build
+                else: n_c = "#FF4444" # Rollover
+            else:
+                if r20 > 50: n_c = "#FFA500" # Weakening
+                else: n_c = "#FF4444" # Bearish
+            
+            # Arrow Color
+            a_c = "#00FF00" if is_rising else "#FF4444"
+            
+            rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
             
             # --- PHASE INJECTION ---
             rrg_phase = rrg_snapshot.get(t, "unknown").upper()
@@ -646,10 +657,8 @@ if st.session_state.run_analysis:
                     if t != parent: final_decision = "AVOID"; final_reason = "Sector Lock"
 
             # Re-Check Logic for Blue Spike using clean data
-            rsi_val = db['RSI_Msg']
-            parts = rsi_val.split()
-            r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
-            is_blue_spike = (r5 >= r20) and (r20 > 50) and (arrow == "↑") and ("SPIKE" in db['Vol_Msg'])
+            # Now we have HTML in RSI_Msg, so we can't parse easily. Use decision logic.
+            is_blue_spike = ("#00BFFF" in db['RSI_Msg']) and ("SPIKE" in db['Vol_Msg'])
             
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
