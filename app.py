@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v59.3 Health & Currency Fix)
+#  TITAN STRATEGY APP (v59.4 Variable Patch)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v59.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Full Market Health & Corrected FX")
+st.title(f"🛡️ Titan Strategy v59.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Variable Scope Fixed")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -341,13 +341,14 @@ with tab3:
             save_portfolio(pf_df); st.success("Done"); st.rerun()
 
 with tab4:
-    st.subheader("Calculator"); risk = st.number_input("Risk Unit", 100, value=2300); tk = st.text_input("Ticker").upper()
+    # --- FIXED VARIABLE NAME HERE ---
+    st.subheader("Calculator"); RISK_UNIT_BASE = st.number_input("Risk Unit", 100, value=2300); tk = st.text_input("Ticker").upper()
     if tk:
         try:
             d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
             stop = round_to_03_07(c - 2.618*atr)
             if c > stop:
-                sh = int(risk / (c - stop))
+                sh = int(RISK_UNIT_BASE / (c - stop)) # Fixed usage
                 st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
         except: st.error("Error")
 
@@ -383,10 +384,9 @@ with tab5:
                  save_portfolio(pf_df); st.success("Done!"); st.rerun()
              except: st.error("Error")
 
-# --- HTML CACHING (THE FIX) ---
+# --- HTML CACHING ---
 @st.cache_data
 def generate_scanner_html(results_df):
-    """Caches the HTML generation to prevent table flickering"""
     if results_df.empty: return ""
     return results_df.style.pipe(style_final).to_html(escape=False)
 
@@ -400,7 +400,7 @@ if st.session_state.run_analysis:
     # --- UNIFIED LIST GENERATION ---
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
-    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X"] # Added CAD=X
+    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X"] 
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
     # --- MASTER DATA FETCH ---
@@ -430,12 +430,10 @@ if st.session_state.run_analysis:
         cad_data = master_data.get("CAD=X")
         if cad_data is not None and not cad_data.empty:
             rate = cad_data['Close'].iloc[-1]
-            # Yahoo CAD=X is often ~1.41 (USD/CAD). If it's < 1.0 (e.g. 0.71), it's inverted.
-            # We want USD -> CAD multiplier (should be > 1.0).
             if rate < 1.0: rate = 1.0 / rate 
             cad_rate = rate
         else:
-            cad_rate = 1.40 # Fallback
+            cad_rate = 1.40 
             
         total_nw_cad = total_net_worth * cad_rate
         open_pl_val = eq_val - total_cost_basis
