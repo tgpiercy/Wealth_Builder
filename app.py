@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.2 Stability Fixed)
+#  TITAN STRATEGY APP (v61.3 Final Stability)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,41 +61,78 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v61.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Style Mapping & Split Colors")
+st.title(f"🛡️ Titan Strategy v61.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Logic Sync & Variable Safety")
 
 # --- CALCULATIONS ---
-def calc_sma(series, length): return series.rolling(window=length).mean()
+def calc_sma(series, length): 
+    return series.rolling(window=length).mean()
+
 def calc_ad(high, low, close, volume):
-    mfm = ((close - low) - (high - close)) / (high - low); mfm = mfm.fillna(0.0); mfv = mfm * volume
+    mfm = ((close - low) - (high - close)) / (high - low)
+    mfm = mfm.fillna(0.0)
+    mfv = mfm * volume
     return mfv.cumsum()
 
 def calc_rsi(series, length=14):
     try:
-        delta = series.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+        delta = series.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
         avg_gain = gain.ewm(com=length-1, adjust=False).mean()
         avg_loss = loss.ewm(com=length-1, adjust=False).mean()
-        rs = avg_gain / avg_loss; rs = rs.fillna(0)
+        rs = avg_gain / avg_loss
+        rs = rs.fillna(0)
         return 100 - (100 / (1 + rs))
-    except: return pd.Series(50, index=series.index)
+    except:
+        return pd.Series(50, index=series.index)
 
+# --- ZIG ZAG ENGINE (SYNTAX FIXED) ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
+    pivots = []
+    trend = 1
+    last_val = df['Close'].iloc[0]
+    pivots.append((0, last_val, 1))
+    
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_val: last_val = price; (pivots[-1] = (i, price, 1)) if pivots[-1][2] == 1 else pivots.append((i, price, 1))
-            elif price < last_val * (1 - deviation_pct): trend = -1; last_val = price; pivots.append((i, price, -1))
+            if price > last_val:
+                last_val = price
+                # FIXED SYNTAX ERROR: Expanded logic blocks
+                if pivots[-1][2] == 1:
+                    pivots[-1] = (i, price, 1)
+                else:
+                    pivots.append((i, price, 1))
+            elif price < last_val * (1 - deviation_pct):
+                trend = -1
+                last_val = price
+                pivots.append((i, price, -1))
         else:
-            if price < last_val: last_val = price; (pivots[-1] = (i, price, -1)) if pivots[-1][2] == -1 else pivots.append((i, price, -1))
-            elif price > last_val * (1 + deviation_pct): trend = 1; last_val = price; pivots.append((i, price, 1))
+            if price < last_val:
+                last_val = price
+                if pivots[-1][2] == -1:
+                    pivots[-1] = (i, price, -1)
+                else:
+                    pivots.append((i, price, -1))
+            elif price > last_val * (1 + deviation_pct):
+                trend = 1
+                last_val = price
+                pivots.append((i, price, 1))
+
     if len(pivots) < 3: return "Range"
-    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
+    curr = pivots[-1]
+    prev = pivots[-3]
+    if curr[2] == 1:
+        return "HH" if curr[1] > prev[1] else "LH"
+    else:
+        return "LL" if curr[1] < prev[1] else "HL"
 
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
-    whole = int(price); candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
+    whole = int(price)
+    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     return min(candidates, key=lambda x: abs(x - price)) if candidates else price
 
 # --- UNIFIED DATA ENGINE ---
@@ -130,8 +167,7 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
             try:
                 rs = price_data[col] / price_data[benchmark_col]
                 mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
-                ratio = 100 + ((rs - mean) / std) * 1.5
-                df_ratio[col] = ratio
+                df_ratio[col] = 100 + ((rs - mean) / std) * 1.5
             except: continue
     for col in df_ratio.columns:
         try: df_mom[col] = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
@@ -154,7 +190,6 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
                     elif vr < 100 and vm < 100: status_map[t] = "LAGGING"
                     else: status_map[t] = "IMPROVING"
         
-        # SPY vs IEF special calc
         if "IEF" in data_map and "SPY" in data_map:
             spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
             rs, ms = calculate_rrg_math(spy_ief, "IEF")
@@ -168,7 +203,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
         return status_map
     except: return {}
 
-# --- STYLING (FIXED VALUEERROR) ---
+# --- STYLING (FIXED VALUEERROR: Proper CSS Formatting) ---
 def style_final(styler):
     def color_rot(val):
         if "LEADING" in val: return 'color: #00FF00; font-weight: bold'
@@ -191,7 +226,7 @@ def style_daily_health(styler):
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
-    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Shadow_SPY"]
+    cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status"]
     if not os.path.exists(PORTFOLIO_FILE): pd.DataFrame(columns=cols).to_csv(PORTFOLIO_FILE, index=False)
     df = pd.read_csv(PORTFOLIO_FILE)
     if "ID" not in df.columns: df["ID"] = range(1, len(df) + 1)
@@ -245,21 +280,16 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # Scanner Calculation
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
-        risk_per_trade = 2300 if mkt_score >= 8 else (1150 if mkt_score >= 5 else 0)
-
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
             df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             ad18 = calc_sma(df['AD'], 18); ad40 = calc_sma(df['AD'], 40)
             
-            # Daily Score
             ad_ok = not ((df['AD'].iloc[-1] < ad18.iloc[-1] and ad18.iloc[-1] <= ad18.iloc[-2]) or (ad18.iloc[-1] < ad40.iloc[-1] and ad18.iloc[-1] < ad18.iloc[-2]))
             
-            # RS Calculation for score
             bench_tick = tc.DATA_MAP.get(t, ["OTHER", "SPY"])[1] or "SPY"
             rs_ok = True
             if bench_tick in master_data:
@@ -269,7 +299,6 @@ if st.session_state.run_analysis:
 
             d_score = sum([ad_ok, rs_ok, df['Close'].iloc[-1] > df['SMA18'].iloc[-1], df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2], df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]])
             
-            # Weekly
             w_df = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
             w_score = 0
             if not w_df.empty:
@@ -280,18 +309,15 @@ if st.session_state.run_analysis:
             action = "BUY" if (w_score >= 4 and d_score >= 4) else "WATCH"
             if "WEAKENING" in rrg_status and action == "BUY": action = "CAUTION"
             
-            # --- SPLIT RSI COLOR LOGIC ---
             r5_full = calc_rsi(df['Close'], 5); r20_full = calc_rsi(df['Close'], 20)
             r5 = r5_full.iloc[-1]; r20 = r20_full.iloc[-1]
             is_rising = r5 > r5_full.iloc[-2]
             
-            # Numbers color (Strategy)
             if r5 >= r20:
                 n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
             else:
                 n_c = "#FFA500" if r20 > 50 else "#FF4444"
             
-            # Arrow color (Direction)
             a_c = "#00FF00" if is_rising else "#FF4444"
             arrow = "↑" if is_rising else "↓"
             rsi_html = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
