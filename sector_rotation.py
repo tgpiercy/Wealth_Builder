@@ -1,11 +1,13 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 
-st.set_page_config(layout="wide", page_title="Sector Rotation Matrix")
-
-st.title("🔄 Sector Rotation Matrix (RRG Logic)")
-st.caption("Institutional Money Flow Tracker")
+# --- CONFIGURATION ---
+st.set_page_config(layout="wide", page_title="Sector RRG Analysis")
+st.title("🔄 Sector Rotation: Relative Rotation Graph (RRG)")
+st.caption("Institutional Money Flow Tracker | Benchmark: SPY")
 
 # 1. Define Universe
 SECTORS = {
@@ -23,92 +25,152 @@ SECTORS = {
 }
 BENCHMARK = "SPY"
 
-if st.button("🔄 Scan Sectors"):
-    with st.spinner("Analyzing Money Flow..."):
+# 2. RRG Calculation Engine
+def calculate_rrg_components(price_data, benchmark_col, window_rs=14, window_mom=5):
+    """
+    Calculates RRG coordinates:
+    - RS-Ratio (X-Axis): Normalized Relative Strength (Trend)
+    - RS-Momentum (Y-Axis): Rate of Change of the Ratio (Velocity)
+    """
+    df_ratio = pd.DataFrame()
+    df_mom = pd.DataFrame()
+    
+    for col in price_data.columns:
+        if col != benchmark_col:
+            # 1. Relative Strength (RS)
+            rs = price_data[col] / price_data[benchmark_col]
+            
+            # 2. RS-Ratio (Normalized Trend)
+            # We use a standard score (Z-Score proxy) centered at 100
+            ma_rs = rs.rolling(window=window_rs).mean()
+            std_rs = rs.rolling(window=window_rs).std()
+            
+            # This formula centers the values around 100
+            ratio = 100 + ((rs - ma_rs) / std_rs) * 1.5 
+            df_ratio[col] = ratio
+
+    # 3. RS-Momentum (Rate of Change of Ratio)
+    for col in df_ratio.columns:
+        # Momentum is the velocity of the ratio compared to its own moving average
+        mom = 100 + (df_ratio[col] - df_ratio[col].rolling(window=window_mom).mean()) * 2
+        df_mom[col] = mom
+        
+    return df_ratio.dropna(), df_mom.dropna()
+
+# 3. Main Execution
+if st.button("Generate RRG Matrix"):
+    with st.spinner("Fetching Data & Calculating Vectors..."):
+        # Fetch 1 Year of Weekly Data (Standard for RRG Trend Analysis)
         tickers = list(SECTORS.keys()) + [BENCHMARK]
-        # Fetch 3mo of data to calculate trends
-        data = yf.download(tickers, period="6mo", progress=False)['Close']
+        data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
         
         if not data.empty:
-            # 2. Calculate Returns
-            curr = data.iloc[-1]
-            prev_1w = data.iloc[-6]  # 1 Week ago
-            prev_1m = data.iloc[-22] # 1 Month ago
-            prev_3m = data.iloc[-65] # 3 Months ago
+            # Run Math
+            ratios, momentums = calculate_rrg_components(data, BENCHMARK)
             
-            # % Change
-            chg_1w = ((curr - prev_1w) / prev_1w) * 100
-            chg_1m = ((curr - prev_1m) / prev_1m) * 100
-            chg_3m = ((curr - prev_3m) / prev_3m) * 100
+            # Define tail length (history to draw)
+            tail_len = 5 
             
-            # Benchmark Performance
-            spy_1w = chg_1w[BENCHMARK]
-            spy_1m = chg_1m[BENCHMARK]
-            spy_3m = chg_3m[BENCHMARK]
+            # --- PLOTLY CHART ---
+            fig = go.Figure()
+
+            # 1. Draw Background Quadrants
+            # Green (Leading) - Top Right
+            fig.add_shape(type="rect", x0=100, y0=100, x1=110, y1=110, fillcolor="rgba(0, 255, 0, 0.1)", layer="below", line_width=0)
+            # Yellow (Weakening) - Bottom Right
+            fig.add_shape(type="rect", x0=100, y0=90, x1=110, y1=100, fillcolor="rgba(255, 255, 0, 0.1)", layer="below", line_width=0)
+            # Red (Lagging) - Bottom Left
+            fig.add_shape(type="rect", x0=90, y0=90, x1=100, y1=100, fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
+            # Blue (Improving) - Top Left
+            fig.add_shape(type="rect", x0=90, y0=100, x1=100, y1=110, fillcolor="rgba(0, 0, 255, 0.1)", layer="below", line_width=0)
+
+            # 2. Add Axes (Crosshair at 100,100)
+            fig.add_hline(y=100, line_dash="dot", line_color="gray")
+            fig.add_vline(x=100, line_dash="dot", line_color="gray")
+
+            # 3. Plot Sector Trails
+            table_data = []
             
-            results = []
-            for t in SECTORS:
-                # 3. Calculate Alpha (Relative Strength)
-                # Positive Alpha = Outperforming SPY
-                alpha_1w = chg_1w[t] - spy_1w
-                alpha_1m = chg_1m[t] - spy_1m
-                alpha_3m = chg_3m[t] - spy_3m
+            for ticker in SECTORS.keys():
+                if ticker not in ratios.columns: continue
                 
-                # 4. RRG Classification Logic
-                # Leading: Winning Trend + Winning Momentum
-                # Weakening: Winning Trend + Losing Momentum
-                # Improving: Losing Trend + Winning Momentum
-                # Lagging: Losing Trend + Losing Momentum
+                # Slice data for the trail
+                x_trail = ratios[ticker].tail(tail_len)
+                y_trail = momentums[ticker].tail(tail_len)
                 
-                status = "LAGGING" # Default
-                if alpha_1m > 0 and alpha_1w > 0: status = "LEADING"
-                elif alpha_1m > 0 and alpha_1w < 0: status = "WEAKENING"
-                elif alpha_1m < 0 and alpha_1w > 0: status = "IMPROVING"
+                if len(x_trail) < tail_len: continue
+
+                curr_x = x_trail.iloc[-1]
+                curr_y = y_trail.iloc[-1]
                 
-                results.append({
-                    "Ticker": t,
-                    "Sector": SECTORS[t],
-                    "Price": curr[t],
-                    "Alpha 1W": alpha_1w,
-                    "Alpha 1M": alpha_1m,
-                    "Alpha 3M": alpha_3m,
-                    "Status": status
+                # Determine Color/Phase based on current position
+                phase = "LAGGING"
+                color = "gray"
+                if curr_x > 100 and curr_y > 100: 
+                    color = "#00FF00"; phase = "LEADING"
+                elif curr_x > 100 and curr_y < 100: 
+                    color = "#FFFF00"; phase = "WEAKENING"
+                elif curr_x < 100 and curr_y < 100: 
+                    color = "#FF4444"; phase = "LAGGING"
+                elif curr_x < 100 and curr_y > 100: 
+                    color = "#00BFFF"; phase = "IMPROVING"
+
+                # Draw Trail (Line)
+                fig.add_trace(go.Scatter(
+                    x=x_trail, y=y_trail, mode='lines',
+                    line=dict(color=color, width=2), opacity=0.5, showlegend=False, hoverinfo='skip'
+                ))
+                
+                # Draw Head (Marker + Text)
+                fig.add_trace(go.Scatter(
+                    x=[curr_x], y=[curr_y], mode='markers+text',
+                    marker=dict(color=color, size=12, line=dict(color='white', width=1)),
+                    text=[ticker], textposition="top center",
+                    name=SECTORS[ticker],
+                    hovertemplate=f"<b>{ticker}</b><br>Trend: %{{x:.2f}}<br>Mom: %{{y:.2f}}"
+                ))
+                
+                table_data.append({
+                    "Sector": SECTORS[ticker],
+                    "Ticker": ticker,
+                    "Phase": phase,
+                    "RS-Ratio": curr_x,
+                    "RS-Momentum": curr_y
                 })
-                
-            df = pd.DataFrame(results).sort_values("Alpha 1W", ascending=False)
 
-            # 5. Styling
-            def style_status(val):
-                color = 'white'
-                weight = 'normal'
-                if val == "LEADING": color = '#00FF00'; weight='bold'   # Green
-                elif val == "WEAKENING": color = '#FFA500'; weight='bold' # Orange
-                elif val == "LAGGING": color = '#FF4444'; weight='bold'   # Red
-                elif val == "IMPROVING": color = '#00BFFF'; weight='bold' # Blue
-                return f'color: {color}; font-weight: {weight}'
-
-            def color_alpha(val):
-                color = '#00FF00' if val > 0 else '#FF4444'
-                return f'color: {color}'
-
-            # Summary Metrics
-            c1, c2, c3 = st.columns(3)
-            c1.metric("SPY 1-Week", f"{spy_1w:.2f}%")
-            c2.metric("SPY 1-Month", f"{spy_1m:.2f}%")
-            c3.metric("SPY 3-Month", f"{spy_3m:.2f}%")
-            
-            st.divider()
-            
-            # Final Table
-            st.dataframe(
-                df.style.map(style_status, subset=['Status'])
-                        .map(color_alpha, subset=['Alpha 1W', 'Alpha 1M', 'Alpha 3M'])
-                        .format({
-                            'Price': "${:.2f}", 
-                            'Alpha 1W': "{:+.2f}%", 
-                            'Alpha 1M': "{:+.2f}%", 
-                            'Alpha 3M': "{:+.2f}%"
-                        })
+            # 4. Chart Layout
+            fig.update_layout(
+                title="Sector Rotation Trails (Last 5 Weeks)",
+                xaxis_title="RS-Ratio (Trend)", yaxis_title="RS-Momentum (Velocity)",
+                width=1100, height=800, template="plotly_dark",
+                xaxis=dict(range=[96, 104], showgrid=False, zeroline=False), 
+                yaxis=dict(range=[96, 104], showgrid=False, zeroline=False),
+                showlegend=False
             )
+            
+            # Quadrant Labels
+            fig.add_annotation(x=103.5, y=103.5, text="LEADING", showarrow=False, font=dict(size=18, color="green"))
+            fig.add_annotation(x=103.5, y=96.5, text="WEAKENING", showarrow=False, font=dict(size=18, color="yellow"))
+            fig.add_annotation(x=96.5, y=96.5, text="LAGGING", showarrow=False, font=dict(size=18, color="red"))
+            fig.add_annotation(x=96.5, y=103.5, text="IMPROVING", showarrow=False, font=dict(size=18, color="cyan"))
+
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 5. Data Table
+            st.divider()
+            st.subheader("📊 Sector Data")
+            df = pd.DataFrame(table_data).sort_values("RS-Ratio", ascending=False)
+            
+            def color_phase(val):
+                c = "white"
+                if val == "LEADING": c = "#00FF00"
+                elif val == "WEAKENING": c = "#FFA500"
+                elif val == "LAGGING": c = "#FF4444"
+                elif val == "IMPROVING": c = "#00BFFF"
+                return f'color: {c}; font-weight: bold'
+
+            st.dataframe(df.style.map(color_phase, subset=['Phase'])
+                                 .format({'RS-Ratio': "{:.2f}", 'RS-Momentum': "{:.2f}"}))
+            
         else:
-            st.error("Could not fetch data.")
+            st.error("Data Fetch Failed.")
