@@ -26,7 +26,7 @@ SECTORS = {
 BENCHMARK = "SPY"
 
 # 2. RRG Calculation Engine
-def calculate_rrg_components(price_data, benchmark_col, window_rs=14, window_mom=5):
+def calculate_rrg_components(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     """
     Calculates RRG coordinates:
     - RS-Ratio (X-Axis): Normalized Relative Strength (Trend)
@@ -55,6 +55,10 @@ def calculate_rrg_components(price_data, benchmark_col, window_rs=14, window_mom
         mom = 100 + (df_ratio[col] - df_ratio[col].rolling(window=window_mom).mean()) * 2
         df_mom[col] = mom
         
+    # 4. Final Smoothing (To make curves look organic)
+    df_ratio = df_ratio.rolling(window=smooth_factor).mean()
+    df_mom = df_mom.rolling(window=smooth_factor).mean()
+        
     return df_ratio.dropna(), df_mom.dropna()
 
 # 3. Main Execution
@@ -71,24 +75,14 @@ if st.button("Generate RRG Matrix"):
             # Define tail length (history to draw)
             tail_len = 5 
             
+            # Variables to track min/max for dynamic scaling
+            all_x = []
+            all_y = []
+
             # --- PLOTLY CHART ---
             fig = go.Figure()
 
-            # 1. Draw Background Quadrants
-            # Green (Leading) - Top Right
-            fig.add_shape(type="rect", x0=100, y0=100, x1=110, y1=110, fillcolor="rgba(0, 255, 0, 0.1)", layer="below", line_width=0)
-            # Yellow (Weakening) - Bottom Right
-            fig.add_shape(type="rect", x0=100, y0=90, x1=110, y1=100, fillcolor="rgba(255, 255, 0, 0.1)", layer="below", line_width=0)
-            # Red (Lagging) - Bottom Left
-            fig.add_shape(type="rect", x0=90, y0=90, x1=100, y1=100, fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
-            # Blue (Improving) - Top Left
-            fig.add_shape(type="rect", x0=90, y0=100, x1=100, y1=110, fillcolor="rgba(0, 0, 255, 0.1)", layer="below", line_width=0)
-
-            # 2. Add Axes (Crosshair at 100,100)
-            fig.add_hline(y=100, line_dash="dot", line_color="gray")
-            fig.add_vline(x=100, line_dash="dot", line_color="gray")
-
-            # 3. Plot Sector Trails
+            # Plot Sector Trails
             table_data = []
             
             for ticker in SECTORS.keys():
@@ -99,6 +93,10 @@ if st.button("Generate RRG Matrix"):
                 y_trail = momentums[ticker].tail(tail_len)
                 
                 if len(x_trail) < tail_len: continue
+
+                # Collect points for auto-scaling
+                all_x.extend(x_trail.values)
+                all_y.extend(y_trail.values)
 
                 curr_x = x_trail.iloc[-1]
                 curr_y = y_trail.iloc[-1]
@@ -115,10 +113,11 @@ if st.button("Generate RRG Matrix"):
                 elif curr_x < 100 and curr_y > 100: 
                     color = "#00BFFF"; phase = "IMPROVING"
 
-                # Draw Trail (Line)
+                # Draw Trail (Smoothed Line)
                 fig.add_trace(go.Scatter(
                     x=x_trail, y=y_trail, mode='lines',
-                    line=dict(color=color, width=2), opacity=0.5, showlegend=False, hoverinfo='skip'
+                    line=dict(color=color, width=2, shape='spline'), # Spline makes it curvy
+                    opacity=0.6, showlegend=False, hoverinfo='skip'
                 ))
                 
                 # Draw Head (Marker + Text)
@@ -138,21 +137,44 @@ if st.button("Generate RRG Matrix"):
                     "RS-Momentum": curr_y
                 })
 
-            # 4. Chart Layout
+            # Calculate Dynamic Range with Padding
+            x_min, x_max = min(all_x), max(all_x)
+            y_min, y_max = min(all_y), max(all_y)
+            pad = 2.0 # Buffer padding
+            
+            # Ensure 100 is always visible (center reference)
+            x_min = min(x_min, 98); x_max = max(x_max, 102)
+            y_min = min(y_min, 98); y_max = max(y_max, 102)
+
+            # Draw Background Quadrants (Dynamic Size)
+            # Green (Leading) - Top Right
+            fig.add_shape(type="rect", x0=100, y0=100, x1=x_max+pad, y1=y_max+pad, fillcolor="rgba(0, 255, 0, 0.1)", layer="below", line_width=0)
+            # Yellow (Weakening) - Bottom Right
+            fig.add_shape(type="rect", x0=100, y0=y_min-pad, x1=x_max+pad, y1=100, fillcolor="rgba(255, 255, 0, 0.1)", layer="below", line_width=0)
+            # Red (Lagging) - Bottom Left
+            fig.add_shape(type="rect", x0=x_min-pad, y0=y_min-pad, x1=100, y1=100, fillcolor="rgba(255, 0, 0, 0.1)", layer="below", line_width=0)
+            # Blue (Improving) - Top Left
+            fig.add_shape(type="rect", x0=x_min-pad, y0=100, x1=100, y1=y_max+pad, fillcolor="rgba(0, 0, 255, 0.1)", layer="below", line_width=0)
+
+            # Add Axes (Crosshair at 100,100)
+            fig.add_hline(y=100, line_dash="dot", line_color="gray")
+            fig.add_vline(x=100, line_dash="dot", line_color="gray")
+
+            # Chart Layout
             fig.update_layout(
-                title="Sector Rotation Trails (Last 5 Weeks)",
+                title="Sector Rotation Trails (Smoothed History)",
                 xaxis_title="RS-Ratio (Trend)", yaxis_title="RS-Momentum (Velocity)",
                 width=1100, height=800, template="plotly_dark",
-                xaxis=dict(range=[96, 104], showgrid=False, zeroline=False), 
-                yaxis=dict(range=[96, 104], showgrid=False, zeroline=False),
+                xaxis=dict(range=[x_min-pad, x_max+pad], showgrid=False, zeroline=False), 
+                yaxis=dict(range=[y_min-pad, y_max+pad], showgrid=False, zeroline=False),
                 showlegend=False
             )
             
-            # Quadrant Labels
-            fig.add_annotation(x=103.5, y=103.5, text="LEADING", showarrow=False, font=dict(size=18, color="green"))
-            fig.add_annotation(x=103.5, y=96.5, text="WEAKENING", showarrow=False, font=dict(size=18, color="yellow"))
-            fig.add_annotation(x=96.5, y=96.5, text="LAGGING", showarrow=False, font=dict(size=18, color="red"))
-            fig.add_annotation(x=96.5, y=103.5, text="IMPROVING", showarrow=False, font=dict(size=18, color="cyan"))
+            # Dynamic Quadrant Labels (Fixed relative to view)
+            fig.add_annotation(x=x_max, y=y_max, text="LEADING", showarrow=False, font=dict(size=18, color="green"), xanchor="right", yanchor="top")
+            fig.add_annotation(x=x_max, y=y_min, text="WEAKENING", showarrow=False, font=dict(size=18, color="yellow"), xanchor="right", yanchor="bottom")
+            fig.add_annotation(x=x_min, y=y_min, text="LAGGING", showarrow=False, font=dict(size=18, color="red"), xanchor="left", yanchor="bottom")
+            fig.add_annotation(x=x_min, y=y_max, text="IMPROVING", showarrow=False, font=dict(size=18, color="cyan"), xanchor="left", yanchor="top")
 
             st.plotly_chart(fig, use_container_width=True)
             
