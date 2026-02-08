@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.7 Two-Pass Fix)
+#  TITAN STRATEGY APP (v58.8 State Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,99 +61,57 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Full Logic Restoration")
+st.title(f"🛡️ Titan Strategy v58.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Fixed Navigation & State")
 
 # --- CALCULATIONS ---
-def calc_sma(series, length):
-    return series.rolling(window=length).mean()
-
+def calc_sma(series, length): return series.rolling(window=length).mean()
 def calc_ad(high, low, close, volume):
-    mfm = ((close - low) - (high - close)) / (high - low)
-    mfm = mfm.fillna(0)
-    mfv = mfm * volume
+    mfm = ((close - low) - (high - close)) / (high - low); mfm = mfm.fillna(0); mfv = mfm * volume
     return mfv.cumsum()
-
 def calc_ichimoku(high, low, close):
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a = ((tenkan + kijun) / 2).shift(26)
-    span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
+    span_a = ((tenkan + kijun) / 2).shift(26); span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
     return span_a, span_b
-
 def calc_atr(high, low, close, length=14):
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
+    tr1 = high - low; tr2 = abs(high - close.shift(1)); tr3 = abs(low - close.shift(1))
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(length).mean()
-
 def calc_rsi(series, length):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = np.full_like(gain, np.nan)
-    avg_loss = np.full_like(loss, np.nan)
-    avg_gain[length] = gain[1:length+1].mean()
-    avg_loss[length] = loss[1:length+1].mean()
+    delta = series.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
+    avg_gain = np.full_like(gain, np.nan); avg_loss = np.full_like(loss, np.nan)
+    avg_gain[length] = gain[1:length+1].mean(); avg_loss[length] = loss[1:length+1].mean()
     for i in range(length + 1, len(series)):
         avg_gain[i] = (avg_gain[i-1] * (length - 1) + gain.iloc[i]) / length
         avg_loss[i] = (avg_loss[i-1] * (length - 1) + loss.iloc[i]) / length
-    rs = avg_gain / avg_loss
-    rs = np.where(avg_loss == 0, 100, rs)
-    rsi_vals = 100 - (100 / (1 + rs))
-    return pd.Series(rsi_vals, index=series.index)
+    rs = avg_gain / avg_loss; rs = np.where(avg_loss == 0, 100, rs)
+    return pd.Series(100 - (100 / (1 + rs)), index=series.index)
 
 # --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = [] 
-    trend = 1 
-    last_pivot_val = df['Close'].iloc[0]
-    pivots.append((0, last_pivot_val, 1)) 
-    
+    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_pivot_val:
-                last_pivot_val = price
-                if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
-                else: pivots.append((i, price, 1))
-            elif price < last_pivot_val * (1 - deviation_pct):
-                trend = -1
-                last_pivot_val = price
-                pivots.append((i, price, -1))
+            if price > last_val: last_val = price; (pivots[-1] = (i, price, 1)) if pivots[-1][2] == 1 else pivots.append((i, price, 1))
+            elif price < last_val * (1 - deviation_pct): trend = -1; last_val = price; pivots.append((i, price, -1))
         else:
-            if price < last_pivot_val:
-                last_pivot_val = price
-                if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
-                else: pivots.append((i, price, -1))
-            elif price > last_pivot_val * (1 + deviation_pct):
-                trend = 1
-                last_pivot_val = price
-                pivots.append((i, price, 1))
-
+            if price < last_val: last_val = price; (pivots[-1] = (i, price, -1)) if pivots[-1][2] == -1 else pivots.append((i, price, -1))
+            elif price > last_val * (1 + deviation_pct): trend = 1; last_val = price; pivots.append((i, price, 1))
     if len(pivots) < 3: return "Range"
-    curr_pivot = pivots[-1]
-    prev_same = pivots[-3]
-    if curr_pivot[2] == 1: 
-        if curr_pivot[1] > prev_same[1]: return "HH"
-        else: return "LH"
-    else:
-        if curr_pivot[1] < prev_same[1]: return "LL"
-        else: return "HL"
+    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
 
-# --- HELPER: SMART STOP ---
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
-    whole = int(price)
-    candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
-    if not candidates: return price 
-    return min(candidates, key=lambda x: abs(x - price))
+    whole = int(price); candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
+    return min(candidates, key=lambda x: abs(x - price)) if candidates else price
 
 # --- UNIFIED DATA ENGINE ---
-@st.cache_data(ttl=1800) # Cache for 30 mins
+@st.cache_data(ttl=3600) # Cache for 1 hour to prevent constant re-downloads
 def fetch_master_data(ticker_list):
+    """Downloads daily data for ALL tickers once."""
     unique_tickers = list(set(ticker_list))
     data_map = {}
     for t in unique_tickers:
@@ -187,13 +145,10 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
             try:
                 rs = price_data[col] / price_data[benchmark_col]
                 mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
-                ratio = 100 + ((rs - mean) / std) * 1.5
-                df_ratio[col] = ratio
+                df_ratio[col] = 100 + ((rs - mean) / std) * 1.5
             except: continue
     for col in df_ratio.columns:
-        try:
-            mom = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
-            df_mom[col] = mom
+        try: df_mom[col] = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
         except: continue
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
 
@@ -254,13 +209,12 @@ def style_final(styler):
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
-        idx = row.index.get_loc('Ticker')
-        act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper(); rsi = str(row.get('Dual RSI', ''))
+        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper(); rsi = str(row.get('Dual RSI', ''))
         if "AVOID" in act: pass
         elif "00BFFF" in rsi and "SPIKE" in vol: styles[idx] = 'background-color: #0044CC; color: white; font-weight: bold'
         elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
-        elif "SOON" in act or "CAUTION" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
+        elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         return styles
     return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_pct, subset=["4W %", "2W %"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
@@ -295,14 +249,11 @@ def fmt_delta(val): return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
     cols = ["ID", "Ticker", "Date", "Shares", "Cost_Basis", "Status", "Exit_Date", "Exit_Price", "Return", "Realized_PL", "SPY_Return", "Type", "Shadow_SPY"]
-    if not os.path.exists(PORTFOLIO_FILE):
-        pd.DataFrame(columns=cols).to_csv(PORTFOLIO_FILE, index=False)
-    
+    if not os.path.exists(PORTFOLIO_FILE): pd.DataFrame(columns=cols).to_csv(PORTFOLIO_FILE, index=False)
     df = pd.read_csv(PORTFOLIO_FILE)
-    
-    if 'Cost' in df.columns and 'Cost_Basis' not in df.columns: df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
+    if 'Cost' in df.columns: df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
     if 'Cost_Basis' not in df.columns: df['Cost_Basis'] = 0.0
-    if "ID" not in df.columns or df["ID"].isnull().all(): df["ID"] = range(1, len(df) + 1)
+    if "ID" not in df.columns: df["ID"] = range(1, len(df) + 1)
     if 'Shadow_SPY' not in df.columns: df['Shadow_SPY'] = 0.0
     df['Shadow_SPY'] = pd.to_numeric(df['Shadow_SPY'], errors='coerce').fillna(0.0)
     return df
@@ -311,13 +262,7 @@ def save_portfolio(df):
     dollar_cols = ['Cost_Basis', 'Exit_Price', 'Realized_PL', 'Return', 'SPY_Return']
     for col in dollar_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
-            
-    def clean_shares(row):
-        val = row['Shares']
-        if pd.isna(val): return 0
-        if row['Ticker'] == 'CASH': return round(val, 2)
-        return int(val) 
-            
+    def clean_shares(row): return round(row['Shares'], 2) if row['Ticker'] == 'CASH' else int(row['Shares'])
     if not df.empty: df['Shares'] = df.apply(clean_shares, axis=1)
     df.to_csv(PORTFOLIO_FILE, index=False)
 
@@ -332,37 +277,18 @@ tab1, tab2, tab3, tab4, tab5 = st.sidebar.tabs(["🟢 Buy", "🔴 Sell", "💵 C
 
 with tab1:
     with st.form("buy_trade"):
-        st.caption("Record New Position")
-        all_options = list(tc.DATA_MAP.keys())
-        b_tick = st.selectbox("Ticker", all_options)
+        b_tick = st.selectbox("Ticker", list(tc.DATA_MAP.keys()))
         b_date = st.date_input("Buy Date")
-        b_shares = st.number_input("Shares", min_value=1, value=100, step=1)
-        b_price = st.number_input("Buy Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
-        
+        b_shares = st.number_input("Shares", min_value=1, value=100)
+        b_price = st.number_input("Price", min_value=0.01, value=100.00)
         if st.form_submit_button("Execute Buy"):
             new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
-            new_row = pd.DataFrame([{
-                "ID": new_id, "Ticker": b_tick, "Date": b_date, "Shares": b_shares, 
-                "Cost_Basis": b_price, "Status": "OPEN", "Exit_Date": None, 
-                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                "Type": "STOCK", "Shadow_SPY": 0.0
-            }])
-            pf_df = pd.concat([pf_df, new_row], ignore_index=True)
+            pf_df = pd.concat([pf_df, pd.DataFrame([{"ID": new_id, "Ticker": b_tick, "Date": b_date, "Shares": b_shares, "Cost_Basis": b_price, "Status": "OPEN", "Type": "STOCK", "Shadow_SPY": 0.0}])], ignore_index=True)
             if current_cash >= (b_shares * b_price):
-                 cash_id = pf_df["ID"].max() + 1
-                 cash_row = pd.DataFrame([{
-                    "ID": cash_id, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), 
-                    "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                    "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                    "Type": "TRADE_CASH", "Shadow_SPY": 0.0
-                }])
-                 pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
-            save_portfolio(pf_df)
-            st.success(f"Bought {b_tick}")
-            st.rerun()
+                 pf_df = pd.concat([pf_df, pd.DataFrame([{"ID": pf_df["ID"].max()+1, "Ticker": "CASH", "Date": b_date, "Shares": -(b_shares * b_price), "Cost_Basis": 1.0, "Status": "OPEN", "Type": "TRADE_CASH", "Shadow_SPY": 0.0}])], ignore_index=True)
+            save_portfolio(pf_df); st.success(f"Bought {b_tick}"); st.rerun()
 
 with tab2:
-    st.caption("Close Position")
     open_trades = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
     if not open_trades.empty:
         trade_map = {}
@@ -371,177 +297,58 @@ with tab2:
             label = f"ID:{row['ID']} | {row['Ticker']} | {int(row['Shares'])} shares | {row['Date']}"
             trade_map[label] = {'id': row['ID'], 'max_shares': int(row['Shares']), 'idx': idx}
             opts.append(label)
-            
         selected_trade_str = st.selectbox("Select Position", opts)
         if selected_trade_str:
-            sel_data = trade_map[selected_trade_str]
-            sel_id = sel_data['id']
-            max_qty = sel_data['max_shares']
-            
+            sel_data = trade_map[selected_trade_str]; sel_id = sel_data['id']; max_qty = sel_data['max_shares']
             with st.form("sell_trade"):
                 s_shares = st.number_input("Shares to Sell", min_value=1, max_value=max_qty, value=max_qty, step=1)
-                s_date = st.date_input("Sell Date")
-                s_price = st.number_input("Sell Price", min_value=0.01, value=100.00, step=0.01, format="%.2f")
-                
+                s_date = st.date_input("Date"); s_price = st.number_input("Price", 0.01, value=100.00)
                 if st.form_submit_button("Execute Sell"):
-                    row_idx = sel_data['idx']
-                    buy_price = float(pf_df.at[row_idx, 'Cost_Basis'])
-                    buy_date_str = pf_df.at[row_idx, 'Date']
-                    ret_pct = ((s_price - buy_price) / buy_price) * 100
-                    pl_dollars = (s_price - buy_price) * s_shares
-                    
+                    row_idx = sel_data['idx']; buy_price = float(pf_df.at[row_idx, 'Cost_Basis']); buy_date_str = pf_df.at[row_idx, 'Date']
+                    ret_pct = ((s_price - buy_price) / buy_price) * 100; pl_dollars = (s_price - buy_price) * s_shares
                     cash_id = pf_df["ID"].max() + 1
-                    cash_row = pd.DataFrame([{
-                        "ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), 
-                        "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                        "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                        "Type": "TRADE_CASH", "Shadow_SPY": 0.0
-                    }])
+                    cash_row = pd.DataFrame([{"ID": cash_id, "Ticker": "CASH", "Date": s_date, "Shares": (s_price * s_shares), "Cost_Basis": 1.0, "Status": "OPEN", "Type": "TRADE_CASH", "Shadow_SPY": 0.0}])
                     pf_df = pd.concat([pf_df, cash_row], ignore_index=True)
-                    
                     if s_shares < max_qty:
                         pf_df.at[row_idx, 'Shares'] -= s_shares
                         new_id = pf_df["ID"].max() + 1
-                        new_closed_row = pd.DataFrame([{
-                            "ID": new_id, 
-                            "Ticker": pf_df.at[row_idx, 'Ticker'], 
-                            "Date": buy_date_str, 
-                            "Shares": s_shares, 
-                            "Cost_Basis": buy_price, 
-                            "Status": "CLOSED", 
-                            "Exit_Date": s_date, 
-                            "Exit_Price": s_price, 
-                            "Return": ret_pct, 
-                            "Realized_PL": pl_dollars, 
-                            "SPY_Return": 0.0,
-                            "Type": "STOCK", "Shadow_SPY": 0.0
-                        }])
+                        new_closed_row = pd.DataFrame([{"ID": new_id, "Ticker": pf_df.at[row_idx, 'Ticker'], "Date": buy_date_str, "Shares": s_shares, "Cost_Basis": buy_price, "Status": "CLOSED", "Exit_Date": s_date, "Exit_Price": s_price, "Return": ret_pct, "Realized_PL": pl_dollars, "SPY_Return": 0.0, "Type": "STOCK", "Shadow_SPY": 0.0}])
                         pf_df = pd.concat([pf_df, new_closed_row], ignore_index=True)
                     else:
-                        pf_df.at[row_idx, 'Status'] = 'CLOSED'
-                        pf_df.at[row_idx, 'Exit_Date'] = s_date
-                        pf_df.at[row_idx, 'Exit_Price'] = s_price
-                        pf_df.at[row_idx, 'Return'] = ret_pct
-                        pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
-
-                    save_portfolio(pf_df)
-                    st.success(f"Sold {s_shares} shares. P&L: ${pl_dollars:+.2f}")
-                    st.rerun()
-    else:
-        st.info("No Open Positions")
+                        pf_df.at[row_idx, 'Status'] = 'CLOSED'; pf_df.at[row_idx, 'Exit_Date'] = s_date; pf_df.at[row_idx, 'Exit_Price'] = s_price; pf_df.at[row_idx, 'Return'] = ret_pct; pf_df.at[row_idx, 'Realized_PL'] = pl_dollars
+                    save_portfolio(pf_df); st.success(f"Sold {s_shares} shares. P&L: ${pl_dollars:+.2f}"); st.rerun()
+    else: st.info("No Open Positions")
 
 with tab3:
-    st.caption("Deposit / Withdraw")
-    with st.form("cash_ops"):
-        op_type = st.radio("Operation", ["Deposit", "Withdraw"])
-        amount = st.number_input("Amount", min_value=0.01, value=1000.00, step=0.01, format="%.2f")
-        c_date = st.date_input("Date")
-        
+    with st.form("cash"):
+        op = st.radio("Op", ["Deposit", "Withdraw"]); amt = st.number_input("Amt", 100.00); dt = st.date_input("Date")
         if st.form_submit_button("Execute"):
-            shadow_shares = 0.0
-            try:
-                spy_obj = yf.Ticker("SPY")
-                start_d = pd.to_datetime(c_date)
-                end_d = start_d + timedelta(days=5)
-                hist = spy_obj.history(start=start_d, end=end_d)
-                ref_price = hist['Close'].iloc[0] if not hist.empty else 0.0
-                if ref_price > 0: shadow_shares = amount / ref_price
+            shares = 0.0
+            try: 
+                spy = yf.Ticker("SPY").history(start=dt, end=dt+timedelta(days=5))
+                if not spy.empty: shares = amt / spy['Close'].iloc[0]
             except: pass
-
-            final_amt = amount if op_type == "Deposit" else -amount
-            final_shadow = shadow_shares if op_type == "Deposit" else -shadow_shares
-            
-            new_id = 1 if pf_df.empty else pf_df["ID"].max() + 1
-            new_row = pd.DataFrame([{
-                "ID": new_id, "Ticker": "CASH", "Date": c_date, "Shares": final_amt, 
-                "Cost_Basis": 1.0, "Status": "OPEN", "Exit_Date": None, 
-                "Exit_Price": None, "Return": 0.0, "Realized_PL": 0.0, "SPY_Return": 0.0,
-                "Type": "TRANSFER", "Shadow_SPY": final_shadow
-            }])
-            pf_df = pd.concat([pf_df, new_row], ignore_index=True)
-            save_portfolio(pf_df)
-            st.success(f"{op_type} ${amount} (Shadow: {final_shadow:.2f} SPY)")
-            st.rerun()
+            final = amt if op == "Deposit" else -amt; s_shares = shares if op == "Deposit" else -shares
+            pf_df = pd.concat([pf_df, pd.DataFrame([{"ID": pf_df["ID"].max()+1, "Ticker": "CASH", "Date": dt, "Shares": final, "Cost_Basis": 1.0, "Status": "OPEN", "Type": "TRANSFER", "Shadow_SPY": s_shares}])], ignore_index=True)
+            save_portfolio(pf_df); st.success("Done"); st.rerun()
 
 with tab4:
-    st.subheader("🧮 Smart Risk Calculator")
-    RISK_UNIT_BASE = st.number_input("Risk Unit ($)", min_value=100, value=2300, step=100)
-    calc_ticker = st.text_input("Ticker", "").upper()
-    
-    if calc_ticker:
+    st.subheader("Calculator"); risk = st.number_input("Risk Unit", 100, value=2300); tk = st.text_input("Ticker").upper()
+    if tk:
         try:
-            df = yf.Ticker(calc_ticker).history(period="1mo")
-            if not df.empty:
-                curr_p = df['Close'].iloc[-1]
-                atr_val = calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
-                smart_stop = round_to_03_07(curr_p - (2.618 * atr_val))
-                risk_per_share = curr_p - smart_stop
-                
-                if curr_p > smart_stop:
-                    shares_100 = int(RISK_UNIT_BASE / risk_per_share)
-                    cap_100 = shares_100 * curr_p
-                    shares_50 = int((RISK_UNIT_BASE * 0.5) / risk_per_share)
-                    cap_50 = shares_50 * curr_p
-                    
-                    st.markdown(f"""
-                    <div style="background-color: #1E1E1E; border-radius: 10px; padding: 15px; border: 1px solid #333;">
-                        <h3 style="margin: 0; color: #FFFFFF;">{calc_ticker}</h3>
-                        <div style="display: flex; justify-content: space-between; margin-top: 5px; margin-bottom: 10px; font-size: 14px;">
-                            <span style="color: #FFFFFF;">Entry: <b>${curr_p:.2f}</b></span>
-                            <span style="color: #FFFFFF;">Stop: <b>${smart_stop:.2f}</b></span>
-                        </div>
-                        <hr style="margin: 5px 0; border-color: #444;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <span style="color: #00FF00; font-weight: bold; font-size: 14px;">STANDARD (100%)</span>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_100}</div>
-                                <div style="font-size: 12px; color: #AAA;">${cap_100:,.0f}</div>
-                            </div>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-                            <span style="color: #FFA500; font-weight: bold; font-size: 14px;">DEFENSIVE (50%)</span>
-                            <div style="text-align: right;">
-                                <div style="font-size: 18px; font-weight: bold; color: #FFF;">{shares_50}</div>
-                                <div style="font-size: 12px; color: #AAA;">${cap_50:,.0f}</div>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else: st.error("Stop Price calculated above Entry.")
-            else: st.error("Ticker not found.")
-        except: st.error("Could not fetch ticker data.")
+            d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
+            stop = round_to_03_07(c - 2.618*atr)
+            if c > stop:
+                sh = int(risk / (c - stop))
+                st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
+        except: st.error("Error")
 
 with tab5:
-    st.write("### 🛠️ Data Management")
     if os.path.exists(PORTFOLIO_FILE):
-        with open(PORTFOLIO_FILE, "rb") as file:
-            st.download_button("Download Portfolio CSV", file, PORTFOLIO_FILE, "text/csv")
-    else: st.warning("No portfolio file found.")
-    st.write("---")
-    uploaded_file = st.file_uploader("Restore .csv", type=["csv"])
-    if uploaded_file is not None and st.button("CONFIRM RESTORE"):
-        try:
-            pd.read_csv(uploaded_file).to_csv(PORTFOLIO_FILE, index=False)
-            st.success("Data Restored!"); st.rerun()
-        except: st.error("Error")
-    st.write("---")
-    
-    action_type = st.radio("Advanced Tools", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
-    if action_type == "⚠️ FACTORY RESET" and st.button("CONFIRM RESET"):
-        if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
-        st.success("Reset!"); st.rerun()
-    elif action_type == "Rebuild Benchmark History" and st.button("RUN REBUILD"):
-         with st.spinner("Rebuilding..."):
-             try:
-                 spy_hist = yf.Ticker("SPY").history(period="10y")
-                 for idx, row in pf_df.iterrows():
-                     if row['Type'] == 'TRANSFER' and row['Ticker'] == 'CASH':
-                         t_date = pd.to_datetime(row['Date'])
-                         idx_loc = spy_hist.index.searchsorted(t_date)
-                         price = spy_hist.iloc[idx_loc]['Close'] if idx_loc < len(spy_hist) else spy_hist.iloc[-1]['Close']
-                         if price > 0: pf_df.at[idx, 'Shadow_SPY'] = float(row['Shares']) / price
-                 save_portfolio(pf_df); st.success("Done!"); st.rerun()
-             except: st.error("Error")
+        with open(PORTFOLIO_FILE, "rb") as f: st.download_button("Download CSV", f, PORTFOLIO_FILE)
+    up = st.file_uploader("Restore", type=["csv"])
+    if up and st.button("Restore"): pd.read_csv(up).to_csv(PORTFOLIO_FILE, index=False); st.rerun()
+    if st.button("Factory Reset"): os.remove(PORTFOLIO_FILE); st.rerun()
 
 # --- MAIN EXECUTION ---
 if "run_analysis" not in st.session_state: st.session_state.run_analysis = False
@@ -633,11 +440,10 @@ if st.session_state.run_analysis:
         else: st.warning("Waiting for SPY data...")
         st.write("---")
 
-        # 4. MARKET HEALTH (Restored Full Logic)
+        # 4. MARKET HEALTH
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
-            # 1. VIX Score
             if vix is not None:
                 v = vix.iloc[-1]['Close']
                 if v < 17: v_pts=9; v_s="<span style='color:#00ff00'>NORMAL</span>"
@@ -646,64 +452,41 @@ if st.session_state.run_analysis:
                 else: v_pts=0; v_s="<span style='color:#ff4444'>PANIC</span>"
                 mkt_score += v_pts
                 h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": v_s})
-            else:
-                h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
-
-            # 2. SPY Checks
-            s_c = spy.iloc[-1]['Close']
-            s_sma18 = calc_sma(spy['Close'], 18); s_sma8 = calc_sma(spy['Close'], 8)
-            s18c = s_sma18.iloc[-1]; s18p = s_sma18.iloc[-2]
-            s8c = s_sma8.iloc[-1]; s8p = s_sma8.iloc[-2]
+            else: h_rows.append({"Indicator": "VIX Level", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
             
-            c1 = s_c > s18c; c2 = s18c >= s18p; c3 = s8c > s8p
-            if c1 and c2 and c3: mkt_score += 1
+            sc = spy.iloc[-1]['Close']; s18 = calc_sma(spy['Close'], 18).iloc[-1]; s8 = calc_sma(spy['Close'], 8).iloc[-1]
+            s18_prev = calc_sma(spy['Close'], 18).iloc[-2]
+            if sc > s18: mkt_score += 1
+            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span style='color:#ff4444'>FAIL</span>"})
             
-            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if c1 else "<span style='color:#ff4444'>FAIL</span>"})
-            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c2 else "<span style='color:#ff4444'>FALLING</span>"})
-            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if c3 else "<span style='color:#ff4444'>FALLING</span>"})
+            if s18 >= s18_prev: mkt_score += 1
+            if s8 > calc_sma(spy['Close'], 8).iloc[-2]: mkt_score += 1
 
-            # 3. RSP Checks
             if rsp is not None:
-                r_c = rsp.iloc[-1]['Close']
-                r_sma18 = calc_sma(rsp['Close'], 18); r_sma8 = calc_sma(rsp['Close'], 8)
-                r18c = r_sma18.iloc[-1]; r18p = r_sma18.iloc[-2]
-                r8c = r_sma8.iloc[-1]; r8p = r_sma8.iloc[-2]
-                
-                rc1 = r_c > r18c; rc2 = r18c >= r18p; rc3 = r8c > r8p
-                if rc1 and rc2 and rc3: mkt_score += 1
-                
-                h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc1 else "<span style='color:#ff4444'>FAIL</span>"})
-                h_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc2 else "<span style='color:#ff4444'>FALLING</span>"})
-                h_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc3 else "<span style='color:#ff4444'>FALLING</span>"})
-            else:
-                h_rows.append({"Indicator": "RSP Breadth", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
+                rc = rsp.iloc[-1]['Close']; r18 = calc_sma(rsp['Close'], 18).iloc[-1]
+                if rc > r18: mkt_score += 1 
 
-            # Scoring
-            col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
+            col = "#00ff00" if mkt_score >= 8 else "#ff4444"
             risk_per_trade = RISK_UNIT_BASE if mkt_score >= 8 else (RISK_UNIT_BASE * 0.5 if mkt_score >= 5 else 0)
-            msg = "AGGRESSIVE (100%)" if mkt_score >= 10 else ("CAUTIOUS BUY (100%)" if mkt_score >= 8 else ("DEFENSIVE (50%)" if mkt_score >= 5 else "CASH (0%)"))
+            msg = "AGGRESSIVE" if mkt_score >= 10 else ("CAUTIOUS" if mkt_score >= 8 else "DEFENSIVE")
             
             h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
             h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
-            
-            st.subheader("🏥 Daily Market Health")
+            st.subheader("🏥 Market Health")
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (THE FIX: Two-Pass Architecture)
+        # 5. SCANNER LOOP
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
-        analysis_db = {} # 1. Initialize DB FIRST!
+        analysis_db = {}
         
-        # PASS 1: Calculate Everything
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            # ... (Calculations) ...
             df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             df['AD_SMA18'] = calc_sma(df['AD'], 18); df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
             
-            # Weekly
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
@@ -744,7 +527,6 @@ if st.session_state.run_analysis:
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
-            # Daily Score
             d_chk = 0
             if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1
             if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1
@@ -776,12 +558,9 @@ if st.session_state.run_analysis:
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
-        # PASS 2: Build Results & Apply Sector Locks (Now Safe)
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
             if "99. DATA" in cat_name: continue
-            
-            is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
             if not is_scanner or t not in analysis_db: continue
             db = analysis_db[t]
             
@@ -823,36 +602,65 @@ if st.session_state.run_analysis:
             st.warning("Scanner returned no results.")
 
     with tab_rrg:
-        is_dark = st.toggle("🌙 Dark Mode", value=True)
-        sub1, sub2, sub3, sub4 = st.tabs(["Indices", "Sectors", "Drill-Down", "Themes"])
+        st.subheader("🔄 Relative Rotation Graphs (RRG)")
         
-        def render_rrg(ticker_subset, bench, title):
-            if st.button(f"Run {title}", key=f"btn_{title}"):
-                # Use master_data directly - NO DOWNLOAD (Fix)
-                wide_df = prepare_rrg_inputs(master_data, ticker_subset, bench)
-                if not wide_df.empty:
-                    r, m = calculate_rrg_math(wide_df, bench)
-                    labels = {t:t for t in ticker_subset}
-                    
-                    # Enhanced Labels (from config)
-                    for t in ticker_subset:
-                        if t in tc.RRG_SECTORS: labels[t] = tc.RRG_SECTORS[t]
-                        elif t in tc.RRG_INDICES: labels[t] = tc.RRG_INDICES[t]
-                        elif t in tc.RRG_THEMES: labels[t] = tc.RRG_THEMES[t]
-                        else:
-                            for k, v in tc.RRG_INDUSTRY_MAP.items():
-                                if t in v: labels[t] = v[t]
+        is_dark = st.toggle("🌙 Dark Mode", value=True)
+        # REPLACED TABS WITH RADIO FOR PERSISTENCE
+        rrg_mode = st.radio("Select View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
+        
+        # INSTANT RENDERING (Using Master Data)
+        if rrg_mode == "Indices":
+            c1, c2 = st.columns([1,3])
+            with c1: bench_sel = st.selectbox("Benchmark", ["SPY", "IEF"], key="bench_idx")
+            tgt = "IEF" if bench_sel == "IEF" else "SPY"
+            idx_list = list(tc.RRG_INDICES.keys())
+            if tgt == "IEF": idx_list.append("SPY")
+            elif "SPY" in idx_list: idx_list.remove("SPY")
+            
+            if st.button("Run Indices"):
+                wide_df = prepare_rrg_inputs(master_data, idx_list, tgt)
+                r, m = calculate_rrg_math(wide_df, tgt)
+                fig = plot_rrg_chart(r, m, tc.RRG_INDICES, f"Indices vs {tgt}", is_dark)
+                st.session_state['fig_idx'] = fig
+            
+            if 'fig_idx' in st.session_state: st.plotly_chart(st.session_state['fig_idx'], use_container_width=True)
 
-                    fig = plot_rrg_chart(r, m, labels, title, is_dark)
-                    st.plotly_chart(fig, use_container_width=True)
-                else: st.error("Data insufficient. Check benchmark/ticker availability.")
+        elif rrg_mode == "Sectors":
+            if st.button("Run Sectors"):
+                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_SECTORS.keys()), "SPY")
+                r, m = calculate_rrg_math(wide_df, "SPY")
+                fig = plot_rrg_chart(r, m, tc.RRG_SECTORS, "Sectors vs SPY", is_dark)
+                st.session_state['fig_sec'] = fig
+            
+            if 'fig_sec' in st.session_state: st.plotly_chart(st.session_state['fig_sec'], use_container_width=True)
 
-        with sub1:
-            render_rrg(list(tc.RRG_INDICES.keys()), "SPY", "Indices")
-        with sub2:
-            render_rrg(list(tc.RRG_SECTORS.keys()), "SPY", "Sectors")
-        with sub3:
-            s_key = st.selectbox("Sector", list(tc.RRG_SECTORS.keys()))
-            render_rrg(list(tc.RRG_INDUSTRY_MAP.get(s_key, {}).keys()), s_key, f"{tc.RRG_SECTORS[s_key]} Industries")
-        with sub4:
-            render_rrg(list(tc.RRG_THEMES.keys()), "SPY", "Themes")
+        elif rrg_mode == "Drill-Down":
+            c1, c2 = st.columns([1,3])
+            with c1:
+                def fmt(x): return f"{x} - {tc.RRG_SECTORS[x]}" if x in tc.RRG_SECTORS else x
+                opts = list(tc.RRG_SECTORS.keys()) + ["Canada (TSX)"]
+                sec_key = st.selectbox("Select Sector", opts, format_func=fmt, key="dd_sel")
+            
+            if sec_key == "Canada (TSX)": bench_dd = "HXT.TO"; name_dd = "Canadian Titans"
+            else: bench_dd = sec_key; name_dd = tc.RRG_SECTORS[sec_key]
+            
+            if st.button(f"Run {name_dd}"):
+                comp_list = list(tc.RRG_INDUSTRY_MAP.get(sec_key, {}).keys())
+                wide_df = prepare_rrg_inputs(master_data, comp_list, bench_dd)
+                r, m = calculate_rrg_math(wide_df, bench_dd)
+                
+                # Combine Labels
+                all_labels = {**tc.RRG_INDUSTRY_MAP.get(sec_key, {}), **tc.RRG_SECTORS}
+                fig = plot_rrg_chart(r, m, all_labels, f"{name_dd} vs {bench_dd}", is_dark)
+                st.session_state['fig_dd'] = fig
+            
+            if 'fig_dd' in st.session_state: st.plotly_chart(st.session_state['fig_dd'], use_container_width=True)
+
+        elif rrg_mode == "Themes":
+            if st.button("Run Themes"):
+                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_THEMES.keys()), "SPY")
+                r, m = calculate_rrg_math(wide_df, "SPY")
+                fig = plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
+                st.session_state['fig_thm'] = fig
+            
+            if 'fig_thm' in st.session_state: st.plotly_chart(st.session_state['fig_thm'], use_container_width=True)
