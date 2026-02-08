@@ -28,7 +28,7 @@ else:
     C_IMPROVING = "#0000FF" 
 
 # --- DATA UNIVERSE ---
-BENCHMARK = "SPY"  # <--- RESTORED THIS LINE
+BENCHMARK = "SPY"
 
 # 1. Macro Sectors
 SECTORS = {
@@ -169,56 +169,56 @@ tab1, tab2 = st.tabs(["🌍 Global Sectors", "🔬 Industry Drill-Down"])
 # 1. MACRO VIEW
 with tab1:
     st.subheader(f"Macro View: Sectors vs {BENCHMARK}")
-    if st.button("Run Global Scan", key="btn_global"):
+    
+    # Check session state logic
+    run_global = st.button("Run Global Scan", key="btn_global")
+    
+    if run_global:
         with st.spinner("Analyzing Global Flows..."):
             tickers = list(SECTORS.keys()) + [BENCHMARK]
             data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
             
             if not data.empty:
                 rat, mom = calculate_rrg(data, BENCHMARK)
-                fig = plot_rrg_chart(rat, mom, SECTORS, f"Sector Rotation vs {BENCHMARK}")
-                st.plotly_chart(fig, use_container_width=True)
+                fig_global = plot_rrg_chart(rat, mom, SECTORS, f"Sector Rotation vs {BENCHMARK}")
+                
+                # SAVE TO SESSION STATE
+                st.session_state['fig_global'] = fig_global
             else:
                 st.error("Data fetch failed.")
+
+    # Render from State if available
+    if 'fig_global' in st.session_state:
+        st.plotly_chart(st.session_state['fig_global'], use_container_width=True)
 
 # 2. MICRO VIEW
 with tab2:
     st.subheader("Micro View: Industry vs Sector")
     
-    # Dropdown for Sector Selection
     sel_sector_key = st.selectbox("Select Sector to Drill Down:", list(SECTORS.keys()), 
                                   format_func=lambda x: f"{x} - {SECTORS[x]}")
     
-    sel_benchmark = sel_sector_key # The sector ETF becomes the benchmark
+    sel_benchmark = sel_sector_key 
     
-    if st.button(f"Analyze {SECTORS[sel_sector_key]} Industries", key="btn_drill"):
+    run_micro = st.button(f"Analyze {SECTORS[sel_sector_key]} Industries", key="btn_drill")
+    
+    if run_micro:
         with st.spinner(f"Fetching {SECTORS[sel_sector_key]} Components..."):
-            
-            # Get Industry Mapping
             ind_map = INDUSTRY_MAP.get(sel_sector_key, {})
             if not ind_map:
-                st.warning("No sub-industries defined for this sector yet.")
+                st.warning("No sub-industries defined.")
                 st.stop()
                 
             tickers = list(ind_map.keys()) + [sel_benchmark]
-            
-            # Fetch Data
             data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
             
             if not data.empty:
                 rat, mom = calculate_rrg(data, sel_benchmark)
+                fig_micro = plot_rrg_chart(rat, mom, ind_map, f"Industry Rotation vs {sel_benchmark} ({SECTORS[sel_sector_key]})")
                 
-                # Plot
-                fig = plot_rrg_chart(rat, mom, ind_map, f"Industry Rotation vs {sel_benchmark} ({SECTORS[sel_sector_key]})")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Data Table
-                st.divider()
-                st.caption(f"Raw Data (vs {sel_benchmark})")
+                # Calc Table
                 latest_rat = rat.iloc[-1].to_dict()
                 latest_mom = mom.iloc[-1].to_dict()
-                
-                # Build simple table
                 tbl = []
                 for t, name in ind_map.items():
                     if t in latest_rat:
@@ -230,7 +230,20 @@ with tab2:
                         elif r < 100 and m > 100: status = "IMPROVING"
                         tbl.append({"Ticker": t, "Name": name, "Status": status, "Trend": r, "Momentum": m})
                 
-                st.dataframe(pd.DataFrame(tbl).style.format({"Trend": "{:.2f}", "Momentum": "{:.2f}"}))
+                df_micro = pd.DataFrame(tbl)
+                
+                # SAVE TO SESSION STATE
+                st.session_state['fig_micro'] = fig_micro
+                st.session_state['df_micro'] = df_micro
                 
             else:
-                st.error(f"Could not fetch data for {sel_sector_key} components.")
+                st.error(f"Could not fetch data for {sel_sector_key}.")
+
+    # Render from State if available
+    if 'fig_micro' in st.session_state:
+        st.plotly_chart(st.session_state['fig_micro'], use_container_width=True)
+        
+        if 'df_micro' in st.session_state:
+            st.divider()
+            st.caption("Industry Data")
+            st.dataframe(st.session_state['df_micro'].style.format({"Trend": "{:.2f}", "Momentum": "{:.2f}"}))
