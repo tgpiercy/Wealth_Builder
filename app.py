@@ -8,14 +8,14 @@ from datetime import datetime, timedelta
 try:
     import yfinance as yf
 except ImportError:
-    st.error("⚠️ YFinance missing.")
+    st.error("⚠️ YFinance missing. pip install yfinance")
     st.stop()
 
 # --- IMPORT CONFIG ---
 try:
     import titan_config as tc
 except ImportError:
-    st.error("⚠️ titan_config.py is missing. Please create it!")
+    st.error("⚠️ titan_config.py is missing!")
     st.stop()
 
 # --- SETUP ---
@@ -24,17 +24,44 @@ CREDENTIALS = {"dad": "1234", "son": "1234"}
 PORTFOLIO_FILE = f"portfolio_{st.session_state.get('user', 'dad')}.csv"
 
 # ==============================================================================
-#  HELPER FUNCTIONS (Restored Logic)
+#  HELPER FUNCTIONS
 # ==============================================================================
 
-def calc_sma(series, length): return series.rolling(window=length).mean()
-def calc_atr(high, low, close, length=14):
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    return pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(length).mean()
+def safe_download(tickers, period):
+    """Robust downloader that handles yfinance MultiIndex issues"""
+    try:
+        data = yf.download(tickers, period=period, group_by='ticker', progress=False)
+        # If only 1 ticker, yfinance returns different shape. Force standard.
+        if len(tickers) == 1:
+            # Reconstruct dict-like structure for consistency
+            return {tickers[0]: data}
+        return data
+    except Exception as e:
+        return pd.DataFrame()
 
-def calc_rsi(series, length):
+def get_price_series(data, ticker):
+    """Extracts Close price series safely from complex yfinance structures"""
+    try:
+        if isinstance(data, pd.DataFrame):
+            # Check if multi-index (Ticker, PriceType)
+            if isinstance(data.columns, pd.MultiIndex):
+                if ticker in data.columns.levels[0]:
+                    return data[ticker]['Close']
+            # Check if simple columns
+            elif ticker in data.columns:
+                return data[ticker]
+            # Check if columns are Close only but named by ticker
+            elif ticker == data.columns[0]: 
+                return data['Close']
+        # If dict (from group_by='ticker')
+        if ticker in data:
+            return data[ticker]['Close']
+    except:
+        pass
+    return pd.Series(dtype=float)
+
+def calc_sma(series, length): return series.rolling(window=length).mean()
+def calc_rsi(series, length=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=length).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=length).mean()
@@ -46,7 +73,7 @@ def calc_ichimoku(high, low, close):
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
     span_a = ((tenkan + kijun) / 2).shift(26)
     span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
-    return pd.concat([span_a, span_b], axis=1).max(axis=1) # Cloud Top
+    return pd.concat([span_a, span_b], axis=1).max(axis=1)
 
 def calc_structure(df, deviation_pct=0.035):
     # ZIG ZAG LOGIC (Simplified for Speed)
@@ -78,29 +105,34 @@ def calc_structure(df, deviation_pct=0.035):
                 pivots.append((i, price, 1))
                 
     if len(pivots) < 3: return "Range"
-    # Compare last pivot to previous same-type pivot
     curr, prev = pivots[-1], pivots[-3]
     if curr[2] == 1: return "HH" if curr[1] > prev[1] else "LH"
     return "LL" if curr[1] < prev[1] else "HL"
 
 def style_portfolio(styler):
     def color_pl(val):
-        if isinstance(val, str) and '$' in val:
-            color = '#ff4444' if '-' in val else '#00ff00'
-            return f'color: {color}; font-weight: bold'
+        # Check if value is string with $ and -
+        if isinstance(val, str):
+            if '-' in val: return 'color: #FF4444; font-weight: bold' # Red
+            elif '$' in val: return 'color: #00FF00; font-weight: bold' # Green
+        # Check if numeric
+        elif isinstance(val, (int, float)):
+            if val < 0: return 'color: #FF4444; font-weight: bold'
+            elif val > 0: return 'color: #00FF00; font-weight: bold'
         return ''
-    return styler.map(color_pl, subset=["Gain/Loss ($)", "% Return"])
+    return styler.map(color_pl, subset=["Gain/Loss ($)", "% Return", "Realized_PL"])
 
 def style_scanner(styler):
     def color_action(val):
-        if val == "BUY": return 'color: #00ff00; font-weight: bold'
-        if "SCOUT" in val: return 'color: #00ffff; font-weight: bold'
-        if val == "AVOID": return 'color: #ff4444'
+        if val == "BUY": return 'color: #00FF00; font-weight: bold' # Green
+        if "SCOUT" in val: return 'color: #00BFFF; font-weight: bold' # Blue
+        if "WATCH" in val: return 'color: #FFFF00' # Yellow
+        if val == "AVOID": return 'color: #FF4444' # Red
         return ''
     return styler.map(color_action, subset=["Action"])
 
 # ==============================================================================
-#  MAIN APP LOGIC
+#  MAIN APP
 # ==============================================================================
 
 # --- AUTH ---
@@ -122,49 +154,63 @@ PORTFOLIO_FILE = f"portfolio_{user}.csv"
 st.sidebar.title(f"👤 {user.upper()}")
 if st.sidebar.button("Log Out"): st.session_state.authenticated = False; st.rerun()
 
-st.title(f"🛡️ Titan Strategy v59.0")
-st.caption("Restored Core Logic | Modular Data")
+st.title(f"🛡️ Titan Strategy v59.1")
 
 tab1, tab2, tab3 = st.tabs(["💼 Portfolio Manager", "🏥 Market Health", "🔍 Deep Scanner"])
 
 # --- TAB 1: PORTFOLIO MANAGER ---
 with tab1:
+    # 1. Load File
     if not os.path.exists(PORTFOLIO_FILE):
         pd.DataFrame(columns=["ID","Ticker","Date","Shares","Cost_Basis","Status","Exit_Price","Realized_PL","Type"]).to_csv(PORTFOLIO_FILE, index=False)
     pf_df = pd.read_csv(PORTFOLIO_FILE)
     
-    # 1. Active Holdings Logic
+    # Ensure Columns (Fixing the previous crash)
+    if 'Cost_Basis' not in pf_df.columns and 'Cost' in pf_df.columns: pf_df.rename(columns={'Cost': 'Cost_Basis'}, inplace=True)
+    if 'Realized_PL' not in pf_df.columns: pf_df['Realized_PL'] = 0.0
+
+    # 2. Process Active Holdings
     active_rows = []
     total_equity = 0.0
     total_cost = 0.0
     
-    # Get Current Prices
     open_pos = pf_df[(pf_df['Status']=='OPEN') & (pf_df['Ticker']!='CASH')]
     if not open_pos.empty:
         tickers = open_pos['Ticker'].unique().tolist()
-        prices = yf.download(tickers, period="1d", progress=False)['Close'].iloc[-1]
-        
-        for idx, row in open_pos.iterrows():
-            t = row['Ticker']
-            # Handle Single Ticker vs Series
-            curr_p = prices[t] if isinstance(prices, pd.Series) else prices
-            val = row['Shares'] * curr_p
-            cost = row['Shares'] * row['Cost_Basis']
+        try:
+            # Robust Download
+            prices_data = safe_download(tickers, "1d")
             
-            total_equity += val
-            total_cost += cost
-            pl = val - cost
-            pl_pct = (pl / cost) * 100 if cost != 0 else 0
-            
-            active_rows.append({
-                "Ticker": t, "Shares": row['Shares'], 
-                "Avg Cost": f"${row['Cost_Basis']:.2f}", "Current": f"${curr_p:.2f}",
-                "Gain/Loss ($)": f"${pl:+.2f}", "% Return": f"{pl_pct:+.2f}%"
-            })
+            for idx, row in open_pos.iterrows():
+                t = row['Ticker']
+                shares = float(row['Shares'])
+                cost_base = float(row['Cost_Basis'])
+                
+                # Extract Price
+                curr_p = cost_base # Default to cost if fetch fails
+                try:
+                    p_series = get_price_series(prices_data, t)
+                    if not p_series.empty: curr_p = float(p_series.iloc[-1])
+                except: pass
+
+                val = shares * curr_p
+                cost = shares * cost_base
+                total_equity += val
+                total_cost += cost
+                pl = val - cost
+                pl_pct = (pl / cost) * 100 if cost != 0 else 0
+                
+                active_rows.append({
+                    "Ticker": t, "Shares": shares, 
+                    "Avg Cost": f"${cost_base:.2f}", "Current": f"${curr_p:.2f}",
+                    "Gain/Loss ($)": f"${pl:+.2f}", "% Return": f"{pl_pct:+.2f}%"
+                })
+        except Exception as e:
+            st.error(f"Price Fetch Error: {e}")
 
     # Cash Logic
-    cash_df = pf_df[(pf_df['Ticker']=='CASH')]
-    cash_bal = cash_df['Shares'].sum()
+    cash_df = pf_df[(pf_df['Ticker']=='CASH') & (pf_df['Status']=='OPEN')]
+    cash_bal = cash_df['Shares'].sum() if not cash_df.empty else 0
     
     # Metrics
     c1, c2, c3 = st.columns(3)
@@ -172,13 +218,17 @@ with tab1:
     c2.metric("Cash Available", f"${cash_bal:,.2f}")
     c3.metric("Unrealized P/L", f"${(total_equity - total_cost):+,.2f}")
     
+    st.subheader("Active Holdings")
     if active_rows:
-        st.subheader("Active Holdings")
-        st.dataframe(pd.DataFrame(active_rows).style.pipe(style_portfolio))
-    
-    # 2. Closed Performance
+        df_active = pd.DataFrame(active_rows)
+        st.dataframe(df_active.style.pipe(style_portfolio), use_container_width=True)
+    else:
+        st.info("No active stock positions.")
+
+    # 3. Closed Performance
     closed = pf_df[pf_df['Status']=='CLOSED']
     if not closed.empty:
+        st.divider()
         st.subheader("Closed Performance")
         wins = closed[closed['Realized_PL'] > 0]
         win_rate = len(wins) / len(closed) * 100
@@ -187,20 +237,25 @@ with tab1:
         c1, c2 = st.columns(2)
         c1.metric("Win Rate", f"{win_rate:.0f}%")
         c2.metric("Total Realized P/L", f"${total_realized:+,.2f}")
-        st.dataframe(closed[["Ticker", "Exit_Price", "Realized_PL"]])
+        
+        # Display Table with Styling
+        closed_disp = closed[["Ticker", "Exit_Price", "Realized_PL"]].copy()
+        st.dataframe(closed_disp.style.pipe(style_portfolio), use_container_width=True)
 
-    # 3. Trade Entry (Simplified for space)
+    # 4. Simple Buy
     with st.expander("➕ Record Trade"):
         with st.form("trade"):
             t_tk = st.text_input("Ticker").upper()
             t_sh = st.number_input("Shares", min_value=1)
             t_pr = st.number_input("Price", min_value=0.01)
-            if st.form_submit_button("Buy"):
-                nid = pf_df['ID'].max() + 1 if not pf_df.empty else 1
-                # Stock Row
-                r1 = {"ID":nid, "Ticker":t_tk, "Date":datetime.today(), "Shares":t_sh, "Cost_Basis":t_pr, "Status":"OPEN", "Type":"STOCK"}
-                # Cash Debit
-                r2 = {"ID":nid+1, "Ticker":"CASH", "Date":datetime.today(), "Shares":-(t_sh*t_pr), "Cost_Basis":1, "Status":"OPEN", "Type":"TRADE_CASH"}
+            if st.form_submit_button("Execute Buy"):
+                nid = 1
+                if not pf_df.empty and 'ID' in pf_df.columns:
+                     nid = pf_df['ID'].max() + 1
+                
+                r1 = {"ID":nid, "Ticker":t_tk, "Date":str(datetime.today().date()), "Shares":t_sh, "Cost_Basis":t_pr, "Status":"OPEN", "Type":"STOCK", "Realized_PL":0}
+                r2 = {"ID":nid+1, "Ticker":"CASH", "Date":str(datetime.today().date()), "Shares":-(t_sh*t_pr), "Cost_Basis":1, "Status":"OPEN", "Type":"DEBIT", "Realized_PL":0}
+                
                 pf_df = pd.concat([pf_df, pd.DataFrame([r1, r2])], ignore_index=True)
                 pf_df.to_csv(PORTFOLIO_FILE, index=False)
                 st.success(f"Bought {t_tk}")
@@ -208,40 +263,70 @@ with tab1:
 
 # --- TAB 2: MARKET HEALTH ---
 with tab2:
-    if st.button("Check Vitals"):
+    if st.button("Check Vitals (Run Diagnosis)"):
         with st.spinner("Analyzing Macro Environment..."):
-            vix = yf.Ticker("^VIX").history(period="5d")['Close'].iloc[-1]
-            spy = yf.Ticker("SPY").history(period="3mo")['Close']
-            rsp = yf.Ticker("RSP").history(period="3mo")['Close']
+            # Fetch Data
+            tickers = ["^VIX", "SPY", "RSP"]
+            data = safe_download(tickers, "3mo")
             
-            spy_sma20 = spy.rolling(20).mean().iloc[-1]
-            rsp_sma20 = rsp.rolling(20).mean().iloc[-1]
+            # Extract Series
+            vix = get_price_series(data, "^VIX")
+            spy = get_price_series(data, "SPY")
+            rsp = get_price_series(data, "RSP")
             
-            score = 0
-            if vix < 20: score += 1
-            if spy.iloc[-1] > spy_sma20: score += 1
-            if rsp.iloc[-1] > rsp_sma20: score += 1
-            
-            st.metric("VIX Volatility", f"{vix:.2f}", delta="Bullish" if vix<20 else "Bearish", delta_color="inverse")
-            
-            if score == 3:
-                st.success("🟢 MARKET STATUS: AGGRESSIVE BUY (100% Risk)")
-            elif score == 2:
-                st.warning("🟡 MARKET STATUS: CAUTIOUS BUY (Manage Risk)")
-            else:
-                st.error("🔴 MARKET STATUS: DEFENSIVE / CASH (Stop Buys)")
+            if not spy.empty and not vix.empty:
+                vix_cur = vix.iloc[-1]
+                spy_cur = spy.iloc[-1]
+                rsp_cur = rsp.iloc[-1]
+                
+                spy_sma = spy.rolling(20).mean().iloc[-1]
+                rsp_sma = rsp.rolling(20).mean().iloc[-1]
+                
+                # Logic
+                score = 0
+                signals = []
+                
+                # 1. Volatility
+                if vix_cur < 20: 
+                    score += 1
+                    signals.append(["Volatility (VIX)", f"{vix_cur:.2f}", "PASS (<20)", "✅"])
+                else:
+                    signals.append(["Volatility (VIX)", f"{vix_cur:.2f}", "FAIL (>20)", "❌"])
+                    
+                # 2. Trend (SPY)
+                if spy_cur > spy_sma:
+                    score += 1
+                    signals.append(["Trend (SPY)", f"${spy_cur:.2f}", "PASS (>20SMA)", "✅"])
+                else:
+                    signals.append(["Trend (SPY)", f"${spy_cur:.2f}", "FAIL (<20SMA)", "❌"])
+
+                # 3. Breadth (RSP)
+                if rsp_cur > rsp_sma:
+                    score += 1
+                    signals.append(["Breadth (RSP)", f"${rsp_cur:.2f}", "PASS (>20SMA)", "✅"])
+                else:
+                    signals.append(["Breadth (RSP)", f"${rsp_cur:.2f}", "FAIL (<20SMA)", "❌"])
+                
+                # Output
+                if score == 3:
+                    st.success("🟢 MARKET STATUS: GREEN LIGHT (Aggressive)")
+                elif score == 2:
+                    st.warning("🟡 MARKET STATUS: YELLOW LIGHT (Caution)")
+                else:
+                    st.error("🔴 MARKET STATUS: RED LIGHT (Defensive/Cash)")
+                
+                # RESTORED TABLE
+                df_sigs = pd.DataFrame(signals, columns=["Metric", "Level", "Condition", "Status"])
+                st.table(df_sigs)
 
 # --- TAB 3: DEEP SCANNER ---
 with tab3:
     st.write("Full Titan Strategy Logic (ZigZag, Cloud, Impulse)")
     
-    # Combine all Config Data
+    # 1. Prepare Scan List from Config
     scan_list = []
-    # Add Indices
     for k,v in tc.INDICES.items(): scan_list.append((k, "INDEX", "SPY"))
-    # Add Sectors
     for k,v in tc.SECTORS.items(): scan_list.append((k, "SECTOR", "SPY"))
-    # Add Industries
     for sec, ind_map in tc.INDUSTRY_MAP.items():
         bench = tc.BENCHMARK_CA if "Canada" in sec else "SPY"
         for k,v in ind_map.items(): scan_list.append((k, f"IND: {sec}", bench))
@@ -251,32 +336,37 @@ with tab3:
         tickers = [x[0] for x in scan_list]
         meta = {x[0]: {'cat': x[1], 'bench': x[2]} for x in scan_list}
         
-        # Batch Fetch to prevent memory crash (25 at a time)
-        batch_size = 25
+        # 2. Batch Processing
+        batch_size = 20
         progress = st.progress(0)
+        status_txt = st.empty()
         
         for i in range(0, len(tickers), batch_size):
             batch = tickers[i:i+batch_size]
-            progress.progress(i / len(tickers))
+            progress.progress(min(i / len(tickers), 1.0))
+            status_txt.caption(f"Scanning batch {i}-{i+len(batch)}...")
             
             try:
-                data = yf.download(batch, period="1y", progress=False)['Close']
-                if data.empty: continue
+                # Robust Download
+                data = safe_download(batch, "1y")
                 
                 for tk in batch:
-                    if tk not in data.columns: continue
-                    prices = data[tk].dropna()
-                    if len(prices) < 60: continue
+                    # Robust Price Extraction
+                    prices = get_price_series(data, tk)
+                    if prices.empty or len(prices) < 60: continue
                     
-                    # 1. Calculations
+                    # 3. Calculations
+                    prices = prices.dropna()
                     curr = prices.iloc[-1]
                     sma18 = calc_sma(prices, 18).iloc[-1]
                     sma50 = calc_sma(prices, 50).iloc[-1]
                     rsi5 = calc_rsi(prices, 5).iloc[-1]
-                    cloud = calc_ichimoku(prices, prices, prices).iloc[-1] # Approx using close
-                    structure = calc_structure(prices.to_frame())
                     
-                    # 2. Logic (The Titan Brain)
+                    # Approximating Cloud (High/Low not always avail in flat series, use Close)
+                    cloud = calc_ichimoku(prices, prices, prices).iloc[-1]
+                    structure = calc_structure(prices.to_frame(name='Close'))
+                    
+                    # 4. Scoring Logic
                     score = 0
                     if curr > sma18: score += 1
                     if sma18 > sma50: score += 1
@@ -284,10 +374,10 @@ with tab3:
                     
                     action = "AVOID"
                     if score >= 3:
-                        if structure == "HH" or structure == "HL":
-                            action = "BUY" if rsi5 < 70 else "WATCH (Extended)"
+                        if structure in ["HH", "HL"]:
+                            action = "BUY" if rsi5 < 70 else "WATCH (Overbought)"
                         else:
-                            action = "SCOUT (Trend OK/Struct Weak)"
+                            action = "SCOUT (Trend OK)"
                     elif score == 2:
                         action = "WATCH"
                         
@@ -298,16 +388,18 @@ with tab3:
                         "Action": action,
                         "Structure": structure,
                         "Score": f"{score}/3",
-                        "RSI (5)": f"{rsi5:.1f}"
+                        "RSI": f"{rsi5:.1f}"
                     })
                     
             except Exception as e:
                 print(f"Batch Error: {e}")
                 
         progress.empty()
+        status_txt.empty()
         
         if results:
             df_res = pd.DataFrame(results).sort_values(["Category", "Score"], ascending=[True, False])
-            st.dataframe(df_res.style.pipe(style_scanner))
+            # Apply Styling
+            st.dataframe(df_res.style.pipe(style_scanner), use_container_width=True)
         else:
-            st.warning("Scan complete but no results found.")
+            st.error("Scan complete but NO results found. Check connection or tickers.")
