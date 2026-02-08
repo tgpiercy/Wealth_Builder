@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.6 Fixed & Verified)
+#  TITAN STRATEGY APP (v58.7 Two-Pass Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Full Market Health & RRG")
+st.title(f"🛡️ Titan Strategy v58.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Full Logic Restoration")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length):
@@ -107,42 +107,40 @@ def calc_rsi(series, length):
 # --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
-    pivots = []
-    trend = 1
-    last_val = df['Close'].iloc[0]
-    pivots.append((0, last_val, 1))
+    pivots = [] 
+    trend = 1 
+    last_pivot_val = df['Close'].iloc[0]
+    pivots.append((0, last_pivot_val, 1)) 
     
     for i in range(1, len(df)):
         price = df['Close'].iloc[i]
         if trend == 1:
-            if price > last_val:
-                last_val = price
+            if price > last_pivot_val:
+                last_pivot_val = price
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
-            elif price < last_val * (1 - deviation_pct):
+            elif price < last_pivot_val * (1 - deviation_pct):
                 trend = -1
-                last_val = price
+                last_pivot_val = price
                 pivots.append((i, price, -1))
         else:
-            if price < last_val:
-                last_val = price
+            if price < last_pivot_val:
+                last_pivot_val = price
                 if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
                 else: pivots.append((i, price, -1))
-            elif price > last_val * (1 + deviation_pct):
+            elif price > last_pivot_val * (1 + deviation_pct):
                 trend = 1
-                last_val = price
+                last_pivot_val = price
                 pivots.append((i, price, 1))
 
     if len(pivots) < 3: return "Range"
-    
-    curr = pivots[-1]
-    prev = pivots[-3]
-    
-    if curr[2] == 1:
-        if curr[1] > prev[1]: return "HH"
+    curr_pivot = pivots[-1]
+    prev_same = pivots[-3]
+    if curr_pivot[2] == 1: 
+        if curr_pivot[1] > prev_same[1]: return "HH"
         else: return "LH"
     else:
-        if curr[1] < prev[1]: return "LL"
+        if curr_pivot[1] < prev_same[1]: return "LL"
         else: return "HL"
 
 # --- HELPER: SMART STOP ---
@@ -156,10 +154,8 @@ def round_to_03_07(price):
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=1800) # Cache for 30 mins
 def fetch_master_data(ticker_list):
-    """Downloads daily data for ALL tickers once."""
     unique_tickers = list(set(ticker_list))
     data_map = {}
-    
     for t in unique_tickers:
         try:
             fetch_sym = "SPY" if t == "MANL" else t
@@ -172,237 +168,129 @@ def fetch_master_data(ticker_list):
     return data_map
 
 def prepare_rrg_inputs(data_map, tickers, benchmark):
-    """Converts Daily Dict -> Weekly Wide DataFrame for RRG"""
     df_wide = pd.DataFrame()
-    
     if benchmark in data_map:
         bench_df = data_map[benchmark].resample('W-FRI').last()
         df_wide[benchmark] = bench_df['Close']
-    
     for t in tickers:
         if t in data_map and t != benchmark:
             w_df = data_map[t].resample('W-FRI').last()
             df_wide[t] = w_df['Close']
-            
     return df_wide.dropna()
 
 # --- RRG LOGIC ---
 def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
-    
-    df_ratio = pd.DataFrame()
-    df_mom = pd.DataFrame()
-    
+    df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
     for col in price_data.columns:
         if col != benchmark_col:
             try:
                 rs = price_data[col] / price_data[benchmark_col]
-                mean = rs.rolling(window_rs).mean()
-                std = rs.rolling(window_rs).std()
+                mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
                 ratio = 100 + ((rs - mean) / std) * 1.5
                 df_ratio[col] = ratio
             except: continue
-
     for col in df_ratio.columns:
         try:
             mom = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
             df_mom[col] = mom
         except: continue
-        
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
 
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
-    
     fig = go.Figure()
-    
     if is_dark:
-        bg_col, text_col = "black", "white"
-        c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"
-        template = "plotly_dark"
+        bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
     else:
-        bg_col, text_col = "white", "black"
-        c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"
-        template = "plotly_white"
+        bg_col, text_col = "white", "black"; c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"; template = "plotly_white"
 
     has_data = False
-   
     for ticker in labels_map.keys():
         if ticker not in ratios.columns: continue
-       
-        xt = ratios[ticker].tail(5)
-        yt = momentums[ticker].tail(5)
+        xt = ratios[ticker].tail(5); yt = momentums[ticker].tail(5)
         if len(xt) < 5: continue
-       
         has_data = True
         cx, cy = xt.iloc[-1], yt.iloc[-1]
-       
         if cx > 100 and cy > 100: color = c_lead
         elif cx > 100 and cy < 100: color = c_weak
         elif cx < 100 and cy < 100: color = c_lag
         else: color = c_imp
-
-        fig.add_trace(go.Scatter(
-            x=xt, y=yt, mode='lines',
-            line=dict(color=color, width=2, shape='spline'),
-            opacity=0.6, showlegend=False, hoverinfo='skip'
-        ))
-       
-        fig.add_trace(go.Scatter(
-            x=[cx], y=[cy], mode='markers+text',
-            marker=dict(color=color, size=12, line=dict(color=text_col, width=1)),
-            text=[ticker], textposition="top center",
-            textfont=dict(color=text_col),
-            hovertemplate=f"<b>{labels_map.get(ticker, ticker)}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"
-        ))
+        
+        fig.add_trace(go.Scatter(x=xt, y=yt, mode='lines', line=dict(color=color, width=2, shape='spline'), opacity=0.6, showlegend=False, hoverinfo='skip'))
+        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[ticker], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{labels_map.get(ticker, ticker)}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
 
     if not has_data: return None
-
     op = 0.1 if is_dark else 0.05
-    fig.add_hline(y=100, line_dash="dot", line_color="gray")
-    fig.add_vline(x=100, line_dash="dot", line_color="gray")
+    fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
     fig.add_shape(type="rect", x0=100, y0=100, x1=200, y1=200, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=100, y0=0, x1=200, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=0, y0=0, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=0, y0=100, x1=100, y1=200, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
-
-    fig.update_layout(
-        title=title, template=template, height=650, showlegend=False,
-        xaxis=dict(range=[96, 104], showgrid=False, title="RS-Ratio (Trend)"),
-        yaxis=dict(range=[96, 104], showgrid=False, title="RS-Momentum (Velocity)")
-    )
-   
+    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=[96, 104], showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=[96, 104], showgrid=False, title="RS-Momentum (Velocity)"))
     fig.add_annotation(x=104, y=104, text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
     fig.add_annotation(x=104, y=96, text="WEAKENING", showarrow=False, font=dict(size=16, color=c_weak), xanchor="right", yanchor="bottom")
     fig.add_annotation(x=96, y=96, text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
     fig.add_annotation(x=96, y=104, text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
-   
     return fig
 
 # --- STYLING ---
 def style_final(styler):
     def color_pct(val):
-        if isinstance(val, str) and '%' in val:
-            try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%')) >= 0 else 'color: #ff0000; font-weight: bold'
-            except: return ''
-        return ''
-    
+        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%')) >= 0 else 'color: #ff0000; font-weight: bold'
+        except: return ''
     def color_rsi(val):
         try:
-            parts = val.split()
-            if len(parts) < 2: return ''
-            r5 = float(parts[0].split('/')[0])
-            r20 = float(parts[0].split('/')[1])
-            arrow = parts[1]
-            is_rising = (arrow == "↑")
-            if r5 >= r20:
-                return 'color: #00BFFF; font-weight: bold' if (r20 > 50 and is_rising) else ('color: #00FF00; font-weight: bold' if is_rising else 'color: #FF4444; font-weight: bold')
-            elif r20 > 50: return 'color: #FFA500; font-weight: bold'
-            return 'color: #FF4444; font-weight: bold'
+            parts = val.split(); r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
+            if r5 >= r20: return 'color: #00BFFF; font-weight: bold' if (r20 > 50 and arrow=="↑") else ('color: #00FF00; font-weight: bold' if arrow=="↑" else 'color: #FF4444; font-weight: bold')
+            return 'color: #FFA500; font-weight: bold' if r20 > 50 else 'color: #FF4444; font-weight: bold'
         except: return ''
-
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
         if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
         if "DISTRIBUTION" in val or "LIQUIDATION" in val: return 'color: #FF4444; font-weight: bold' 
         if "SELLING" in val: return 'color: #FFA500; font-weight: bold'      
-        if "HH" in val: return 'color: #CCFFCC'
-        if "LL" in val: return 'color: #FFCCCC'
-        return 'color: #888888'
-
+        return 'color: #CCFFCC' if "HH" in val else ('color: #FFCCCC' if "LL" in val else 'color: #888888')
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
         idx = row.index.get_loc('Ticker')
-        act = str(row.get('Action', '')).upper()
-        vol = str(row.get('Volume', '')).upper()
-        rsi = str(row.get('Dual RSI', ''))
-        
+        act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper(); rsi = str(row.get('Dual RSI', ''))
         if "AVOID" in act: pass
         elif "00BFFF" in rsi and "SPIKE" in vol: styles[idx] = 'background-color: #0044CC; color: white; font-weight: bold'
         elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
         elif "SOON" in act or "CAUTION" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         return styles
-
-    return styler.set_table_styles([
-        {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px'), ('vertical-align', 'top')]}, 
-        {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}
-    ]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'})\
-      .apply(highlight_ticker_row, axis=1)\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"])\
-      .map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"])\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"])\
-      .map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"])\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"])\
-      .map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"])\
-      .map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"])\
-      .map(color_pct, subset=["4W %", "2W %"])\
-      .map(color_rsi, subset=["Dual RSI"])\
-      .map(color_inst, subset=["Institutional<br>Activity"])\
-      .hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_pct, subset=["4W %", "2W %"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
 def style_daily_health(styler):
     def color_status(v):
         if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
         if "FAIL" in v or "PANIC" in v or "DEFENSIVE" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
         return 'color: white; font-weight: bold'
-
-    return styler.set_table_styles([
-         {'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, 
-         {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}
-    ]).set_properties(**{'background-color': '#222', 'border-color': '#444'})\
-      .set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'})\
-      .map(color_status, subset=['Status'])\
-      .hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'border-color': '#444'}).set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'}).map(color_status, subset=['Status']).hide(axis='index')
 
 def style_portfolio(styler):
     def color_pl(val):
-        try:
-            num = float(val.strip('%').replace('+',''))
-            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%').replace('+','')) >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
-    
     def color_pl_dol(val):
-        try:
-            num = float(val.strip('$').replace('+','').replace(',',''))
-            if val.startswith('-'): num = -num 
-            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('$').replace('+','').replace(',','')) >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
-        
-    def color_action(val):
-        if "EXIT" in val: return 'color: #ff0000; font-weight: bold; background-color: #220000'
-        if "HOLD" in val: return 'color: #00ff00; font-weight: bold'
-        return 'color: #ffffff'
-
-    return styler.set_table_styles([
-         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
-         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}
-    ]).map(color_pl, subset=["% Return"])\
-      .map(color_pl_dol, subset=["Gain/Loss ($)"])\
-      .map(color_action, subset=["Audit Action"])\
-      .hide(axis='index')
+    def color_action(val): return 'color: #ff0000; font-weight: bold; background-color: #220000' if "EXIT" in val else ('color: #00ff00; font-weight: bold' if "HOLD" in val else 'color: #ffffff')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["Gain/Loss ($)"]).map(color_action, subset=["Audit Action"]).hide(axis='index')
 
 def style_history(styler):
     def color_pl(val):
-        try:
-            num = float(val.strip('%').replace('+',''))
-            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%').replace('+','')) >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
-    
     def color_pl_dol(val):
-        try:
-            num = float(val.strip('$').replace('+','').replace(',',''))
-            if val.startswith('-'): num = -num 
-            return 'color: #00ff00; font-weight: bold' if num >= 0 else 'color: #ff4444; font-weight: bold'
+        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('$').replace('+','').replace(',','')) >= 0 else 'color: #ff4444; font-weight: bold'
         except: return ''
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["P/L"]).hide(axis='index')
 
-    return styler.set_table_styles([
-         {'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]},
-         {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["P/L"]).hide(axis='index')
-
-def fmt_delta(val):
-    return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
+def fmt_delta(val): return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
@@ -667,7 +555,6 @@ if st.session_state.run_analysis:
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     
     # MASTER LIST (Duplicates removed automatically by set)
-    # Using 'tc' references to pull from config
     all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys())
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
@@ -789,7 +676,7 @@ if st.session_state.run_analysis:
                 h_rows.append({"Indicator": "RSP SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc2 else "<span style='color:#ff4444'>FALLING</span>"})
                 h_rows.append({"Indicator": "RSP SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if rc3 else "<span style='color:#ff4444'>FALLING</span>"})
             else:
-                h_rows.append({"Indicator": "RSP Data", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
+                h_rows.append({"Indicator": "RSP Breadth", "Status": "<span style='color:#ffaa00'>NO DATA</span>"})
 
             # Scoring
             col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
@@ -803,14 +690,16 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP
+        # 5. SCANNER LOOP (THE FIX: Two-Pass Architecture)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
+        analysis_db = {} # 1. Initialize DB FIRST!
         
+        # PASS 1: Calculate Everything
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            # ... (Calculations reused) ...
+            # ... (Calculations) ...
             df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             df['AD_SMA18'] = calc_sma(df['AD'], 18); df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
             
@@ -830,7 +719,6 @@ if st.session_state.run_analysis:
             inst_activity = calc_structure(df)
             
             ad_pass = False
-            # Check AD logic (preventing index errors)
             if len(df) > 2 and not pd.isna(df['AD_SMA18'].iloc[-1]):
                  ad_pass = (df['AD'].iloc[-1] >= df['AD_SMA18'].iloc[-1] * 0.995) and (df['AD_SMA18'].iloc[-1] >= df['AD_SMA18'].iloc[-2])
             
@@ -886,32 +774,41 @@ if st.session_state.run_analysis:
             arrow_col = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
             rsi_msg = f"<span style='color:{num_col}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{arrow_col}'><b>{arrow}</b></span>"
             
+            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "Mom4W": mom_4w, "Mom2W": mom_2w, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+
+        # PASS 2: Build Results & Apply Sector Locks (Now Safe)
+        for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
             if "99. DATA" in cat_name: continue
             
-            final_decision = decision
+            is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
+            if not is_scanner or t not in analysis_db: continue
+            db = analysis_db[t]
+            
+            final_decision = db['Decision']; final_reason = db['Reason']
             if cat_name in tc.SECTOR_PARENTS:
                 parent = tc.SECTOR_PARENTS[cat_name]
                 if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
                     if t != parent: final_decision = "AVOID"; final_reason = "Sector Lock"
 
-            is_blue_spike = ("00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
+            rsi_html = db['RSI_Msg']; vol_str = db['Vol_Msg']
+            is_blue_spike = ("00BFFF" in rsi_html) and ("SPIKE" in vol_str)
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
             
             if "AVOID" in final_decision and not is_blue_spike: disp_stop = ""; disp_shares = ""
             else:
-                shares = int(final_risk / (dc['Close'] - smart_stop_val)) if (dc['Close'] - smart_stop_val) > 0 else 0
-                disp_stop = f"${smart_stop_val:.2f} (-{stop_pct:.1f}%)"; disp_shares = f"{shares} shares"
+                shares = int(final_risk / (db['Price'] - db['Stop'])) if (db['Price'] - db['Stop']) > 0 else 0
+                disp_stop = f"${db['Stop']:.2f} (-{db['StopPct']:.1f}%)"; disp_shares = f"{shares} shares"
 
             row = {
-                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "4W %": mom_4w, "2W %": mom_2w,
-                "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
-                "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
-                "Structure": "ABOVE 18" if (dc['Close'] > df['SMA18'].iloc[-1]) else "BELOW 18",
-                "Ichimoku<br>Cloud": "PASS" if (wc['Close']>wc['Cloud_Top']) else "FAIL", "A/D Breadth": "STRONG" if ad_pass else "WEAK",
-                "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
-                "Action": final_decision, "Reasoning": reason, "Stop Price": disp_stop, "Position Size": disp_shares
+                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "4W %": db['Mom4W'], "2W %": db['Mom2W'],
+                "Weekly<br>SMA8": "PASS" if db['W_SMA8_Pass'] else "FAIL", "Weekly<br>Impulse": db['W_Pulse'], 
+                "Weekly<br>Score": db['W_Score'], "Daily<br>Score": db['D_Score'],
+                "Structure": "ABOVE 18" if db['D_Chk_Price'] else "BELOW 18",
+                "Ichimoku<br>Cloud": "PASS" if db['W_Cloud'] else "FAIL", "A/D Breadth": "STRONG" if db['AD_Pass'] else "WEAK",
+                "Volume": db['Vol_Msg'], "Dual RSI": db['RSI_Msg'], "Institutional<br>Activity": db['Inst_Act'],
+                "Action": final_decision, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
             }
             results.append(row)
             if t == "HXT.TO": row_cad = row.copy(); row_cad["Sector"] = "15. CANADA (HXT)"; row_cad["Rank"] = 0; results.append(row_cad)
