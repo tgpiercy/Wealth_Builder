@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v58.0 Merged)
+#  TITAN STRATEGY APP (v58.1 Persistence Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,10 +61,10 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v58.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Scanner + RRG Integration")
+st.title(f"🛡️ Titan Strategy v58.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Persistent Analysis Mode")
 
-# --- SHARED CALCULATIONS ---
+# --- CALCULATIONS ---
 def calc_sma(series, length):
     return series.rolling(window=length).mean()
 
@@ -624,7 +624,18 @@ with tab5:
              except: st.error("Error")
 
 # --- MAIN EXECUTION ---
+# State Management Fix
+if "run_analysis" not in st.session_state:
+    st.session_state.run_analysis = False
+
 if st.button("RUN ANALYSIS", type="primary"):
+    st.session_state.run_analysis = True
+    st.rerun()
+
+if st.session_state.run_analysis:
+    if st.button("⬅️ Back to Menu"):
+        st.session_state.run_analysis = False
+        st.rerun()
     
     # === TABS UI ===
     tab_scan, tab_rrg = st.tabs(["🔍 Market Scanner", "🔄 Sector Rotation"])
