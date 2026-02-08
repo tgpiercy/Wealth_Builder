@@ -38,10 +38,10 @@ SECTORS = {
     "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"
 }
 
-# 2. Major Indices
+# 2. Major Indices (Base List)
 INDICES = {
-    "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", "IWC": "Micro-Cap", 
-    "MDY": "Mid-Cap 400", "RSP": "S&P Equal Wgt"
+    "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", 
+    "IWC": "Micro-Cap", "MDY": "Mid-Cap 400", "RSP": "S&P Equal Wgt"
 }
 
 # 3. Micro Industries (US & Canada)
@@ -178,10 +178,43 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
 
 # --- APP LAYOUT ---
 
-tab1, tab2, tab3 = st.tabs(["🌍 Global Sectors", "🔬 Industry Drill-Down", "📈 Indices"])
+tab1, tab2, tab3 = st.tabs(["📈 Indices", "🌍 Global Sectors", "🔬 Industry Drill-Down"])
 
-# 1. MACRO VIEW
+# 1. INDICES VIEW
 with tab1:
+    st.subheader(f"Indices View: Market Rotation")
+    
+    # Benchmark Toggle
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        bench_sel = st.selectbox("Select Benchmark:", ["SPY (Equities)", "IEF (Bonds)"])
+    
+    # Logic: Set Benchmark & Adjust Asset List
+    active_indices = INDICES.copy()
+    if "IEF" in bench_sel:
+        target_bench = "IEF"
+        active_indices["SPY"] = "S&P 500" # Add SPY to plot against Bonds
+    else:
+        target_bench = "SPY"
+        # Standard list (SPY is benchmark, so not plotted as a dot)
+
+    if st.button("Run Index Scan", key="btn_indices"):
+        with st.spinner(f"Analyzing vs {target_bench}..."):
+            tickers = list(active_indices.keys()) + [target_bench]
+            data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
+            
+            if not data.empty:
+                rat, mom = calculate_rrg(data, target_bench)
+                fig_indices = plot_rrg_chart(rat, mom, active_indices, f"Major Indices vs {target_bench}")
+                st.session_state['fig_indices'] = fig_indices
+            else:
+                st.error("Data fetch failed.")
+
+    if 'fig_indices' in st.session_state:
+        st.plotly_chart(st.session_state['fig_indices'], use_container_width=True)
+
+# 2. MACRO VIEW (Sectors)
+with tab2:
     st.subheader(f"Macro View: Sectors vs {BENCHMARK_US}")
     
     if st.button("Run Global Scan", key="btn_global"):
@@ -199,18 +232,22 @@ with tab1:
     if 'fig_global' in st.session_state:
         st.plotly_chart(st.session_state['fig_global'], use_container_width=True)
 
-# 2. MICRO VIEW
-with tab2:
+# 3. MICRO VIEW (Drill-Down)
+with tab3:
     st.subheader("Micro View: Industry vs Sector")
     
-    # Layout Fix: Columns to shorten dropdown
     c1, c2 = st.columns([1, 2])
     with c1:
-        # Add Canada to the list keys
+        # Helper for Dropdown Text
+        def format_sector_label(option):
+            if option in SECTORS:
+                return f"{option} - {SECTORS[option]}"
+            return option # For Canada or others
+            
         all_options = list(SECTORS.keys()) + ["Canada (TSX)"]
-        sel_sector_key = st.selectbox("Select Sector:", all_options)
+        sel_sector_key = st.selectbox("Select Sector:", all_options, format_func=format_sector_label)
     
-    # Determine Benchmark & Map based on Selection
+    # Logic for Benchmark Swapping
     if sel_sector_key == "Canada (TSX)":
         sel_benchmark = BENCHMARK_CA
         sector_name = "Canadian Sectors"
@@ -256,22 +293,3 @@ with tab2:
         st.plotly_chart(st.session_state['fig_micro'], use_container_width=True)
         if 'df_micro' in st.session_state:
             st.dataframe(st.session_state['df_micro'].style.format({"Trend": "{:.2f}", "Momentum": "{:.2f}"}))
-
-# 3. INDICES VIEW
-with tab3:
-    st.subheader(f"Indices View: Major Markets vs {BENCHMARK_US}")
-    
-    if st.button("Run Index Scan", key="btn_indices"):
-        with st.spinner("Analyzing Indices..."):
-            tickers = list(INDICES.keys()) + [BENCHMARK_US]
-            data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
-            
-            if not data.empty:
-                rat, mom = calculate_rrg(data, BENCHMARK_US)
-                fig_indices = plot_rrg_chart(rat, mom, INDICES, f"Major Indices vs {BENCHMARK_US}")
-                st.session_state['fig_indices'] = fig_indices
-            else:
-                st.error("Data fetch failed.")
-
-    if 'fig_indices' in st.session_state:
-        st.plotly_chart(st.session_state['fig_indices'], use_container_width=True)
