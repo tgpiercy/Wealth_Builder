@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # --- CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="Sector RRG Analysis")
 st.title("🔄 Sector & Industry Rotation (RRG)")
-st.caption("Institutional Money Flow Tracker | Macro & Micro Analysis")
+st.caption("Institutional Money Flow Tracker | Macro, Micro & International")
 
 # --- THEME SELECTOR ---
 is_dark = st.toggle("🌙 Dark Mode Chart", value=True)
@@ -28,18 +28,26 @@ else:
     C_IMPROVING = "#0000FF" 
 
 # --- DATA UNIVERSE ---
-BENCHMARK = "SPY"
+BENCHMARK_US = "SPY"
+BENCHMARK_CA = "HXT.TO"
 
-# 1. Macro Sectors
+# 1. Macro Sectors (US)
 SECTORS = {
     "XLK": "Technology", "XLF": "Financials", "XLE": "Energy", "XLV": "Health Care", 
     "XLY": "Cons. Discret", "XLP": "Cons. Staples", "XLI": "Industrials", 
     "XLC": "Comm. Services", "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate"
 }
 
-# 2. Micro Industries (Map Sector -> Representative ETFs/Stocks)
+# 2. Major Indices
+INDICES = {
+    "QQQ": "Nasdaq 100", "DIA": "Dow Jones", "IWM": "Russell 2000", "IWC": "Micro-Cap", 
+    "MDY": "Mid-Cap 400", "RSP": "S&P Equal Wgt"
+}
+
+# 3. Micro Industries (US & Canada)
 INDUSTRY_MAP = {
-    "XLK": {"SMH": "Semis", "IGV": "Software", "CIBR": "CyberSec", "AAPL": "Apple", "MSFT": "Microsoft", "VGT": "Vanguard Tech"},
+    # US SECTORS
+    "XLK": {"SMH": "Semis", "IGV": "Software", "CIBR": "CyberSec", "AAPL": "Apple", "MSFT": "Microsoft"},
     "XLF": {"KBE": "Banks", "KRE": "Reg. Banks", "IAI": "Brokers", "IAK": "Insurance", "XP": "Fintech"},
     "XLE": {"XOP": "Exploration", "OIH": "Oil Svcs", "CRAK": "Refiners", "XOM": "Exxon", "CVX": "Chevron"},
     "XLV": {"IBB": "Biotech", "IHI": "Med Devices", "PPH": "Pharma", "XHE": "Equipment", "UNH": "UnitedHealth"},
@@ -49,7 +57,14 @@ INDUSTRY_MAP = {
     "XLC": {"SOCL": "Social", "PBS": "Media", "GOOGL": "Google", "META": "Meta", "NFLX": "Netflix"},
     "XLB": {"GDX": "Gold Miners", "SIL": "Silver", "LIT": "Lithium", "REMX": "Rare Earth", "COPX": "Copper"},
     "XLU": {"IDU": "US Util", "VPU": "Vanguard Util", "NEE": "NextEra", "DUK": "Duke Energy"},
-    "XLRE": {"REZ": "Resid. RE", "BBRE": "BetaBuilders", "PLD": "Prologis", "AMT": "Am. Tower"}
+    "XLRE": {"REZ": "Resid. RE", "BBRE": "BetaBuilders", "PLD": "Prologis", "AMT": "Am. Tower"},
+    
+    # CANADA (TSX SECTORS) - Ratios against HXT.TO
+    "Canada (TSX)": {
+        "XEG.TO": "Energy", "XFN.TO": "Financials", "XIT.TO": "Tech", 
+        "XRE.TO": "REITs", "XGD.TO": "Gold", "XUT.TO": "Utilities",
+        "XST.TO": "Staples", "XBM.TO": "Base Metals"
+    }
 }
 
 # --- CALCULATION ENGINE ---
@@ -124,13 +139,12 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
         ))
 
     # Dynamic Scaling
-    if not all_x: return go.Figure() # Empty return if no data
+    if not all_x: return go.Figure()
     
     x_min, x_max = min(all_x), max(all_x)
     y_min, y_max = min(all_y), max(all_y)
     pad = 1.5
     
-    # Keep 100 centered
     x_min = min(x_min, 98); x_max = max(x_max, 102)
     y_min = min(y_min, 98); y_max = max(y_max, 102)
 
@@ -164,30 +178,24 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, tail_len=5):
 
 # --- APP LAYOUT ---
 
-tab1, tab2 = st.tabs(["🌍 Global Sectors", "🔬 Industry Drill-Down"])
+tab1, tab2, tab3 = st.tabs(["🌍 Global Sectors", "🔬 Industry Drill-Down", "📈 Indices"])
 
 # 1. MACRO VIEW
 with tab1:
-    st.subheader(f"Macro View: Sectors vs {BENCHMARK}")
+    st.subheader(f"Macro View: Sectors vs {BENCHMARK_US}")
     
-    # Check session state logic
-    run_global = st.button("Run Global Scan", key="btn_global")
-    
-    if run_global:
+    if st.button("Run Global Scan", key="btn_global"):
         with st.spinner("Analyzing Global Flows..."):
-            tickers = list(SECTORS.keys()) + [BENCHMARK]
+            tickers = list(SECTORS.keys()) + [BENCHMARK_US]
             data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
             
             if not data.empty:
-                rat, mom = calculate_rrg(data, BENCHMARK)
-                fig_global = plot_rrg_chart(rat, mom, SECTORS, f"Sector Rotation vs {BENCHMARK}")
-                
-                # SAVE TO SESSION STATE
+                rat, mom = calculate_rrg(data, BENCHMARK_US)
+                fig_global = plot_rrg_chart(rat, mom, SECTORS, f"Sector Rotation vs {BENCHMARK_US}")
                 st.session_state['fig_global'] = fig_global
             else:
                 st.error("Data fetch failed.")
 
-    # Render from State if available
     if 'fig_global' in st.session_state:
         st.plotly_chart(st.session_state['fig_global'], use_container_width=True)
 
@@ -195,18 +203,27 @@ with tab1:
 with tab2:
     st.subheader("Micro View: Industry vs Sector")
     
-    sel_sector_key = st.selectbox("Select Sector to Drill Down:", list(SECTORS.keys()), 
-                                  format_func=lambda x: f"{x} - {SECTORS[x]}")
+    # Layout Fix: Columns to shorten dropdown
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        # Add Canada to the list keys
+        all_options = list(SECTORS.keys()) + ["Canada (TSX)"]
+        sel_sector_key = st.selectbox("Select Sector:", all_options)
     
-    sel_benchmark = sel_sector_key 
+    # Determine Benchmark & Map based on Selection
+    if sel_sector_key == "Canada (TSX)":
+        sel_benchmark = BENCHMARK_CA
+        sector_name = "Canadian Sectors"
+    else:
+        sel_benchmark = sel_sector_key
+        sector_name = SECTORS[sel_sector_key]
     
-    run_micro = st.button(f"Analyze {SECTORS[sel_sector_key]} Industries", key="btn_drill")
-    
-    if run_micro:
-        with st.spinner(f"Fetching {SECTORS[sel_sector_key]} Components..."):
+    if st.button(f"Analyze {sector_name}", key="btn_drill"):
+        with st.spinner(f"Fetching Components vs {sel_benchmark}..."):
+            
             ind_map = INDUSTRY_MAP.get(sel_sector_key, {})
             if not ind_map:
-                st.warning("No sub-industries defined.")
+                st.warning("No industries defined.")
                 st.stop()
                 
             tickers = list(ind_map.keys()) + [sel_benchmark]
@@ -214,7 +231,7 @@ with tab2:
             
             if not data.empty:
                 rat, mom = calculate_rrg(data, sel_benchmark)
-                fig_micro = plot_rrg_chart(rat, mom, ind_map, f"Industry Rotation vs {sel_benchmark} ({SECTORS[sel_sector_key]})")
+                fig_micro = plot_rrg_chart(rat, mom, ind_map, f"Rotation vs {sel_benchmark} ({sector_name})")
                 
                 # Calc Table
                 latest_rat = rat.iloc[-1].to_dict()
@@ -230,20 +247,31 @@ with tab2:
                         elif r < 100 and m > 100: status = "IMPROVING"
                         tbl.append({"Ticker": t, "Name": name, "Status": status, "Trend": r, "Momentum": m})
                 
-                df_micro = pd.DataFrame(tbl)
-                
-                # SAVE TO SESSION STATE
                 st.session_state['fig_micro'] = fig_micro
-                st.session_state['df_micro'] = df_micro
-                
+                st.session_state['df_micro'] = pd.DataFrame(tbl)
             else:
-                st.error(f"Could not fetch data for {sel_sector_key}.")
+                st.error("Data fetch failed.")
 
-    # Render from State if available
     if 'fig_micro' in st.session_state:
         st.plotly_chart(st.session_state['fig_micro'], use_container_width=True)
-        
         if 'df_micro' in st.session_state:
-            st.divider()
-            st.caption("Industry Data")
             st.dataframe(st.session_state['df_micro'].style.format({"Trend": "{:.2f}", "Momentum": "{:.2f}"}))
+
+# 3. INDICES VIEW
+with tab3:
+    st.subheader(f"Indices View: Major Markets vs {BENCHMARK_US}")
+    
+    if st.button("Run Index Scan", key="btn_indices"):
+        with st.spinner("Analyzing Indices..."):
+            tickers = list(INDICES.keys()) + [BENCHMARK_US]
+            data = yf.download(tickers, period="1y", interval="1wk", progress=False)['Close']
+            
+            if not data.empty:
+                rat, mom = calculate_rrg(data, BENCHMARK_US)
+                fig_indices = plot_rrg_chart(rat, mom, INDICES, f"Major Indices vs {BENCHMARK_US}")
+                st.session_state['fig_indices'] = fig_indices
+            else:
+                st.error("Data fetch failed.")
+
+    if 'fig_indices' in st.session_state:
+        st.plotly_chart(st.session_state['fig_indices'], use_container_width=True)
