@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v60.4 Rotation Safety & Health Fix)
+#  TITAN STRATEGY APP (v60.5 Variable Name Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -61,8 +61,8 @@ st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v60.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Weakening Lock & Full Scoring")
+st.title(f"🛡️ Titan Strategy v60.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Pine Parity & Stability")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -229,7 +229,6 @@ def style_final(styler):
         if "LAGGING" in val: return 'color: #FF4444; font-weight: bold'
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
-    
     def color_rsi(val):
         try:
             parts = val.split(); r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
@@ -657,7 +656,7 @@ if st.session_state.run_analysis:
                 decision = "CAUTION"
                 reason = "Rotation Weak"
             
-            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_pass, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+            analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         for t in scan_list:
             cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
