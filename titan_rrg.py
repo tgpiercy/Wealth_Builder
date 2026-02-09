@@ -8,9 +8,9 @@ def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14):
     """
     Calculates JdK RS-Ratio and RS-Momentum series.
     """
-    # 1. Align Data
+    # 1. Align Data (Indices are already Weekly due to prepare_rrg_inputs)
     common_idx = price_series.dropna().index.intersection(bench_series.dropna().index)
-    if len(common_idx) < 50: return pd.Series(dtype=float), pd.Series(dtype=float)
+    if len(common_idx) < 30: return pd.Series(dtype=float), pd.Series(dtype=float)
 
     p = price_series.loc[common_idx]
     b = bench_series.loc[common_idx]
@@ -31,15 +31,21 @@ def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14):
 
 def prepare_rrg_inputs(master_data, tickers, benchmark):
     """
-    Returns a wide DataFrame of Closes.
+    Returns a wide DataFrame of Closes, RESAMPLED TO WEEKLY.
+    This ensures RRG calculates on the Standard Weekly Rotation Cycle.
     """
     data = {}
+    
+    # helper to resample
+    def get_weekly(df):
+        return df['Close'].resample('W-FRI').last()
+
     if benchmark in master_data:
-        data[benchmark] = master_data[benchmark]['Close']
+        data[benchmark] = get_weekly(master_data[benchmark])
     
     for t in tickers:
         if t in master_data and len(master_data[t]) > 50:
-            data[t] = master_data[t]['Close']
+            data[t] = get_weekly(master_data[t])
             
     df = pd.DataFrame(data).ffill()
     return df
@@ -71,7 +77,7 @@ def get_heading_from_tail(x_series, y_series):
     if len(x_series) < 2 or len(y_series) < 2: 
         return "<span style='font-size: 22px; line-height: 1;'>➡️</span>"
     
-    # Use exact last 2 points
+    # Use exact last 2 points (Weekly points now)
     x2 = x_series.iloc[-1]; x1 = x_series.iloc[-2]
     y2 = y_series.iloc[-1]; y1 = y_series.iloc[-2]
     
@@ -80,16 +86,22 @@ def get_heading_from_tail(x_series, y_series):
     
     style = "style='font-size: 22px; line-height: 1;'"
     
-    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" 
-    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" 
-    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" 
-    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" 
+    # RRG Direction Logic:
+    # 0-90 deg (NE) -> Leading/Improving Strength
+    # 90-180 deg (SE) -> Weakening
+    # 180-270 deg (SW) -> Lagging/Weakness
+    # 270-360 deg (NW) -> Improving
+    
+    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" # NE
+    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" # SE
+    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" # SW
+    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" # NW
     
     return f"<span {style}>➡️</span>"
 
 def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
     """
-    Runs RRG logic for ALL tickers.
+    Runs Weekly RRG logic for ALL tickers.
     Special Handling: If Ticker is 'SPY', compare vs 'IEF'.
     """
     if not master_data: return {}
@@ -100,17 +112,17 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
     scan_tickers = list(master_data.keys())
     if benchmark in scan_tickers: scan_tickers.remove(benchmark)
     
+    # This now returns WEEKLY data
     wide_df = prepare_rrg_inputs(master_data, scan_tickers, benchmark)
+    
     if not wide_df.empty:
         r_df, m_df = calculate_rrg_math(wide_df, benchmark)
         
         for t in r_df.columns:
             try:
-                # Use dropna to find valid tail for this ticker
                 ts_r = r_df[t].dropna(); ts_m = m_df[t].dropna()
                 if ts_r.empty or ts_m.empty: continue
                 
-                # Match index
                 common = ts_r.index.intersection(ts_m.index)
                 if len(common) < 2: continue
                 
@@ -129,15 +141,14 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
             except:
                 snapshot[t] = "UNKNOWN"
 
-    # 2. Special Exception: SPY vs IEF
+    # 2. Special Exception: SPY vs IEF (Weekly)
     if "SPY" in master_data and "IEF" in master_data:
         try:
-            spy_s = master_data["SPY"]['Close']
-            ief_s = master_data["IEF"]['Close']
+            spy_s = master_data["SPY"]['Close'].resample('W-FRI').last()
+            ief_s = master_data["IEF"]['Close'].resample('W-FRI').last()
             r_spy, m_spy = calculate_rrg_components(spy_s, ief_s)
             
             if not r_spy.empty and not m_spy.empty:
-                # Align
                 c_idx = r_spy.index.intersection(m_spy.index)
                 if len(c_idx) > 2:
                     curr_r = r_spy.loc[c_idx[-1]]; curr_m = m_spy.loc[c_idx[-1]]
@@ -158,8 +169,6 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
 def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
     """
     Plots RRG Scatter with Tails.
-    Cleaner Labels: Only Ticker Symbol.
-    No Mouseover: hoverinfo='skip'.
     """
     fig = go.Figure()
     
@@ -173,11 +182,10 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
     fig.add_shape(type="rect", x0=100, y0=85, x1=115, y1=100, fillcolor="rgba(255,255,0,0.1)", line_width=0)
 
     for col in r_df.columns:
-        # Get valid overlapping data
         valid_idx = r_df[col].dropna().index.intersection(m_df[col].dropna().index)
         if len(valid_idx) < 5: continue
         
-        # Last 10 points for visual tail
+        # Slice last 10 points (Now represents 10 WEEKS)
         x_tail = r_df.loc[valid_idx, col].iloc[-10:]
         y_tail = m_df.loc[valid_idx, col].iloc[-10:]
         
@@ -189,22 +197,19 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         elif curr_x < 100 and curr_y < 100: color = '#ff4444' 
         else: color = '#ffff00'
         
-        # Use simple column name (Ticker) instead of long description
-        label = col 
+        label = label_map.get(col, col)
         
-        # Tail
         fig.add_trace(go.Scatter(
             x=x_tail, y=y_tail, mode='lines', 
             line=dict(color=color, width=1),
             opacity=0.5, hoverinfo='skip', showlegend=False
         ))
         
-        # Head (No Hover, Text is Ticker)
         fig.add_trace(go.Scatter(
             x=[curr_x], y=[curr_y], mode='markers+text',
             marker=dict(color=color, size=10, line=dict(color='white', width=1)),
             text=[label], textposition="top center", 
-            hoverinfo='skip', # DISABLED MOUSEOVER
+            hoverinfo='skip',
             showlegend=False
         ))
 
@@ -215,6 +220,6 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         paper_bgcolor=bg_color, plot_bgcolor=bg_color,
         font=dict(color="white" if is_dark else "black"),
         width=1000, height=800, showlegend=False,
-        dragmode='pan' # Default to pan instead of zoom
+        dragmode='pan'
     )
     return fig
