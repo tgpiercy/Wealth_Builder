@@ -1,11 +1,13 @@
 # ==============================================================================
-#  TITAN CONFIGURATION (v62.6 Hierarchy Map)
+#  TITAN CONFIGURATION (v62.7 Simplified Auth)
 # ==============================================================================
 
 # --- CREDENTIALS ---
+# Format: "username": "password"
+# Leave password empty "" for no password.
 CREDENTIALS = {
-    "admin": "password123",
-    "user": "titan2025"
+    "dad": "",
+    "son": ""
 }
 
 # --- MASTER DATA MAP ---
