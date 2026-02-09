@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.5 Global Dark Mode)
+#  TITAN STRATEGY APP (v60.6 Global Dark Mode - Cleaned)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -60,17 +60,18 @@ PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
 # --- GLOBAL SETTINGS (SIDEBAR) ---
 st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 
-# GLOBAL DARK MODE TOGGLE
-# Initializes default to True (Dark) if not set
+# Initialize Dark Mode State
 if "is_dark" not in st.session_state:
     st.session_state.is_dark = True
-st.sidebar.toggle("🌙 Dark Mode", key="is_dark") # This automatically syncs with session_state.is_dark
+
+# Global Toggle
+st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v61.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Global UX Settings")
+st.title(f"🛡️ Titan Strategy v60.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Pine Parity & Global UI")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -118,9 +119,7 @@ def calc_structure(df, deviation_pct=0.035):
             elif price > last_val * (1 + deviation_pct):
                 trend = 1; last_val = price; pivots.append((i, price, 1))
     if len(pivots) < 3: return "Range"
-    curr = pivots[-1]; prev = pivots[-3]
-    if curr[2] == 1: return "HH" if curr[1] > prev[1] else "LH"
-    else: return "LL" if curr[1] < prev[1] else "HL"
+    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
 
 def round_to_03_07(price):
     if pd.isna(price): return 0.0
@@ -130,6 +129,7 @@ def round_to_03_07(price):
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
 def fetch_master_data(ticker_list):
+    """Downloads daily data for ALL tickers once."""
     unique_tickers = sorted(list(set(ticker_list))) 
     data_map = {}
     for t in unique_tickers:
@@ -196,7 +196,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
     fig = go.Figure()
-    # Use global dark mode setting logic
+    # USE GLOBAL SETTING
     if is_dark:
         bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
     else:
@@ -384,7 +384,7 @@ with tab4:
             d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
             stop = round_to_03_07(c - 2.618*atr)
             if c > stop:
-                sh = int(RISK_UNIT_BASE / (c - stop))
+                sh = int(RISK_UNIT_BASE / (c - stop)) 
                 st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
         except: st.error("Error")
 
