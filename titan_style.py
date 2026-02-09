@@ -60,8 +60,16 @@ def color_ad_breadth(val):
 
 def color_volume(val):
     val = str(val).upper()
-    if 'SPIKE' in val: return 'color: #00bfff; font-weight: bold' # Cyan for spike
-    if 'HIGH' in val: return 'color: #00ff00' # Green for high
+    if 'SPIKE' in val: return 'color: #ff00ff; font-weight: bold' # Magenta
+    if 'HIGH' in val: return 'color: #00ff00' # Green
+    return 'color: white'
+
+def color_inst_activity(val):
+    val = str(val).upper()
+    # Bullish States
+    if 'ACCUMULATION' in val or 'BREAKOUT' in val: return 'color: #00ff00'
+    # Bearish States
+    if 'DISTRIBUTION' in val or 'LIQUIDATION' in val or 'SELLING' in val or 'CAPITULATION' in val: return 'color: #ff4444'
     return 'color: white'
 
 # --- MAIN STYLER ---
@@ -74,6 +82,7 @@ def style_final(styler):
     styler.applymap(color_structure, subset=['Structure']) 
     styler.applymap(color_ad_breadth, subset=['A/D Breadth'])
     styler.applymap(color_volume, subset=['Volume']) 
+    styler.applymap(color_inst_activity, subset=['Institutional<br>Activity']) # New Coloring Applied
     styler.applymap(color_action, subset=['Action'])
 
     # 2. Global Table Formatting
