@@ -1,133 +1,196 @@
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
+import titan_math as tm
 
-# --- RRG CALCULATIONS ---
-def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
-    if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
-    df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
-    for col in price_data.columns:
-        if col != benchmark_col:
-            try:
-                rs = price_data[col] / price_data[benchmark_col]
-                mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
-                ratio = 100 + ((rs - mean) / std) * 1.5
-                df_ratio[col] = ratio
-            except: continue
-    for col in df_ratio.columns:
-        try: df_mom[col] = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
-        except: continue
-    return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
+# --- RRG MATH ENGINE ---
+def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14):
+    """
+    Calculates JdK RS-Ratio and RS-Momentum series.
+    """
+    # 1. Relative Strength (Price / Bench)
+    # Align dates first
+    common_idx = price_series.index.intersection(bench_series.index)
+    p = price_series.loc[common_idx]
+    b = bench_series.loc[common_idx]
+    rs_raw = 100 * (p / b)
+    
+    # 2. RS-Ratio (Trend of RS) -> Normalized around 100
+    # Logic: 100 + ((RS - SMA(RS)) / StdDev(RS)) * scaling, 
+    # simplified to standard moving average ratio for stability in this implementation:
+    # Standard JdK uses complex normalization, we use a robust approximation:
+    # Ratio = 100 * (RS / SMA(RS))
+    rs_mean = rs_raw.rolling(window=len_rs).mean()
+    rs_ratio = 100 * (rs_raw / rs_mean)
+    
+    # 3. RS-Momentum (Rate of Change of Ratio)
+    # Mom = 100 * (Ratio / SMA(Ratio))
+    ratio_mean = rs_ratio.rolling(window=len_mom).mean()
+    rs_mom = 100 * (rs_ratio / ratio_mean)
+    
+    return rs_ratio.dropna(), rs_mom.dropna()
 
-def prepare_rrg_inputs(data_map, tickers, benchmark):
-    df_wide = pd.DataFrame()
-    if benchmark in data_map:
-        bench_df = data_map[benchmark].resample('W-FRI').last()
-        df_wide[benchmark] = bench_df['Close']
+def prepare_rrg_inputs(master_data, tickers, benchmark):
+    """
+    Returns a wide DataFrame of Closes for the RRG calculation.
+    """
+    data = {}
+    if benchmark not in master_data: return pd.DataFrame()
+    
+    # Add Benchmark
+    data[benchmark] = master_data[benchmark]['Close']
+    
+    # Add Tickers
     for t in tickers:
-        if t in data_map and t != benchmark:
-            w_df = data_map[t].resample('W-FRI').last()
-            df_wide[t] = w_df['Close']
-    return df_wide.dropna()
+        if t in master_data and len(master_data[t]) > 50:
+            data[t] = master_data[t]['Close']
+            
+    df = pd.DataFrame(data).ffill().dropna()
+    return df
 
-def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
-    status_map = {}
-    try:
-        all_tickers = list(data_map.keys())
-        wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
-        if not wide_df.empty:
-            r, m = calculate_rrg_math(wide_df, benchmark)
-            if not r.empty:
-                l_idx = r.index[-1]
-                for t in r.columns:
-                    try:
-                        vr, vm = r.at[l_idx, t], m.at[l_idx, t]
-                        if vr > 100 and vm > 100: status_map[t] = "LEADING"
-                        elif vr > 100 and vm < 100: status_map[t] = "WEAKENING"
-                        elif vr < 100 and vm < 100: status_map[t] = "LAGGING"
-                        else: status_map[t] = "IMPROVING"
-                    except: continue
+def calculate_rrg_math(wide_df, benchmark_ticker):
+    """
+    Returns the Ratio and Momentum DataFrames for the last 5 periods (for tails).
+    """
+    r_dict = {}
+    m_dict = {}
+    
+    if benchmark_ticker not in wide_df.columns: return pd.DataFrame(), pd.DataFrame()
+    bench = wide_df[benchmark_ticker]
+    
+    for col in wide_df.columns:
+        if col == benchmark_ticker: continue
+        r, m = calculate_rrg_components(wide_df[col], bench)
+        r_dict[col] = r
+        m_dict[col] = m
         
-        if "SPY" in data_map and "IEF" in data_map:
-            spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
-            rs, ms = calculate_rrg_math(spy_ief, "IEF")
-            if not rs.empty:
-                l_idx = rs.index[-1]
-                vrs, vms = rs.at[l_idx, "SPY"], ms.at[l_idx, "SPY"]
-                if vrs > 100 and vms > 100: status_map["SPY"] = "LEADING"
-                elif vrs > 100 and vms < 100: status_map["SPY"] = "WEAKENING"
-                elif vrs < 100 and vms < 100: status_map["SPY"] = "LAGGING"
-                else: status_map["SPY"] = "IMPROVING"
-    except: pass
-    return status_map
+    r_df = pd.DataFrame(r_dict)
+    m_df = pd.DataFrame(m_dict)
+    return r_df, m_df
 
-# --- PLOTTING ENGINE (CLEAN LABELS & NO HOVER) ---
-def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
+def get_heading(r_series, m_series):
+    """
+    Determines the directional arrow based on the movement from T-1 to T.
+    """
+    if len(r_series) < 2 or len(m_series) < 2: return ""
+    
+    dx = r_series.iloc[-1] - r_series.iloc[-2] # Change in Ratio (X-axis)
+    dy = m_series.iloc[-1] - m_series.iloc[-2] # Change in Momentum (Y-axis)
+    
+    # Logic:
+    # NE (Top Right): +Ratio, +Mom (Strongest)
+    # NW (Top Left): -Ratio, +Mom (Improving)
+    # SE (Bottom Right): +Ratio, -Mom (Weakening)
+    # SW (Bottom Left): -Ratio, -Mom (Weakest)
+    
+    if dx > 0 and dy > 0: return "↗️" # Charging
+    if dx > 0 and dy < 0: return "↘️" # Rolling Over
+    if dx < 0 and dy < 0: return "↙️" # Dumping
+    if dx < 0 and dy > 0: return "↖️" # Bottoming
+    return "➡️"
+
+def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
+    """
+    Runs RRG logic for ALL tickers in master_data vs Benchmark.
+    Returns a dict: {Ticker: "PHASE ↗️"}
+    """
+    if not master_data: return {}
+    
+    # Create Wide DF
+    scan_tickers = list(master_data.keys())
+    if benchmark in scan_tickers: scan_tickers.remove(benchmark)
+    
+    wide_df = prepare_rrg_inputs(master_data, scan_tickers, benchmark)
+    if wide_df.empty: return {}
+    
+    r_df, m_df = calculate_rrg_math(wide_df, benchmark)
+    snapshot = {}
+    
+    for t in r_df.columns:
+        try:
+            curr_r = r_df[t].iloc[-1]
+            curr_m = m_df[t].iloc[-1]
+            heading = get_heading(r_df[t], m_df[t])
+            
+            phase = "UNKNOWN"
+            if curr_r > 100 and curr_m > 100: phase = "LEADING"
+            elif curr_r < 100 and curr_m > 100: phase = "IMPROVING"
+            elif curr_r < 100 and curr_m < 100: phase = "LAGGING"
+            elif curr_r > 100 and curr_m < 100: phase = "WEAKENING"
+            
+            snapshot[t] = f"{phase} {heading}"
+        except:
+            snapshot[t] = "UNKNOWN"
+            
+    return snapshot
+
+def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
+    """
+    Plots the RRG Scatter chart with TAILS (Lines history).
+    """
     fig = go.Figure()
-    if is_dark:
-        bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
-    else:
-        bg_col, text_col = "white", "black"; c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"; template = "plotly_white"
-
-    has_data = False; x_vals = []; y_vals = []
     
-    # Ensure SPY is in the plot list if available
-    plot_tickers = list(labels_map.keys())
-    if "SPY" in ratios.columns and "SPY" not in plot_tickers: plot_tickers.append("SPY")
+    # Quadrant Background
+    bg_color = "#1e1e1e" if is_dark else "#ffffff"
+    grid_color = "#333" if is_dark else "#ddd"
+    
+    # Add Quadrants
+    fig.add_shape(type="rect", x0=100, y0=100, x1=110, y1=110, fillcolor="rgba(0,255,0,0.1)", line_width=0) # Leading
+    fig.add_shape(type="rect", x0=90, y0=100, x1=100, y1=110, fillcolor="rgba(0,0,255,0.1)", line_width=0) # Improving
+    fig.add_shape(type="rect", x0=90, y0=90, x1=100, y1=100, fillcolor="rgba(255,0,0,0.1)", line_width=0) # Lagging
+    fig.add_shape(type="rect", x0=100, y0=90, x1=110, y1=100, fillcolor="rgba(255,255,0,0.1)", line_width=0) # Weakening
 
-    for ticker in plot_tickers:
-        if ticker not in ratios.columns: continue
-        xt = ratios[ticker].tail(5); yt = momentums[ticker].tail(5)
-        if len(xt) < 5: continue
-        has_data = True
-        cx, cy = xt.iloc[-1], yt.iloc[-1]
-        x_vals.extend(xt.values); y_vals.extend(yt.values)
-
-        if cx > 100 and cy > 100: color = c_lead
-        elif cx > 100 and cy < 100: color = c_weak
-        elif cx < 100 and cy < 100: color = c_lag
-        else: color = c_imp
+    # Plot Tails & Dots
+    for col in r_df.columns:
+        # Get last 5 points for the tail
+        tail_len = 10
+        if len(r_df) < tail_len: continue
         
-        # 1. DRAW TAIL
+        x_tail = r_df[col].iloc[-tail_len:]
+        y_tail = m_df[col].iloc[-tail_len:]
+        
+        # Color Logic based on current position
+        curr_x = x_tail.iloc[-1]
+        curr_y = y_tail.iloc[-1]
+        
+        if curr_x > 100 and curr_y > 100: color = '#00ff00' # Green
+        elif curr_x < 100 and curr_y > 100: color = '#00bfff' # Blue
+        elif curr_x < 100 and curr_y < 100: color = '#ff4444' # Red
+        else: color = '#ffff00' # Yellow
+        
+        label = label_map.get(col, col)
+        
+        # Draw Tail (Line)
         fig.add_trace(go.Scatter(
-            x=xt, y=yt, 
-            mode='lines', 
-            line=dict(color=color, width=2, shape='spline'), 
-            opacity=0.6, 
-            showlegend=False, 
-            hoverinfo='skip' # No hover on tail
+            x=x_tail, y=y_tail,
+            mode='lines',
+            line=dict(color=color, width=1),
+            opacity=0.5,
+            hoverinfo='skip',
+            showlegend=False
         ))
         
-        # 2. DRAW HEAD (LABEL = TICKER ONLY, NO POPUP)
+        # Draw Head (Marker)
         fig.add_trace(go.Scatter(
-            x=[cx], y=[cy], 
-            mode='markers+text', 
-            marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), 
-            text=[ticker],  # <--- FORCE TICKER ONLY
-            textposition="top center", 
-            textfont=dict(color=text_col), 
-            hoverinfo='skip' # <--- COMPLETELY DISABLES POPUP
+            x=[curr_x], y=[curr_y],
+            mode='markers+text',
+            marker=dict(color=color, size=10, line=dict(color='white', width=1)),
+            text=[label],
+            textposition="top center",
+            name=label,
+            hoverinfo='text+x+y'
         ))
 
-    if not has_data: return None
+    # Axis Formatting
+    fig.update_layout(
+        title=title,
+        xaxis=dict(title="RS-Ratio (Trend)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white'),
+        yaxis=dict(title="RS-Momentum (Velocity)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white'),
+        paper_bgcolor=bg_color,
+        plot_bgcolor=bg_color,
+        font=dict(color="white" if is_dark else "black"),
+        width=1000, height=800,
+        showlegend=False
+    )
     
-    # Dynamic Scaling
-    min_x, max_x = min(x_vals + [96]), max(x_vals + [104])
-    min_y, max_y = min(y_vals + [96]), max(y_vals + [104])
-    buff_x = (max_x - min_x) * 0.05; buff_y = (max_y - min_y) * 0.05
-    rx = [min_x - buff_x, max_x + buff_x]; ry = [min_y - buff_y, max_y + buff_y]
-
-    op = 0.1 if is_dark else 0.05
-    fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
-    
-    # Infinite Backgrounds
-    fig.add_shape(type="rect", x0=100, y0=100, x1=500, y1=500, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=100, y0=-500, x1=500, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=-500, y0=-500, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=-500, y0=100, x1=100, y1=500, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
-    
-    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=rx, showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=ry, showgrid=False, title="RS-Momentum (Velocity)"))
-    fig.add_annotation(x=rx[1], y=ry[1], text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
-    fig.add_annotation(x=rx[1], y=ry[0], text="WEAKENING", showarrow=False, font=dict(size=16, color=c_weak), xanchor="right", yanchor="bottom")
-    fig.add_annotation(x=rx[0], y=ry[0], text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
-    fig.add_annotation(x=rx[0], y=ry[1], text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
     return fig
