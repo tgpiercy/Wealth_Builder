@@ -1,5 +1,5 @@
 # ==============================================================================
-#  TITAN STRATEGY CONFIGURATION (v66.5 - Headers Restructured)
+#  TITAN STRATEGY CONFIGURATION (v66.8 - Consolidated Headers)
 # ==============================================================================
 
 # --- AUTHENTICATION ---
@@ -10,8 +10,6 @@ CREDENTIALS = {
 
 # --- MASTER DATA MAP ---
 # Format: { Ticker : (Display_Category, Benchmark_Ticker) }
-# The 'Display_Category' determines the HEADER in the scanner.
-# The ORDER of lines determines the SORT ORDER in the scanner.
 
 DATA_MAP = {
     # --- 01. MARKETS ---
@@ -25,60 +23,53 @@ DATA_MAP = {
     "IEF": ("01. MARKETS", "SPY"),
     "^VIX": ("01. MARKETS", "SPY"),
 
-    # --- 02. TECHNOLOGY ---
-    "XLK": ("02. TECHNOLOGY", "SPY"),
-    "IGV": ("02. TECHNOLOGY", "XLK"),  # Software
-    "SMH": ("02. TECHNOLOGY", "XLK"),  # Semis
+    # --- 02. SECTORS ---
+    # Includes all Tier 1, Tier 2, Defensive, and XBI
+    "XLK": ("02. SECTORS", "SPY"), # Tech
+    "XLC": ("02. SECTORS", "SPY"), # Comms
+    "XLF": ("02. SECTORS", "SPY"), # Financials
+    "XLI": ("02. SECTORS", "SPY"), # Industrials
+    "XLE": ("02. SECTORS", "SPY"), # Energy
+    "XLB": ("02. SECTORS", "SPY"), # Materials
+    "XLV": ("02. SECTORS", "SPY"), # Healthcare
+    "XLY": ("02. SECTORS", "SPY"), # Discretionary
+    "XLP": ("02. SECTORS", "SPY"), # Staples
+    "XLRE": ("02. SECTORS", "SPY"), # Real Estate
+    "XLU": ("02. SECTORS", "SPY"), # Utilities
+    "XBI": ("02. SECTORS", "SPY"), # Biotech (Moved here per request)
 
-    # --- 03. ENERGY ---
-    "XLE": ("03. ENERGY", "SPY"),
-    "XOP": ("03. ENERGY", "XLE"),      # E&P
+    # --- 03. THEMES ---
+    "BOTZ": ("03. THEMES", "SPY"),
+    "REMX": ("03. THEMES", "SPY"),
+    "ICLN": ("03. THEMES", "SPY"),
+    "GDX": ("03. THEMES", "SPY"),
 
-    # --- 04. FINANCIALS ---
-    "XLF": ("04. FINANCIALS", "SPY"),
-    "KRE": ("04. FINANCIALS", "XLF"),  # Regional Banks
+    # --- 04. METALS ---
+    "GLD": ("04. METALS", "SPY"),
+    "SLV": ("04. METALS", "SPY"),
 
-    # --- 05. INDUSTRIALS ---
-    "XLI": ("05. INDUSTRIALS", "SPY"),
-    "ITA": ("05. INDUSTRIALS", "XLI"), # Aerospace & Defense
+    # --- 05. INDUSTRIES ---
+    # Grouped by header, sorted by sector logic
+    "IGV": ("05. INDUSTRIES", "XLK"),  # Software (Tech)
+    "SMH": ("05. INDUSTRIES", "XLK"),  # Semis (Tech)
+    "XOP": ("05. INDUSTRIES", "XLE"),  # E&P (Energy)
+    "KRE": ("05. INDUSTRIES", "XLF"),  # Reg Banks (Fin)
+    "ITA": ("05. INDUSTRIES", "XLI"),  # Aerospace (Ind)
+    "ITB": ("05. INDUSTRIES", "XLY"),  # Homebuilders (Disc)
 
-    # --- 06. DISCRETIONARY ---
-    "XLY": ("06. DISCRETIONARY", "SPY"),
-    "ITB": ("06. DISCRETIONARY", "XLY"), # Homebuilders
-
-    # --- 07. SECTORS (GENERAL) ---
-    "XLC": ("07. SECTORS", "SPY"),
-    "XLB": ("07. SECTORS", "SPY"),
-    "XLV": ("07. SECTORS", "SPY"),
-    "XLP": ("07. SECTORS", "SPY"),
-    "XLRE": ("07. SECTORS", "SPY"),
-    "XLU": ("07. SECTORS", "SPY"),
-    "XBI": ("07. SECTORS", "SPY"),     # Biotech (Moved here per request)
-
-    # --- 08. THEMES ---
-    "BOTZ": ("08. THEMES", "SPY"),
-    "REMX": ("08. THEMES", "SPY"),
-    "ICLN": ("08. THEMES", "SPY"),
-    "GDX": ("08. THEMES", "SPY"),
-
-    # --- 09. METALS ---
-    "GLD": ("09. METALS", "SPY"),
-    "SLV": ("09. METALS", "SPY"),
-
-    # --- 10. CANADA (HXT) ---
-    "RY.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "BN.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "CNQ.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "CP.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "WSP.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "SHOP.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "CSU.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "NTR.TO": ("10. CANADA (HXT)", "HXT.TO"),
-    "TECK-B.TO": ("10. CANADA (HXT)", "HXT.TO"),
+    # --- 06. CANADA ---
+    # Individual TSX Stocks
+    "RY.TO": ("06. CANADA", "HXT.TO"),
+    "BN.TO": ("06. CANADA", "HXT.TO"),
+    "CNQ.TO": ("06. CANADA", "HXT.TO"),
+    "CP.TO": ("06. CANADA", "HXT.TO"),
+    "WSP.TO": ("06. CANADA", "HXT.TO"),
+    "SHOP.TO": ("06. CANADA", "HXT.TO"),
+    "CSU.TO": ("06. CANADA", "HXT.TO"),
+    "NTR.TO": ("06. CANADA", "HXT.TO"),
+    "TECK-B.TO": ("06. CANADA", "HXT.TO"),
     
     # --- DRILL DOWN DATA ONLY (HIDDEN FROM SCANNER) ---
-    # These are used for the 'Drill Down' tab but not the main list
-    # We assign them a '99.' category so the scanner logic skips them.
     "AIQ": ("99. DATA", "BOTZ"),
     "IBB": ("99. DATA", "XBI"),
     "ARKG": ("99. DATA", "XBI"),
@@ -148,14 +139,10 @@ RRG_INDUSTRY_MAP = {
 }
 
 SECTOR_PARENTS = {
-    "02. TECHNOLOGY": "XLK",
-    "03. ENERGY": "XLE",
-    "04. FINANCIALS": "XLF",
-    "05. INDUSTRIALS": "XLI",
-    "06. DISCRETIONARY": "XLY",
-    "07. SECTORS": "SPY", 
-    "08. THEMES": "SPY",
-    "10. CANADA (HXT)": "HXT.TO"
+    "02. SECTORS": "SPY",
+    "03. THEMES": "SPY",
+    "05. INDUSTRIES": "SPY",
+    "06. CANADA": "HXT.TO"
 }
 
 SECTOR_ETFS = list(RRG_SECTORS.keys()) + list(RRG_THEMES.keys())
