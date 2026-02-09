@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v62.4 Logic Relaxation)
+#  TITAN STRATEGY APP (v62.5 Data Depth 10y)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v62.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Logic Relaxation")
+st.title(f"🛡️ Titan Strategy v62.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Deep History (10y)")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
@@ -75,7 +75,8 @@ def fetch_master_data(ticker_list):
         try:
             fetch_sym = "SPY" if t == "MANL" else t 
             tk = yf.Ticker(fetch_sym)
-            df = tk.history(period="2y", interval="1d")
+            # INCREASED DATA FETCH TO 10 YEARS FOR ACCURACY
+            df = tk.history(period="10y", interval="1d")
             df.index = pd.to_datetime(df.index).tz_localize(None)
             if not df.empty and 'Close' in df.columns:
                 data_map[t] = df
