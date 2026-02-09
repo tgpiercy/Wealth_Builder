@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v66.3 Strict Sort)
+#  TITAN STRATEGY APP (v66.4 RSI Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v66.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Custom Sort Order")
+st.title(f"🛡️ Titan Strategy v66.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Stable Release")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -93,10 +93,9 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     analysis_db = {}
     
     # SORTING PRIORITY MAP (From Config Order)
-    # This creates a map { 'SPY': 0, 'RSP': 1, 'DIA': 2 ... }
     TICKER_PRIORITY = {t: i for i, t in enumerate(tc.DATA_MAP.keys())}
     
-    # DEDUPLICATION: Ensure we process each ticker exactly once
+    # DEDUPLICATION
     unique_scan_list = sorted(list(set(scan_list)))
     
     for t in unique_scan_list:
@@ -123,7 +122,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
             rs_sma18 = tm.calc_sma(rs_series, 18)
             
-            # SCORECARD LOGIC
             if len(rs_series) > 2 and len(rs_sma18) > 2:
                 curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
                 lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) 
@@ -208,6 +206,14 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         r5 = df['RSI5'].iloc[-1]; r20 = df['RSI20'].iloc[-1] if not pd.isna(df['RSI20'].iloc[-1]) else 50
         r5_prev = df['RSI5'].iloc[-2]; is_rising = r5 > r5_prev
         
+        # --- RSI MSG CONSTRUCTION (Restored) ---
+        if r5 >= r20:
+            n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
+        else:
+            n_c = "#FFA500" if r20 > 50 else "#FF4444"
+        a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
+        rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
+        
         final_inst_msg = inst_activity
         if "SPIKE" in vol_msg:
             if inst_activity == "HL": final_inst_msg = "ACCUMULATION (HL)" if is_rising else final_inst_msg
@@ -245,16 +251,13 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         
         if is_scanner:
             final_decision = decision; final_reason = reason
-            if cat_name in tc.SECTOR_PARENTS: pass # Parent logic hook
+            if cat_name in tc.SECTOR_PARENTS: pass 
 
             is_blue_spike = ("#00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
             
             disp_struct = "BULLISH" if struct_pass else ""
             disp_action = final_decision if "AVOID" not in final_decision else ""
             
-            # --- PRIORITY CALCULATION ---
-            # Assign sorting priority based on config position
-            # Default to 9999 if not found
             sort_priority = TICKER_PRIORITY.get(t, 9999)
             
             row = {
@@ -265,16 +268,11 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "A/D Breadth": ad_msg,
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
                 "Action": disp_action, "Reasoning": final_reason,
-                "Priority": sort_priority  # Hidden sort key
+                "Priority": sort_priority 
             }
             
-            # --- DEDUPLICATION ---
-            # HXT.TO is now treated as a market ticker, no redirection needed based on config v66.2
-            # SECTOR ETFS still get Summary grouping for clarity if needed
             if t in tc.SECTOR_ETFS:
                 row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
-                # Give Summary Rows a slightly higher priority in that block? 
-                # Actually we just want them to appear where they are in config.
                 results.append(row)
             else:
                 results.append(row)
