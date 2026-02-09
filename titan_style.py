@@ -68,12 +68,12 @@ def color_volume(val):
 def style_final(styler):
     # 1. Apply Column Specific Coloring
     styler.applymap(color_rotation, subset=['Rotation'])
-    styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8', 'Ichimoku<br>Cloud'])
+    styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8'])
     styler.applymap(color_impulse, subset=['Weekly<br>Impulse'])
     styler.applymap(color_score, subset=['Weekly<br>Score', 'Daily<br>Score'])
     styler.applymap(color_structure, subset=['Structure']) 
     styler.applymap(color_ad_breadth, subset=['A/D Breadth'])
-    styler.applymap(color_volume, subset=['Volume']) # Restored!
+    styler.applymap(color_volume, subset=['Volume']) 
     styler.applymap(color_action, subset=['Action'])
 
     # 2. Global Table Formatting
