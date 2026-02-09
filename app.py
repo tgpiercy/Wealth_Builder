@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.4 Performance Restoration)
+#  TITAN STRATEGY APP (v63.5 UI Cleanup)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Performance Tracking Restored")
+st.title(f"🛡️ Titan Strategy v63.5 ({current_user.upper()})")
+st.caption("Institutional Protocol: Performance Dashboard Restored")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
@@ -240,7 +240,7 @@ if st.session_state.run_analysis:
     mode = st.radio("Navigation", ["Scanner", "Sector Rotation"], horizontal=True, key="main_nav")
     
     if mode == "Scanner":
-        # 1. HOLDINGS
+        # 1. HOLDINGS & PERFORMANCE CALCULATION
         open_pos = pf_df[(pf_df['Status'] == 'OPEN') & (pf_df['Ticker'] != 'CASH')]
         eq_val = 0.0; total_cost_basis = 0.0; pf_rows = []
         
@@ -266,27 +266,29 @@ if st.session_state.run_analysis:
         open_pl_val = eq_val - total_cost_basis
         open_pl_cad = open_pl_val * cad_rate
         
-        # --- SHADOW SPY BENCHMARK CALCULATION ---
+        # SHADOW SPY BENCHMARK
         shadow_spy_qty = pf_df['Shadow_SPY'].sum() if not pf_df.empty else 0.0
         spy_price = master_data['SPY']['Close'].iloc[-1] if 'SPY' in master_data else 0.0
         shadow_equity = shadow_spy_qty * spy_price
-        
         alpha_dollars = total_net_worth - shadow_equity
-        alpha_pct = ((total_net_worth - shadow_equity) / shadow_equity) * 100 if shadow_equity > 0 else 0.0
         
-        # DISPLAY METRICS
+        # --- SECTION 1: PERFORMANCE DASHBOARD ---
+        st.subheader("📊 Performance Dashboard")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", ts.fmt_delta(open_pl_cad))
+        c1.metric(f"Net Worth (CAD)", f"${total_nw_cad:,.2f}", ts.fmt_delta(open_pl_cad))
         c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", ts.fmt_delta(open_pl_val))
         c3.metric("Benchmark (Shadow SPY)", f"${shadow_equity:,.2f}", f"{alpha_dollars:+.2f} Alpha")
         c4.metric("Cash", f"${current_cash:,.2f}")
         c5.metric("Equity", f"${eq_val:,.2f}")
-        
+        st.write("---")
+
+        # --- SECTION 2: CURRENT HOLDINGS ---
+        st.subheader("💼 Current Holdings")
         if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(ts.style_portfolio).to_html(), unsafe_allow_html=True)
         else: st.info("No active trades.")
         st.write("---")
 
-        # 4. MARKET HEALTH
+        # --- SECTION 3: MARKET HEALTH ---
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
@@ -323,7 +325,7 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(ts.style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (GW2 SCORECARD PARITY)
+        # --- SECTION 4: SCANNER LOOP (GW2 SCORECARD PARITY) ---
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {}
