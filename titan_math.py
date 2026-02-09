@@ -11,7 +11,7 @@ def calc_rsi(series, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def calc_ad(high, low, close, volume): 
+def calc_ad(high, low, close, volume):
     # Money Flow Multiplier
     mfm = ((close - low) - (high - close)) / (high - low)
     mfm = mfm.replace([np.inf, -np.inf], 0).fillna(0)
@@ -30,94 +30,98 @@ def calc_rising(series, lookback=2):
     return series.iloc[-1] > series.iloc[-1 - lookback]
 
 def calc_structure(df):
-    # Pivot High/Low Logic (Simplified for Trend)
+    """Simple Pivot Check for Fallback"""
     if len(df) < 5: return "NEUTRAL"
-    c = df['Close'].iloc[-1]; c_prev = df['Close'].iloc[-2]
     h = df['High'].iloc[-1]; h_prev = df['High'].iloc[-2]
     l = df['Low'].iloc[-1]; l_prev = df['Low'].iloc[-2]
     
     if h > h_prev and l > l_prev: return "HH" # Higher High
     if h < h_prev and l < l_prev: return "LL" # Lower Low
     if h < h_prev and l > l_prev: return "ID" # Inside Day
-    return "HL" # Mixed/Higher Low
+    return "HL" 
 
 def round_to_03_07(val):
-    """Smart Stops: Round to nearest .03 or .07 to avoid round number clusters."""
-    int_part = int(val)
-    dec_part = val - int_part
-    if dec_part < 0.05: final_dec = 0.03
-    elif dec_part < 0.50: final_dec = 0.47 
-    elif dec_part < 0.95: final_dec = 0.93
-    else: final_dec = 0.97
-    return int_part + final_dec
+    try:
+        int_part = int(val)
+        dec_part = val - int_part
+        if dec_part < 0.05: final_dec = 0.03
+        elif dec_part < 0.50: final_dec = 0.47 
+        elif dec_part < 0.95: final_dec = 0.93
+        else: final_dec = 0.97
+        return int_part + final_dec
+    except: return val
 
 def calc_ichimoku(high, low, close):
-    # Standard settings: 9, 26, 52
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
     span_a = ((tenkan + kijun) / 2).shift(26)
     span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
     return span_a, span_b
 
-# --- THE MISSING FUNCTION (VSA LOGIC) ---
+# --- VSA LOGIC (Optimized & Safe) ---
 def calc_smart_money(df):
     """
     Analyzes Volume + Spread + Close Location to detect Intent.
+    Includes Safety Checks for Zero Division.
     """
     if len(df) < 20: return "INSUFFICIENT DATA"
     
-    # 1. Get Current Bar Data
-    curr = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    vol = curr['Volume']
-    # Ensure VolSMA exists in DF before accessing
-    if 'VolSMA' in df.columns:
-        vol_avg = df['VolSMA'].iloc[-1]
-    else:
-        vol_avg = vol # Fallback
-    
-    high = curr['High']; low = curr['Low']; close = curr['Close']
-    
-    # 2. Calculate Spread (Range)
-    spread = high - low
-    avg_spread = (df['High'] - df['Low']).rolling(14).mean().iloc[-1]
-    
-    # 3. Relative Metrics
-    rel_vol = vol / vol_avg if vol_avg > 0 else 0
-    rel_spread = spread / avg_spread if avg_spread > 0 else 0
-    
-    # 4. Close Location (0.0 = Low, 1.0 = High)
-    loc = (close - low) / spread if spread > 0 else 0.5
-    
-    # --- LOGIC TREE ---
-    
-    # SCENARIO A: High Volume (Institutional Participation)
-    if rel_vol >= 1.5:
-        # 1. Churning (High Vol + Tiny Range) -> Indecision
-        if rel_spread < 0.75:
-            return "CHURNING (Neutral)"
-            
-        # 2. Up Move
-        if close > prev['Close']:
-            if loc < 0.30: return "UPTHRUST (Trap)" # Sold into rally
-            if loc > 0.70: return "IGNITION (Buy)"   # Strong buying
-            return "RALLY (Strong)"
-            
-        # 3. Down Move
-        else:
-            if loc > 0.70: return "STOPPING (Absorb)" # Bought into dip
-            if loc < 0.30: return "DUMPING (Panic)"   # Panic selling
-            return "DROP (Heavy)"
-
-    # SCENARIO B: Low Volume (No Interest)
-    elif rel_vol < 0.6:
-        if close > prev['Close']: return "DRIFT (No Demand)"
-        else: return "TEST (No Supply)"
+    try:
+        curr = df.iloc[-1]; prev = df.iloc[-2]
         
-    # SCENARIO C: Normal Volume -> Use Structure
-    else:
-        struct = calc_structure(df)
-        if struct == "HH": return "TRENDING UP"
-        if struct == "LL": return "TRENDING DOWN"
-        return "CONSOLIDATING"
+        # 1. Volume Analysis
+        vol = curr.get('Volume', 0)
+        # Use pre-calculated VolSMA if available, else roll it
+        if 'VolSMA' in df.columns: vol_avg = df['VolSMA'].iloc[-1]
+        else: vol_avg = df['Volume'].rolling(20).mean().iloc[-1]
+        
+        # Safety: Avoid division by zero
+        if vol_avg is None or vol_avg == 0: rel_vol = 0
+        else: rel_vol = vol / vol_avg
+        
+        # 2. Spread (Range) Analysis
+        high = curr['High']; low = curr['Low']; close = curr['Close']
+        spread = high - low
+        avg_spread = (df['High'] - df['Low']).rolling(14).mean().iloc[-1]
+        
+        if avg_spread is None or avg_spread == 0: rel_spread = 0
+        else: rel_spread = spread / avg_spread
+        
+        # 3. Location of Close (0.0 = Low, 1.0 = High)
+        if spread == 0: loc = 0.5
+        else: loc = (close - low) / spread
+        
+        # --- INTERPRETATION ENGINE ---
+        
+        # A. HIGH VOLUME (Institution Active)
+        if rel_vol >= 1.5:
+            # Churning: High effort, no result (Tiny Range)
+            if rel_spread < 0.75: return "CHURNING (Neutral)"
+            
+            # Up Moves
+            if close > prev['Close']:
+                if loc < 0.30: return "UPTHRUST (Trap)" # Sold into strength
+                if loc > 0.70: return "IGNITION (Buy)"   # Real buying
+                return "RALLY (Strong)"
+                
+            # Down Moves
+            else:
+                if loc > 0.70: return "STOPPING (Absorb)" # Institutions buying the dip
+                if loc < 0.30: return "DUMPING (Panic)"   # Real selling
+                return "DROP (Heavy)"
+
+        # B. LOW VOLUME (No Interest)
+        elif rel_vol < 0.6:
+            if close > prev['Close']: return "DRIFT (No Demand)"
+            return "TEST (No Supply)"
+            
+        # C. NORMAL VOLUME
+        else:
+            # Fallback to simple structure
+            struct = calc_structure(df)
+            if struct == "HH": return "TRENDING UP"
+            if struct == "LL": return "TRENDING DOWN"
+            return "NORMAL"
+            
+    except Exception as e:
+        return "ERROR"
