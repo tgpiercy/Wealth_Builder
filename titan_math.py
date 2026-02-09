@@ -46,7 +46,7 @@ def round_to_03_07(val):
     int_part = int(val)
     dec_part = val - int_part
     if dec_part < 0.05: final_dec = 0.03
-    elif dec_part < 0.50: final_dec = 0.47 # optimized slightly lower
+    elif dec_part < 0.50: final_dec = 0.47 
     elif dec_part < 0.95: final_dec = 0.93
     else: final_dec = 0.97
     return int_part + final_dec
@@ -59,7 +59,7 @@ def calc_ichimoku(high, low, close):
     span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
     return span_a, span_b
 
-# --- NEW: VSA LOGIC ---
+# --- THE MISSING FUNCTION (VSA LOGIC) ---
 def calc_smart_money(df):
     """
     Analyzes Volume + Spread + Close Location to detect Intent.
@@ -71,9 +71,13 @@ def calc_smart_money(df):
     prev = df.iloc[-2]
     
     vol = curr['Volume']
-    vol_avg = df['VolSMA'].iloc[-1]
+    # Ensure VolSMA exists in DF before accessing
+    if 'VolSMA' in df.columns:
+        vol_avg = df['VolSMA'].iloc[-1]
+    else:
+        vol_avg = vol # Fallback
     
-    high = curr['High']; low = curr['Low']; close = curr['Close']; open_p = curr['Open']
+    high = curr['High']; low = curr['Low']; close = curr['Close']
     
     # 2. Calculate Spread (Range)
     spread = high - low
@@ -90,21 +94,20 @@ def calc_smart_money(df):
     
     # SCENARIO A: High Volume (Institutional Participation)
     if rel_vol >= 1.5:
-        
-        # 1. Churning (High Vol + Tiny Range) -> Indecision / Turning Point
+        # 1. Churning (High Vol + Tiny Range) -> Indecision
         if rel_spread < 0.75:
             return "CHURNING (Neutral)"
             
         # 2. Up Move
         if close > prev['Close']:
-            if loc < 0.30: return "UPTH RUST (Trap)" # High vol, moved up, but closed at lows (Selling)
-            if loc > 0.70: return "IGNITION (Buy)"   # High vol, wide range, closed at highs (Strong Buy)
+            if loc < 0.30: return "UPTHRUST (Trap)" # Sold into rally
+            if loc > 0.70: return "IGNITION (Buy)"   # Strong buying
             return "RALLY (Strong)"
             
         # 3. Down Move
         else:
-            if loc > 0.70: return "STOPPING (Absorb)" # High vol, moved down, but closed at highs (Buying)
-            if loc < 0.30: return "DUMPING (Panic)"   # High vol, wide range, closed at lows (Strong Sell)
+            if loc > 0.70: return "STOPPING (Absorb)" # Bought into dip
+            if loc < 0.30: return "DUMPING (Panic)"   # Panic selling
             return "DROP (Heavy)"
 
     # SCENARIO B: Low Volume (No Interest)
@@ -112,9 +115,8 @@ def calc_smart_money(df):
         if close > prev['Close']: return "DRIFT (No Demand)"
         else: return "TEST (No Supply)"
         
-    # SCENARIO C: Normal Volume
+    # SCENARIO C: Normal Volume -> Use Structure
     else:
-        # Fallback to Structure
         struct = calc_structure(df)
         if struct == "HH": return "TRENDING UP"
         if struct == "LL": return "TRENDING DOWN"
