@@ -5,6 +5,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime, timedelta
+import importlib # REQUIRED FOR RELOAD FIX
 
 # --- IMPORT MODULES ---
 try:
@@ -12,6 +13,13 @@ try:
     import titan_math as tm
     import titan_rrg as tr
     import titan_style as ts
+    
+    # --- FORCE RELOAD TO FIX ATTRIBUTE ERROR ---
+    importlib.reload(tm)
+    importlib.reload(tc)
+    importlib.reload(tr)
+    importlib.reload(ts)
+    
 except ImportError as e:
     st.error(f"⚠️ CRITICAL ERROR: Missing Module. {e}")
     st.stop()
@@ -24,15 +32,13 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
 
-# --- FIX: INITIALIZE LOGIN KEYS ---
-# This prevents the AttributeError by ensuring keys exist before access
+# Initialize keys to prevent AttributeError
 if 'username_input' not in st.session_state:
     st.session_state.username_input = ""
 if 'password_input' not in st.session_state:
     st.session_state.password_input = ""
 
 def check_login():
-    # Safely access state with default fallback just in case
     username = st.session_state.get("username_input", "")
     password = st.session_state.get("password_input", "")
     
@@ -56,7 +62,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v68.2 Stable Login)
+#  TITAN STRATEGY APP (v68.3 Reload Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -72,8 +78,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v68.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Login Fixed")
+st.title(f"🛡️ Titan Strategy v68.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Modules Reloaded")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -105,7 +111,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
-        # Calculate VolSMA FIRST
+        # Calculate VolSMA FIRST because calc_smart_money needs it
         df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
         
         df['SMA8'] = tm.calc_sma(df['Close'], 8)
@@ -148,7 +154,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
 
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
         
-        # VSA CALL
+        # --- VSA CALL (Safe now due to reload) ---
         inst_activity = tm.calc_smart_money(df)
         
         ad_score_ok = False
