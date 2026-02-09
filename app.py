@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.0 Restored Upgrades)
+#  TITAN STRATEGY APP (v61.1 Integrated Fixes)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -68,8 +68,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v61.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Global UI & SPY Benchmarking")
+st.title(f"🛡️ Titan Strategy v61.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Fixed Indices Logic & Cleanup")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -96,7 +96,7 @@ def calc_rsi(series, length=14):
         return 100 - (100 / (1 + rs))
     except: return pd.Series(50, index=series.index)
 
-# --- ZIG ZAG ENGINE (SYNTAX SAFE) ---
+# --- ZIG ZAG ENGINE ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
     pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
@@ -105,7 +105,6 @@ def calc_structure(df, deviation_pct=0.035):
         if trend == 1:
             if price > last_val:
                 last_val = price
-                # Expanded logic to prevent SyntaxError
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
             elif price < last_val * (1 - deviation_pct):
@@ -172,7 +171,7 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
 def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
     status_map = {}
     try:
-        # 1. Standard Rotation
+        # 1. Main Rotation
         all_tickers = list(data_map.keys())
         wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
         if not wide_df.empty:
@@ -188,7 +187,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
                         else: status_map[t] = "IMPROVING"
                     except: continue
         
-        # 2. SPY vs IEF Special Case (For Screener)
+        # 2. SPY vs IEF Special Case
         if "SPY" in data_map and "IEF" in data_map:
             spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
             rs, ms = calculate_rrg_math(spy_ief, "IEF")
@@ -205,17 +204,22 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
     fig = go.Figure()
-    # Use global setting
     if is_dark:
         bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
     else:
         bg_col, text_col = "white", "black"; c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"; template = "plotly_white"
 
     has_data = False
-    # Dynamic Scaling Arrays
     x_vals, y_vals = [], []
 
-    for ticker in labels_map.keys():
+    # THE FIX: Iterate through actual columns in dataframe, looking up label if exists
+    # This fixes the "Invisible SPY" issue where SPY wasn't in labels_map
+    plot_tickers = list(labels_map.keys())
+    # If SPY is in the data but not in the map, add it
+    if "SPY" in ratios.columns and "SPY" not in plot_tickers:
+        plot_tickers.append("SPY")
+
+    for ticker in plot_tickers:
         if ticker not in ratios.columns: continue
         xt = ratios[ticker].tail(5); yt = momentums[ticker].tail(5)
         if len(xt) < 5: continue
@@ -228,12 +232,15 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
         elif cx < 100 and cy < 100: color = c_lag
         else: color = c_imp
         
+        # Use config label if avail, else ticker
+        disp_name = labels_map.get(ticker, ticker)
+        
         fig.add_trace(go.Scatter(x=xt, y=yt, mode='lines', line=dict(color=color, width=2, shape='spline'), opacity=0.6, showlegend=False, hoverinfo='skip'))
-        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[ticker], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{labels_map.get(ticker, ticker)}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
+        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[disp_name], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{disp_name}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
 
     if not has_data: return None
     
-    # Auto-Range Calculation
+    # Auto-Range with "Infinite" Backgrounds
     min_x, max_x = min(x_vals + [96]), max(x_vals + [104])
     min_y, max_y = min(y_vals + [96]), max(y_vals + [104])
     buff_x = (max_x - min_x) * 0.05; buff_y = (max_y - min_y) * 0.05
@@ -241,11 +248,12 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
 
     op = 0.1 if is_dark else 0.05
     fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
-    # Backgrounds (oversized to cover dynamic range)
-    fig.add_shape(type="rect", x0=100, y0=100, x1=rx[1]*1.5, y1=ry[1]*1.5, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=100, y0=ry[0]*1.5, x1=rx[1]*1.5, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=rx[0]*1.5, y0=ry[0]*1.5, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=rx[0]*1.5, y0=100, x1=100, y1=ry[1]*1.5, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
+    
+    # Backgrounds extend to +/- 500 to prevent cutoff
+    fig.add_shape(type="rect", x0=100, y0=100, x1=500, y1=500, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=100, y0=-500, x1=500, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=-500, y0=-500, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=-500, y0=100, x1=100, y1=500, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
     
     fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=rx, showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=ry, showgrid=False, title="RS-Momentum (Velocity)"))
     fig.add_annotation(x=rx[1], y=ry[1], text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
@@ -254,7 +262,7 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     fig.add_annotation(x=rx[0], y=ry[1], text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
     return fig
 
-# --- STYLING (CSS SAFE) ---
+# --- STYLING ---
 def style_final(styler):
     def color_rotation(val):
         if "LEADING" in val: return 'color: #00FF00; font-weight: bold'
@@ -263,7 +271,6 @@ def style_final(styler):
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
     def color_rsi(val):
-        # HTML handled in scanner loop
         return ''
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
@@ -274,7 +281,7 @@ def style_final(styler):
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
-        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper()
+        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper()
         if "AVOID" in act: pass
         elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
@@ -503,20 +510,6 @@ if st.session_state.run_analysis:
         else: st.info("No active trades.")
         st.write("---")
 
-        # 3. BENCHMARK
-        shadow_shares_total = pf_df['Shadow_SPY'].sum()
-        spy_data = master_data.get("SPY")
-        if spy_data is not None:
-            curr_spy = spy_data['Close'].iloc[-1]
-            bench_val = shadow_shares_total * curr_spy
-            alpha = total_net_worth - bench_val
-            alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
-            c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
-            c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
-            st.write("---")
-
         # 4. MARKET HEALTH (RESTORED FULL)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
@@ -737,7 +730,7 @@ if st.session_state.run_analysis:
 
     if mode == "Sector Rotation":
         st.subheader("🔄 Relative Rotation Graphs (RRG)")
-        is_dark = st.toggle("🌙 Dark Mode", value=True)
+        is_dark = st.session_state.get('is_dark', True) # Use global setting
         rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
         
         if rrg_mode == "Indices":
@@ -751,7 +744,9 @@ if st.session_state.run_analysis:
             if st.button("Run Indices"):
                 wide_df = prepare_rrg_inputs(master_data, idx_list, tgt)
                 r, m = calculate_rrg_math(wide_df, tgt)
-                st.session_state['fig_idx'] = plot_rrg_chart(r, m, tc.RRG_INDICES, f"Indices vs {tgt}", is_dark)
+                # THE FIX: Explicitly pass correct labels map so SPY is drawn
+                lbls = tc.RRG_INDICES.copy(); lbls['SPY'] = 'S&P 500 (Eq)'
+                st.session_state['fig_idx'] = plot_rrg_chart(r, m, lbls, f"Indices vs {tgt}", is_dark)
             if 'fig_idx' in st.session_state: st.plotly_chart(st.session_state['fig_idx'], use_container_width=True)
 
         elif rrg_mode == "Sectors":
