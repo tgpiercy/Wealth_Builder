@@ -29,7 +29,7 @@ def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14, 
     ratio_mean = rs_ratio.rolling(window=len_mom).mean()
     rs_mom = 100 * (rs_ratio / ratio_mean)
     
-    # 5. SMOOTHING (The Fix)
+    # 5. SMOOTHING
     rs_ratio_smooth = rs_ratio.rolling(window=smooth_period).mean()
     rs_mom_smooth = rs_mom.rolling(window=smooth_period).mean()
     
@@ -90,15 +90,15 @@ def get_heading_from_tail(x_series, y_series):
     
     angle = math.degrees(math.atan2(dy, dx))
     
-    if -22.5 <= angle < 22.5: return f"<span {style}>➡️</span>"   # E
-    elif 22.5 <= angle < 67.5: return f"<span {style}>↗️</span>"  # NE
-    elif 67.5 <= angle < 112.5: return f"<span {style}>⬆️</span>" # N
-    elif 112.5 <= angle < 157.5: return f"<span {style}>↖️</span>" # NW
-    elif 157.5 <= angle <= 180: return f"<span {style}>⬅️</span>"  # W
-    elif -180 <= angle < -157.5: return f"<span {style}>⬅️</span>" # W (Wrap)
-    elif -157.5 <= angle < -112.5: return f"<span {style}>↙️</span>" # SW
-    elif -112.5 <= angle < -67.5: return f"<span {style}>⬇️</span>" # S
-    elif -67.5 <= angle < -22.5: return f"<span {style}>↘️</span>" # SE
+    if -22.5 <= angle < 22.5: return f"<span {style}>➡️</span>"
+    elif 22.5 <= angle < 67.5: return f"<span {style}>↗️</span>"
+    elif 67.5 <= angle < 112.5: return f"<span {style}>⬆️</span>"
+    elif 112.5 <= angle < 157.5: return f"<span {style}>↖️</span>"
+    elif 157.5 <= angle <= 180: return f"<span {style}>⬅️</span>"
+    elif -180 <= angle < -157.5: return f"<span {style}>⬅️</span>"
+    elif -157.5 <= angle < -112.5: return f"<span {style}>↙️</span>"
+    elif -112.5 <= angle < -67.5: return f"<span {style}>⬇️</span>"
+    elif -67.5 <= angle < -22.5: return f"<span {style}>↘️</span>"
     
     return f"<span {style}>➡️</span>"
 
@@ -140,7 +140,6 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
             except:
                 snapshot[t] = "UNKNOWN"
 
-    # Special Exception: SPY vs IEF
     if "SPY" in master_data and "IEF" in master_data:
         try:
             spy_s = master_data["SPY"]['Close'].resample('W-FRI').last().ffill()
@@ -164,26 +163,20 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
 
 def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
     """
-    Plots RRG Scatter with Tails (5-week smooth).
-    AUTO-SCALING ENABLED (Fixed range removed).
+    Plots RRG Scatter with Tails.
+    Features: 
+    1. Dynamic Zoom (Smart Auto-Scaling)
+    2. Strict Ticker Labels
+    3. Smoothed Tails
     """
     fig = go.Figure()
     
     bg_color = "#1e1e1e" if is_dark else "#ffffff"
     grid_color = "#333" if is_dark else "#ddd"
     
-    # Quadrants - Drawn as infinite shapes or large enough rectangles
-    # Since we want auto-scale, we draw shapes relative to center (100,100)
-    # We use 'layer="below"' so data is on top.
-    
-    # Leading (NE)
-    fig.add_shape(type="rect", x0=100, y0=100, x1=200, y1=200, fillcolor="rgba(0,255,0,0.1)", line_width=0, layer="below")
-    # Improving (NW)
-    fig.add_shape(type="rect", x0=0, y0=100, x1=100, y1=200, fillcolor="rgba(0,0,255,0.1)", line_width=0, layer="below")
-    # Lagging (SW)
-    fig.add_shape(type="rect", x0=0, y0=0, x1=100, y1=100, fillcolor="rgba(255,0,0,0.1)", line_width=0, layer="below")
-    # Weakening (SE)
-    fig.add_shape(type="rect", x0=100, y0=0, x1=200, y1=100, fillcolor="rgba(255,255,0,0.1)", line_width=0, layer="below")
+    # Track min/max to force auto-scale later
+    all_x = []
+    all_y = []
 
     for col in r_df.columns:
         valid_idx = r_df[col].dropna().index.intersection(m_df[col].dropna().index)
@@ -193,6 +186,10 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         x_tail = r_df.loc[valid_idx, col].iloc[-5:] 
         y_tail = m_df.loc[valid_idx, col].iloc[-5:] 
         
+        # Collect points for auto-scaling
+        all_x.extend(x_tail.values)
+        all_y.extend(y_tail.values)
+        
         curr_x = x_tail.iloc[-1]
         curr_y = y_tail.iloc[-1]
         
@@ -201,7 +198,7 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         elif curr_x < 100 and curr_y < 100: color = '#ff4444' 
         else: color = '#ffff00'
         
-        # Label is TICKER only (column name)
+        # STRICT TICKER LABEL (Ignore label_map values, use key/col only)
         label = col 
         
         fig.add_trace(go.Scatter(
@@ -218,11 +215,33 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
             showlegend=False
         ))
 
+    # --- SMART SCALING LOGIC ---
+    if all_x and all_y:
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        
+        # Add padding (5% or minimum 2 units)
+        pad_x = max(2.0, (max_x - min_x) * 0.1)
+        pad_y = max(2.0, (max_y - min_y) * 0.1)
+        
+        x_range = [min_x - pad_x, max_x + pad_x]
+        y_range = [min_y - pad_y, max_y + pad_y]
+    else:
+        # Default fallback if no data
+        x_range = [96, 104]
+        y_range = [96, 104]
+
+    # Draw Infinite Quadrants (using calculated range + massive buffer)
+    # This ensures background covers the view without breaking auto-scale
+    fig.add_shape(type="rect", x0=100, y0=100, x1=x_range[1]+100, y1=y_range[1]+100, fillcolor="rgba(0,255,0,0.1)", line_width=0, layer="below") # Leading
+    fig.add_shape(type="rect", x0=x_range[0]-100, y0=100, x1=100, y1=y_range[1]+100, fillcolor="rgba(0,0,255,0.1)", line_width=0, layer="below") # Improving
+    fig.add_shape(type="rect", x0=x_range[0]-100, y0=y_range[0]-100, x1=100, y1=100, fillcolor="rgba(255,0,0,0.1)", line_width=0, layer="below") # Lagging
+    fig.add_shape(type="rect", x0=100, y0=y_range[0]-100, x1=x_range[1]+100, y1=100, fillcolor="rgba(255,255,0,0.1)", line_width=0, layer="below") # Weakening
+
     fig.update_layout(
         title=title,
-        # REMOVED FIXED RANGES for Auto-Scaling
-        xaxis=dict(title="RS-Ratio (Trend)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white'),
-        yaxis=dict(title="RS-Momentum (Velocity)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white'),
+        xaxis=dict(title="RS-Ratio (Trend)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white', range=x_range),
+        yaxis=dict(title="RS-Momentum (Velocity)", showgrid=True, gridcolor=grid_color, zeroline=True, zerolinecolor='white', range=y_range),
         paper_bgcolor=bg_color, plot_bgcolor=bg_color,
         font=dict(color="white" if is_dark else "black"),
         width=1000, height=800, showlegend=False,
