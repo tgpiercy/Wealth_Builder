@@ -11,7 +11,7 @@ def calc_rsi(series, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def calc_ad(high, low, close, volume):
+def calc_ad(high, low, close, volume): 
     # Money Flow Multiplier
     mfm = ((close - low) - (high - close)) / (high - low)
     mfm = mfm.replace([np.inf, -np.inf], 0).fillna(0)
