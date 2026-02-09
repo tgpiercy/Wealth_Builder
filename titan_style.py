@@ -12,6 +12,7 @@ def color_action(val):
     if 'SCOUT' in val: return 'color: #00bfff; font-weight: bold'
     if 'WATCH' in val: return 'color: #ffff00; font-weight: bold'
     if 'CAUTION' in val: return 'color: #ffaa00; font-weight: bold'
+    if 'LOCKED' in val: return 'color: #888888; font-weight: bold; font-style: italic' # Grey for Sector Lock
     if 'AVOID' in val: return 'color: #ff4444'
     return 'color: white'
 
@@ -66,9 +67,7 @@ def color_volume(val):
 
 def color_inst_activity(val):
     val = str(val).upper()
-    # Bullish States
     if 'ACCUMULATION' in val or 'BREAKOUT' in val: return 'color: #00ff00'
-    # Bearish States
     if 'DISTRIBUTION' in val or 'LIQUIDATION' in val or 'SELLING' in val or 'CAPITULATION' in val: return 'color: #ff4444'
     return 'color: white'
 
@@ -82,7 +81,7 @@ def style_final(styler):
     styler.applymap(color_structure, subset=['Structure']) 
     styler.applymap(color_ad_breadth, subset=['A/D Breadth'])
     styler.applymap(color_volume, subset=['Volume']) 
-    styler.applymap(color_inst_activity, subset=['Institutional<br>Activity']) # New Coloring Applied
+    styler.applymap(color_inst_activity, subset=['Institutional<br>Activity'])
     styler.applymap(color_action, subset=['Action'])
 
     # 2. Global Table Formatting
