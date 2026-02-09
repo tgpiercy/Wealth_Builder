@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.6 Caching & Performance)
+#  TITAN STRATEGY APP (v63.7 Duplicate Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: High-Performance Caching")
+st.title(f"🛡️ Titan Strategy v63.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Master Table")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -93,7 +93,10 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     results = []
     analysis_db = {}
     
-    for t in scan_list:
+    # DEDUPLICATION: Ensure we process each ticker exactly once
+    unique_scan_list = sorted(list(set(scan_list)))
+    
+    for t in unique_scan_list:
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
@@ -428,6 +431,8 @@ if st.session_state.run_analysis:
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
     all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X", "IEF", "RSP", "SPY", "^VIX"] 
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
+    # DEDUPLICATION FOR DATA FETCHING
+    all_tickers = sorted(list(set(all_tickers)))
     
     # --- STEP 1: FETCH DATA (Cached) ---
     master_data = fetch_master_data(all_tickers)
@@ -447,10 +452,9 @@ if st.session_state.run_analysis:
     risk_per_trade = BASE_RISK if mkt_score >= 8 else (BASE_RISK * 0.5 if mkt_score >= 5 else 0)
     
     # --- STEP 3: RUN STRATEGY ENGINE (Cached) ---
-    # We pass 'rrg_snapshot' as a kwarg or calc it here. RRG is fast enough to run here or separate.
-    # To keep cache clean, we run RRG snapshot here and pass it in.
     rrg_snapshot = tr.generate_full_rrg_snapshot(master_data, "SPY")
     
+    # Deduped list is passed to engine (redundant but safe)
     scan_results, analysis_db = run_strategy_engine(master_data, all_tickers, risk_per_trade, rrg_snapshot)
 
     # --- STATE-BASED NAVIGATION ---
