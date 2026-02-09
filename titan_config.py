@@ -1,5 +1,5 @@
 # ==============================================================================
-#  TITAN STRATEGY CONFIGURATION (v65.9 - Clean List)
+#  TITAN STRATEGY CONFIGURATION (v66.0 - Market Order)
 # ==============================================================================
 
 # --- AUTHENTICATION ---
@@ -11,13 +11,13 @@ CREDENTIALS = {
 # --- MASTER DATA MAP ---
 # Format: { Ticker : (Display_Category, Benchmark_Ticker) }
 DATA_MAP = {
-    # --- 01. MARKETS ---
+    # --- 01. MARKETS (REORDERED) ---
     "SPY": ("01. MARKETS", "SPY"),
     "RSP": ("01. MARKETS", "SPY"),
     "DIA": ("01. MARKETS", "SPY"),
-    "QQQ": ("01. MARKETS", "SPY"),
     "IWM": ("01. MARKETS", "SPY"),
     "IWC": ("01. MARKETS", "SPY"),
+    "QQQ": ("01. MARKETS", "SPY"),
     "HXT.TO": ("01. MARKETS", "SPY"), # TSX 60
     "IEF": ("01. MARKETS", "SPY"),    # Bonds
     "^VIX": ("01. MARKETS", "SPY"),   # Volatility
@@ -132,10 +132,11 @@ DATA_MAP = {
 # 1. INDICES (Markets)
 RRG_INDICES = {
     "SPY": "S&P 500",
-    "QQQ": "Nasdaq 100",
+    "RSP": "S&P 500 Eq",
     "DIA": "Dow Jones",
     "IWM": "Russell 2000",
     "IWC": "Micro-Cap",
+    "QQQ": "Nasdaq 100",
     "HXT.TO": "TSX 60 (CAD)",
     "IEF": "Bonds (7-10Y)"
 }
