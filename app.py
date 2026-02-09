@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.8 Structure Fix)
+#  TITAN STRATEGY APP (v63.9 Clean UI)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.8 ({current_user.upper()})")
-st.caption("Institutional Protocol: Structure Logic Alignment")
+st.title(f"🛡️ Titan Strategy v63.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Output Mode")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -245,11 +245,11 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         rrg_phase = rrg_snapshot.get(t, "unknown").upper()
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
-        # Structure Logic: 18 > 40
-        struct_check = df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]
-        struct_msg = "BULLISH (18>40)" if struct_check else "BEARISH (18<40)"
-
-        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Msg": struct_msg, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+        # Structure Check (SMA 18 vs 40)
+        # We perform the check, but logic dictates: Only show if Passing.
+        struct_pass = df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]
+        
+        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Pass": struct_pass, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         # Filter Logic for Table
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
@@ -265,7 +265,16 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
             
-            if "AVOID" in final_decision and not is_blue_spike: disp_stop = ""; disp_shares = ""
+            # --- CLEAN OUTPUT LOGIC (v63.9) ---
+            # 1. Structure: Only show "BULLISH" if passed. Empty if failed.
+            disp_struct = "BULLISH" if struct_pass else ""
+            
+            # 2. Action: Only show text if NOT AVOID.
+            disp_action = final_decision if "AVOID" not in final_decision else ""
+            
+            # 3. Stop/Shares: Only show if Action is valid (not empty)
+            if disp_action == "" and not is_blue_spike: 
+                disp_stop = ""; disp_shares = ""
             else:
                 shares = int(final_risk / (dc['Close'] - smart_stop_val)) if (dc['Close'] - smart_stop_val) > 0 else 0
                 disp_stop = f"${smart_stop_val:.2f} (-{stop_pct:.1f}%)"; disp_shares = f"{shares} shares"
@@ -274,10 +283,10 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": rrg_phase,
                 "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
                 "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
-                "Structure": struct_msg,
+                "Structure": disp_struct,
                 "Ichimoku<br>Cloud": "PASS" if (wc['Close']>wc['Cloud_Top']) else "FAIL", "A/D Breadth": "STRONG" if ad_score_ok else "WEAK",
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
-                "Action": final_decision, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
+                "Action": disp_action, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
             }
             results.append(row)
             if t == "HXT.TO": row_cad = row.copy(); row_cad["Sector"] = "15. CANADA (HXT)"; row_cad["Rank"] = 0; results.append(row_cad)
