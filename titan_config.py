@@ -1,5 +1,5 @@
 # ==============================================================================
-#  TITAN STRATEGY CONFIGURATION (v66.8 - Consolidated Headers)
+#  TITAN STRATEGY CONFIGURATION (v66.9 - Full List Restored)
 # ==============================================================================
 
 # --- AUTHENTICATION ---
@@ -24,7 +24,6 @@ DATA_MAP = {
     "^VIX": ("01. MARKETS", "SPY"),
 
     # --- 02. SECTORS ---
-    # Includes all Tier 1, Tier 2, Defensive, and XBI
     "XLK": ("02. SECTORS", "SPY"), # Tech
     "XLC": ("02. SECTORS", "SPY"), # Comms
     "XLF": ("02. SECTORS", "SPY"), # Financials
@@ -36,7 +35,7 @@ DATA_MAP = {
     "XLP": ("02. SECTORS", "SPY"), # Staples
     "XLRE": ("02. SECTORS", "SPY"), # Real Estate
     "XLU": ("02. SECTORS", "SPY"), # Utilities
-    "XBI": ("02. SECTORS", "SPY"), # Biotech (Moved here per request)
+    "XBI": ("02. SECTORS", "SPY"), # Biotech
 
     # --- 03. THEMES ---
     "BOTZ": ("03. THEMES", "SPY"),
@@ -48,17 +47,62 @@ DATA_MAP = {
     "GLD": ("04. METALS", "SPY"),
     "SLV": ("04. METALS", "SPY"),
 
-    # --- 05. INDUSTRIES ---
-    # Grouped by header, sorted by sector logic
-    "IGV": ("05. INDUSTRIES", "XLK"),  # Software (Tech)
-    "SMH": ("05. INDUSTRIES", "XLK"),  # Semis (Tech)
-    "XOP": ("05. INDUSTRIES", "XLE"),  # E&P (Energy)
-    "KRE": ("05. INDUSTRIES", "XLF"),  # Reg Banks (Fin)
-    "ITA": ("05. INDUSTRIES", "XLI"),  # Aerospace (Ind)
-    "ITB": ("05. INDUSTRIES", "XLY"),  # Homebuilders (Disc)
+    # --- 05. INDUSTRIES (Specialized ETFs & Top Stocks) ---
+    
+    # Tech & AI
+    "IGV": ("05. INDUSTRIES", "XLK"),   # Software
+    "SMH": ("05. INDUSTRIES", "XLK"),   # Semis
+    "AIQ": ("05. INDUSTRIES", "BOTZ"),  # AI
+    "MSFT": ("05. INDUSTRIES", "XLK"),  # Microsoft
+    "NVDA": ("05. INDUSTRIES", "SMH"),  # Nvidia
+    "SMCI": ("05. INDUSTRIES", "XLK"),  # Super Micro
+    "DELL": ("05. INDUSTRIES", "XLK"),  # Dell
+    "ANET": ("05. INDUSTRIES", "XLK"),  # Arista
+    "WDC": ("05. INDUSTRIES", "XLK"),   # Western Digital
+    "PSTG": ("05. INDUSTRIES", "XLK"),  # Pure Storage
+
+    # Comms
+    "META": ("05. INDUSTRIES", "XLC"),  # Meta
+    "GOOGL": ("05. INDUSTRIES", "XLC"), # Google
+
+    # Energy & Clean Energy
+    "XOP": ("05. INDUSTRIES", "XLE"),   # E&P
+    "OIH": ("05. INDUSTRIES", "XLE"),   # Oil Services
+    "MLPX": ("05. INDUSTRIES", "XLE"),  # Midstream
+    "TAN": ("05. INDUSTRIES", "ICLN"),  # Solar
+    "NLR": ("05. INDUSTRIES", "ICLN"),  # Nuclear
+    "URA": ("05. INDUSTRIES", "ICLN"),  # Uranium
+
+    # Financials
+    "KRE": ("05. INDUSTRIES", "XLF"),   # Reg Banks
+    "KBE": ("05. INDUSTRIES", "XLF"),   # Banks
+    "IAK": ("05. INDUSTRIES", "XLF"),   # Insurance
+
+    # Industrials
+    "ITA": ("05. INDUSTRIES", "XLI"),   # Aerospace
+    "IYT": ("05. INDUSTRIES", "XLI"),   # Transport
+    "PAVE": ("05. INDUSTRIES", "XLI"),  # Infrastructure
+
+    # Materials & Miners
+    "GDXJ": ("05. INDUSTRIES", "GDX"),  # Jr Miners
+    "SIL": ("05. INDUSTRIES", "GDX"),   # Silver Miners
+    "COPX": ("05. INDUSTRIES", "XLB"),  # Copper
+    "SLX": ("05. INDUSTRIES", "XLB"),   # Steel
+    "MOO": ("05. INDUSTRIES", "XLB"),   # Agribusiness
+    "AA": ("05. INDUSTRIES", "XLB"),    # Alcoa
+    "DD": ("05. INDUSTRIES", "XLB"),    # DuPont
+
+    # Healthcare & Biotech
+    "IBB": ("05. INDUSTRIES", "XBI"),   # Biotech
+    "ARKG": ("05. INDUSTRIES", "XBI"),  # Genomics
+    "PPH": ("05. INDUSTRIES", "XLV"),   # Pharma
+    "IHI": ("05. INDUSTRIES", "XLV"),   # Med Devices
+
+    # Discretionary
+    "ITB": ("05. INDUSTRIES", "XLY"),   # Homebuilders
+    "AMZN": ("05. INDUSTRIES", "XLY"),  # Amazon
 
     # --- 06. CANADA ---
-    # Individual TSX Stocks
     "RY.TO": ("06. CANADA", "HXT.TO"),
     "BN.TO": ("06. CANADA", "HXT.TO"),
     "CNQ.TO": ("06. CANADA", "HXT.TO"),
@@ -68,39 +112,6 @@ DATA_MAP = {
     "CSU.TO": ("06. CANADA", "HXT.TO"),
     "NTR.TO": ("06. CANADA", "HXT.TO"),
     "TECK-B.TO": ("06. CANADA", "HXT.TO"),
-    
-    # --- DRILL DOWN DATA ONLY (HIDDEN FROM SCANNER) ---
-    "AIQ": ("99. DATA", "BOTZ"),
-    "IBB": ("99. DATA", "XBI"),
-    "ARKG": ("99. DATA", "XBI"),
-    "TAN": ("99. DATA", "ICLN"),
-    "NLR": ("99. DATA", "ICLN"),
-    "URA": ("99. DATA", "ICLN"),
-    "GDXJ": ("99. DATA", "GDX"),
-    "SIL": ("99. DATA", "GDX"),
-    "COPX": ("99. DATA", "XLB"),
-    "AA": ("99. DATA", "XLB"),
-    "SLX": ("99. DATA", "XLB"),
-    "DD": ("99. DATA", "XLB"),
-    "MOO": ("99. DATA", "XLB"),
-    "META": ("99. DATA", "XLC"),
-    "GOOGL": ("99. DATA", "XLC"),
-    "OIH": ("99. DATA", "XLE"),
-    "MLPX": ("99. DATA", "XLE"),
-    "KBE": ("99. DATA", "XLF"),
-    "IAK": ("99. DATA", "XLF"),
-    "IYT": ("99. DATA", "XLI"),
-    "PAVE": ("99. DATA", "XLI"),
-    "SMCI": ("99. DATA", "XLK"),
-    "DELL": ("99. DATA", "XLK"),
-    "WDC": ("99. DATA", "XLK"),
-    "PSTG": ("99. DATA", "XLK"),
-    "ANET": ("99. DATA", "XLK"),
-    "MSFT": ("99. DATA", "XLK"),
-    "NVDA": ("99. DATA", "XLK"),
-    "PPH": ("99. DATA", "XLV"),
-    "IHI": ("99. DATA", "XLV"),
-    "AMZN": ("99. DATA", "XLY"),
 }
 
 # --- RRG GROUPS (Unchanged) ---
