@@ -6,19 +6,15 @@ import os
 import time
 from datetime import datetime, timedelta
 
-# --- IMPORT CONFIG ---
+# --- IMPORT MODULES ---
 try:
     import titan_config as tc
-except ImportError:
-    st.error("⚠️ CRITICAL ERROR: `titan_config.py` is missing. Please create it.")
+    import titan_math as tm
+    import titan_rrg as tr
+    import titan_style as ts
+except ImportError as e:
+    st.error(f"⚠️ CRITICAL ERROR: Missing Module. {e}")
     st.stop()
-
-# --- SAFE IMPORT FOR PLOTLY ---
-try:
-    import plotly.graph_objects as go
-except ImportError:
-    st.warning("⚠️ Plotly not found. RRG Charts will not work. (pip install plotly)")
-    go = None
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Titan Strategy", layout="wide")
@@ -51,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.1 Integrated Fixes)
+#  TITAN STRATEGY APP (v61.7 Modular Controller)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -68,70 +64,19 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v61.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Fixed Indices Logic & Cleanup")
-
-# --- CALCULATIONS ---
-def calc_sma(series, length): return series.rolling(window=length).mean()
-def calc_ad(high, low, close, volume):
-    mfm = ((close - low) - (high - close)) / (high - low); mfm = mfm.fillna(0.0); mfv = mfm * volume
-    return mfv.cumsum()
-def calc_ichimoku(high, low, close):
-    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
-    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a = ((tenkan + kijun) / 2).shift(26); span_b = ((high.rolling(52).max() + low.rolling(52).min()) / 2).shift(26)
-    return span_a, span_b
-def calc_atr(high, low, close, length=14):
-    try:
-        tr1 = high - low; tr2 = abs(high - close.shift(1)); tr3 = abs(low - close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        return tr.ewm(com=length-1, adjust=False).mean()
-    except: return pd.Series(0, index=close.index)
-def calc_rsi(series, length=14):
-    try:
-        delta = series.diff(); gain = delta.clip(lower=0); loss = -delta.clip(upper=0)
-        avg_gain = gain.ewm(com=length-1, adjust=False).mean()
-        avg_loss = loss.ewm(com=length-1, adjust=False).mean()
-        rs = avg_gain / avg_loss; rs = rs.fillna(0)
-        return 100 - (100 / (1 + rs))
-    except: return pd.Series(50, index=series.index)
-
-# --- ZIG ZAG ENGINE ---
-def calc_structure(df, deviation_pct=0.035):
-    if len(df) < 50: return "None"
-    pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
-    for i in range(1, len(df)):
-        price = df['Close'].iloc[i]
-        if trend == 1:
-            if price > last_val:
-                last_val = price
-                if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
-                else: pivots.append((i, price, 1))
-            elif price < last_val * (1 - deviation_pct):
-                trend = -1; last_val = price; pivots.append((i, price, -1))
-        else:
-            if price < last_val:
-                last_val = price
-                if pivots[-1][2] == -1: pivots[-1] = (i, price, -1)
-                else: pivots.append((i, price, -1))
-            elif price > last_val * (1 + deviation_pct):
-                trend = 1; last_val = price; pivots.append((i, price, 1))
-    if len(pivots) < 3: return "Range"
-    return ("HH" if pivots[-1][1] > pivots[-3][1] else "LH") if pivots[-1][2] == 1 else ("LL" if pivots[-1][1] < pivots[-3][1] else "HL")
-
-def round_to_03_07(price):
-    if pd.isna(price): return 0.0
-    whole = int(price); candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
-    return min(candidates, key=lambda x: abs(x - price)) if candidates else price
+st.title(f"🛡️ Titan Strategy v61.7 ({current_user.upper()})")
+st.caption("Institutional Protocol: Modular Architecture")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
 def fetch_master_data(ticker_list):
+    """Downloads daily data for ALL tickers once."""
     unique_tickers = sorted(list(set(ticker_list))) 
     data_map = {}
     for t in unique_tickers:
         try:
-            fetch_sym = "SPY" if t == "MANL" else t
+            # Handle special ticker mapping if needed
+            fetch_sym = "SPY" if t == "MANL" else t 
             tk = yf.Ticker(fetch_sym)
             df = tk.history(period="2y", interval="1d")
             df.index = pd.to_datetime(df.index).tz_localize(None)
@@ -139,184 +84,6 @@ def fetch_master_data(ticker_list):
                 data_map[t] = df
         except: continue
     return data_map
-
-def prepare_rrg_inputs(data_map, tickers, benchmark):
-    df_wide = pd.DataFrame()
-    if benchmark in data_map:
-        bench_df = data_map[benchmark].resample('W-FRI').last()
-        df_wide[benchmark] = bench_df['Close']
-    for t in tickers:
-        if t in data_map and t != benchmark:
-            w_df = data_map[t].resample('W-FRI').last()
-            df_wide[t] = w_df['Close']
-    return df_wide.dropna()
-
-# --- RRG LOGIC ---
-def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
-    if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
-    df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
-    for col in price_data.columns:
-        if col != benchmark_col:
-            try:
-                rs = price_data[col] / price_data[benchmark_col]
-                mean = rs.rolling(window_rs).mean(); std = rs.rolling(window_rs).std()
-                ratio = 100 + ((rs - mean) / std) * 1.5
-                df_ratio[col] = ratio
-            except: continue
-    for col in df_ratio.columns:
-        try: df_mom[col] = 100 + (df_ratio[col] - df_ratio[col].rolling(window_mom).mean()) * 2
-        except: continue
-    return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
-
-def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
-    status_map = {}
-    try:
-        # 1. Main Rotation
-        all_tickers = list(data_map.keys())
-        wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
-        if not wide_df.empty:
-            r, m = calculate_rrg_math(wide_df, benchmark)
-            if not r.empty:
-                l_idx = r.index[-1]
-                for t in r.columns:
-                    try:
-                        vr, vm = r.at[l_idx, t], m.at[l_idx, t]
-                        if vr > 100 and vm > 100: status_map[t] = "LEADING"
-                        elif vr > 100 and vm < 100: status_map[t] = "WEAKENING"
-                        elif vr < 100 and vm < 100: status_map[t] = "LAGGING"
-                        else: status_map[t] = "IMPROVING"
-                    except: continue
-        
-        # 2. SPY vs IEF Special Case
-        if "SPY" in data_map and "IEF" in data_map:
-            spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
-            rs, ms = calculate_rrg_math(spy_ief, "IEF")
-            if not rs.empty:
-                l_idx = rs.index[-1]
-                vrs, vms = rs.at[l_idx, "SPY"], ms.at[l_idx, "SPY"]
-                if vrs > 100 and vms > 100: status_map["SPY"] = "LEADING"
-                elif vrs > 100 and vms < 100: status_map["SPY"] = "WEAKENING"
-                elif vrs < 100 and vms < 100: status_map["SPY"] = "LAGGING"
-                else: status_map["SPY"] = "IMPROVING"
-    except: pass
-    return status_map
-
-def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
-    if go is None: return None
-    fig = go.Figure()
-    if is_dark:
-        bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
-    else:
-        bg_col, text_col = "white", "black"; c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"; template = "plotly_white"
-
-    has_data = False
-    x_vals, y_vals = [], []
-
-    # THE FIX: Iterate through actual columns in dataframe, looking up label if exists
-    # This fixes the "Invisible SPY" issue where SPY wasn't in labels_map
-    plot_tickers = list(labels_map.keys())
-    # If SPY is in the data but not in the map, add it
-    if "SPY" in ratios.columns and "SPY" not in plot_tickers:
-        plot_tickers.append("SPY")
-
-    for ticker in plot_tickers:
-        if ticker not in ratios.columns: continue
-        xt = ratios[ticker].tail(5); yt = momentums[ticker].tail(5)
-        if len(xt) < 5: continue
-        has_data = True
-        cx, cy = xt.iloc[-1], yt.iloc[-1]
-        x_vals.extend(xt.values); y_vals.extend(yt.values)
-
-        if cx > 100 and cy > 100: color = c_lead
-        elif cx > 100 and cy < 100: color = c_weak
-        elif cx < 100 and cy < 100: color = c_lag
-        else: color = c_imp
-        
-        # Use config label if avail, else ticker
-        disp_name = labels_map.get(ticker, ticker)
-        
-        fig.add_trace(go.Scatter(x=xt, y=yt, mode='lines', line=dict(color=color, width=2, shape='spline'), opacity=0.6, showlegend=False, hoverinfo='skip'))
-        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[disp_name], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{disp_name}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
-
-    if not has_data: return None
-    
-    # Auto-Range with "Infinite" Backgrounds
-    min_x, max_x = min(x_vals + [96]), max(x_vals + [104])
-    min_y, max_y = min(y_vals + [96]), max(y_vals + [104])
-    buff_x = (max_x - min_x) * 0.05; buff_y = (max_y - min_y) * 0.05
-    rx = [min_x - buff_x, max_x + buff_x]; ry = [min_y - buff_y, max_y + buff_y]
-
-    op = 0.1 if is_dark else 0.05
-    fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
-    
-    # Backgrounds extend to +/- 500 to prevent cutoff
-    fig.add_shape(type="rect", x0=100, y0=100, x1=500, y1=500, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=100, y0=-500, x1=500, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=-500, y0=-500, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=-500, y0=100, x1=100, y1=500, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
-    
-    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=rx, showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=ry, showgrid=False, title="RS-Momentum (Velocity)"))
-    fig.add_annotation(x=rx[1], y=ry[1], text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
-    fig.add_annotation(x=rx[1], y=ry[0], text="WEAKENING", showarrow=False, font=dict(size=16, color=c_weak), xanchor="right", yanchor="bottom")
-    fig.add_annotation(x=rx[0], y=ry[0], text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
-    fig.add_annotation(x=rx[0], y=ry[1], text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
-    return fig
-
-# --- STYLING ---
-def style_final(styler):
-    def color_rotation(val):
-        if "LEADING" in val: return 'color: #00FF00; font-weight: bold'
-        if "WEAKENING" in val: return 'color: #FFFF00; font-weight: bold'
-        if "LAGGING" in val: return 'color: #FF4444; font-weight: bold'
-        if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
-        return ''
-    def color_rsi(val):
-        return ''
-    def color_inst(val):
-        if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
-        if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
-        if "DISTRIBUTION" in val or "LIQUIDATION" in val: return 'color: #FF4444; font-weight: bold' 
-        if "SELLING" in val: return 'color: #FFA500; font-weight: bold'      
-        return 'color: #CCFFCC' if "HH" in val else ('color: #FFCCCC' if "LL" in val else 'color: #888888')
-    def highlight_ticker_row(row):
-        styles = ['' for _ in row.index]
-        if 'Ticker' not in row.index: return styles
-        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper()
-        if "AVOID" in act: pass
-        elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
-        elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
-        elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
-        elif "CAUTION" in act: styles[idx] = 'background-color: #AA4400; color: white; font-weight: bold'
-        return styles
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
-
-def style_daily_health(styler):
-    def color_status(v):
-        if "PASS" in v or "NORMAL" in v or "CAUTIOUS" in v or "RISING" in v or "AGGRESSIVE" in v: return 'color: #00ff00; font-weight: bold'
-        if "FAIL" in v or "PANIC" in v or "DEFENSIVE" in v or "FALLING" in v or "CASH" in v: return 'color: #ff4444; font-weight: bold'
-        return 'color: white; font-weight: bold'
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'left'), ('background-color', '#111'), ('color', 'white'), ('font-size', '14px')]}, {'selector': 'td', 'props': [('text-align', 'left'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'border-color': '#444'}).set_properties(subset=['Indicator'], **{'color': 'white', 'font-weight': 'bold'}).map(color_status, subset=['Status']).hide(axis='index')
-
-def style_portfolio(styler):
-    def color_pl(val):
-        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%').replace('+','')) >= 0 else 'color: #ff4444; font-weight: bold'
-        except: return ''
-    def color_pl_dol(val):
-        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('$').replace('+','').replace(',','')) >= 0 else 'color: #ff4444; font-weight: bold'
-        except: return ''
-    def color_action(val): return 'color: #ff0000; font-weight: bold; background-color: #220000' if "EXIT" in val else ('color: #00ff00; font-weight: bold' if "HOLD" in val else 'color: #ffffff')
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["Gain/Loss ($)"]).map(color_action, subset=["Audit Action"]).hide(axis='index')
-
-def style_history(styler):
-    def color_pl(val):
-        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('%').replace('+','')) >= 0 else 'color: #ff4444; font-weight: bold'
-        except: return ''
-    def color_pl_dol(val):
-        try: return 'color: #00ff00; font-weight: bold' if float(val.strip('$').replace('+','').replace(',','')) >= 0 else 'color: #ff4444; font-weight: bold'
-        except: return ''
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px')]}]).map(color_pl, subset=["% Return"]).map(color_pl_dol, subset=["P/L"]).hide(axis='index')
-
-def fmt_delta(val): return f"-${abs(val):,.2f}" if val < 0 else f"${val:,.2f}"
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
@@ -408,8 +175,8 @@ with tab4:
     st.subheader("Calculator"); RISK_UNIT_BASE = st.number_input("Risk Unit", 100, value=2300); tk = st.text_input("Ticker").upper()
     if tk:
         try:
-            d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
-            stop = round_to_03_07(c - 2.618*atr)
+            d = yf.Ticker(tk).history("1mo"); c = d['Close'].iloc[-1]; atr = tm.calc_atr(d['High'], d['Low'], d['Close']).iloc[-1]
+            stop = tm.round_to_03_07(c - 2.618*atr)
             if c > stop:
                 sh = int(RISK_UNIT_BASE / (c - stop)) 
                 st.info(f"Entry: ${c:.2f} | Stop: ${stop:.2f} | Shares: {sh} | Cap: ${sh*c:,.0f}")
@@ -451,7 +218,7 @@ with tab5:
 @st.cache_data
 def generate_scanner_html(results_df):
     if results_df.empty: return ""
-    return results_df.style.pipe(style_final).to_html(escape=False)
+    return results_df.style.pipe(ts.style_final).to_html(escape=False)
 
 # --- MAIN EXECUTION ---
 if "run_analysis" not in st.session_state: st.session_state.run_analysis = False
@@ -469,7 +236,7 @@ if st.session_state.run_analysis:
     # --- MASTER DATA FETCH & RRG CALC ---
     with st.spinner('Downloading Unified Market Data...'):
         master_data = fetch_master_data(all_tickers)
-        rrg_snapshot = generate_full_rrg_snapshot(master_data, "SPY")
+        rrg_snapshot = tr.generate_full_rrg_snapshot(master_data, "SPY")
 
     # --- STATE-BASED NAVIGATION ---
     mode = st.radio("Navigation", ["Scanner", "Sector Rotation"], horizontal=True, key="main_nav")
@@ -502,15 +269,29 @@ if st.session_state.run_analysis:
         open_pl_cad = open_pl_val * cad_rate
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", fmt_delta(open_pl_cad))
-        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", fmt_delta(open_pl_val))
+        c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", ts.fmt_delta(open_pl_cad))
+        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", ts.fmt_delta(open_pl_val))
         c3.metric("Cash", f"${current_cash:,.2f}"); c4.metric("Equity", f"${eq_val:,.2f}")
         
-        if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
+        if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(ts.style_portfolio).to_html(), unsafe_allow_html=True)
         else: st.info("No active trades.")
         st.write("---")
 
-        # 4. MARKET HEALTH (RESTORED FULL)
+        # 3. BENCHMARK
+        shadow_shares_total = pf_df['Shadow_SPY'].sum()
+        spy_data = master_data.get("SPY")
+        if spy_data is not None:
+            curr_spy = spy_data['Close'].iloc[-1]
+            bench_val = shadow_shares_total * curr_spy
+            alpha = total_net_worth - bench_val
+            alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
+            c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
+            c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
+            st.write("---")
+
+        # 4. MARKET HEALTH
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
         mkt_score = 0; h_rows = []
         if spy is not None:
@@ -520,18 +301,18 @@ if st.session_state.run_analysis:
                 mkt_score += 9 if v < 17 else (6 if v < 20 else (3 if v < 25 else 0))
                 h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": s})
             
-            sc = spy.iloc[-1]['Close']; s18 = calc_sma(spy['Close'], 18).iloc[-1]; s8 = calc_sma(spy['Close'], 8).iloc[-1]
+            sc = spy.iloc[-1]['Close']; s18 = tm.calc_sma(spy['Close'], 18).iloc[-1]; s8 = tm.calc_sma(spy['Close'], 8).iloc[-1]
             if sc > s18: mkt_score += 1
             h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span style='color:#ff4444'>FAIL</span>"})
             
-            if s18 >= calc_sma(spy['Close'], 18).iloc[-2]: mkt_score += 1
-            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s18 >= calc_sma(spy['Close'], 18).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
+            if s18 >= tm.calc_sma(spy['Close'], 18).iloc[-2]: mkt_score += 1
+            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s18 >= tm.calc_sma(spy['Close'], 18).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
             
-            if s8 > calc_sma(spy['Close'], 8).iloc[-2]: mkt_score += 1
-            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s8 > calc_sma(spy['Close'], 8).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
+            if s8 > tm.calc_sma(spy['Close'], 8).iloc[-2]: mkt_score += 1
+            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s8 > tm.calc_sma(spy['Close'], 8).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
 
             if rsp is not None:
-                rc = rsp.iloc[-1]['Close']; r18 = calc_sma(rsp['Close'], 18).iloc[-1]
+                rc = rsp.iloc[-1]['Close']; r18 = tm.calc_sma(rsp['Close'], 18).iloc[-1]
                 if rc > r18: mkt_score += 1
                 h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc > r18 else "<span style='color:#ff4444'>FAIL</span>"})
             
@@ -542,10 +323,10 @@ if st.session_state.run_analysis:
             h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
             h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
             st.subheader("🏥 Daily Market Health")
-            st.markdown(pd.DataFrame(h_rows).style.pipe(style_daily_health).to_html(escape=False), unsafe_allow_html=True)
+            st.markdown(pd.DataFrame(h_rows).style.pipe(ts.style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (CACHED)
+        # 5. SCANNER LOOP
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {}
@@ -553,12 +334,12 @@ if st.session_state.run_analysis:
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            df['SMA18'] = calc_sma(df['Close'], 18); df['SMA40'] = calc_sma(df['Close'], 40); df['AD'] = calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
+            df['SMA18'] = tm.calc_sma(df['Close'], 18); df['SMA40'] = tm.calc_sma(df['Close'], 40); df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
             # Pine Parity: Soft Distribution Check
-            ad_sma18 = calc_sma(df['AD'], 18); ad_sma40 = calc_sma(df['AD'], 40)
-            df['VolSMA'] = calc_sma(df['Volume'], 18); df['RSI5'] = calc_rsi(df['Close'], 5); df['RSI20'] = calc_rsi(df['Close'], 20)
+            ad_sma18 = tm.calc_sma(df['AD'], 18); ad_sma40 = tm.calc_sma(df['AD'], 40)
+            df['VolSMA'] = tm.calc_sma(df['Volume'], 18); df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
             
-            # --- RS CALC (Stability Band 0.5%) ---
+            # --- RS CALC ---
             bench_ticker = "SPY"
             if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
             
@@ -567,7 +348,7 @@ if st.session_state.run_analysis:
                 bench_series = master_data[bench_ticker]['Close']
                 common_idx = df.index.intersection(bench_series.index)
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
-                rs_sma18 = calc_sma(rs_series, 18)
+                rs_sma18 = tm.calc_sma(rs_series, 18)
                 
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
@@ -589,13 +370,13 @@ if st.session_state.run_analysis:
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
-            df_w['SMA8'] = calc_sma(df_w['Close'], 8); df_w['SMA18'] = calc_sma(df_w['Close'], 18); df_w['SMA40'] = calc_sma(df_w['Close'], 40)
-            span_a, span_b = calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close']); df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
+            df_w['SMA8'] = tm.calc_sma(df_w['Close'], 8); df_w['SMA18'] = tm.calc_sma(df_w['Close'], 18); df_w['SMA40'] = tm.calc_sma(df_w['Close'], 40)
+            span_a, span_b = tm.calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close']); df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
-            inst_activity = calc_structure(df)
+            inst_activity = tm.calc_structure(df)
             
-            # --- A/D WEAK DISTRIBUTION CHECK (Pine Match) ---
+            # --- A/D WEAK DISTRIBUTION CHECK ---
             ad_score_ok = False
             if len(ad_sma18) > 2:
                 ad_val = df['AD'].iloc[-1]
@@ -626,7 +407,7 @@ if st.session_state.run_analysis:
             if wc['Close'] > wc['Cloud_Top']: w_score += 1
             if wc['Close'] > wc['SMA8']: w_score += 1 
             
-            # --- DAILY SCORE (5 Pts - Pine Parity) ---
+            # --- DAILY SCORE ---
             d_chk = 0
             if ad_score_ok: d_chk += 1
             if rs_score_ok: d_chk += 1
@@ -648,36 +429,20 @@ if st.session_state.run_analysis:
             elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
             elif risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
-            atr = calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
-            raw_stop = dc['Close'] - (2.618 * atr); smart_stop_val = round_to_03_07(raw_stop)
+            atr = tm.calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
+            raw_stop = dc['Close'] - (2.618 * atr); smart_stop_val = tm.round_to_03_07(raw_stop)
             stop_dist = dc['Close'] - smart_stop_val; stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
-            num_col = "#FF4444"
-            if r5 >= r20: num_col = "#00BFFF" if (r20 > 50 and is_rising) else "#00FF00"
-            arrow_col = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
-            
-            # --- SPLIT COLORING (FIX) ---
-            # Num Color
+            # --- SPLIT RSI COLOR LOGIC ---
             if r5 >= r20:
-                if r20 > 50 and is_rising: n_c = "#00BFFF" # Blue Spike
-                elif is_rising: n_c = "#00FF00" # Green Build
-                else: n_c = "#FF4444" # Rollover
+                n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
             else:
-                if r20 > 50: n_c = "#FFA500" # Weakening
-                else: n_c = "#FF4444" # Bearish
-            
-            # Arrow Color
-            a_c = "#00FF00" if is_rising else "#FF4444"
-            
+                n_c = "#FFA500" if r20 > 50 else "#FF4444"
+            a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
             rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
             
-            # --- PHASE INJECTION ---
             rrg_phase = rrg_snapshot.get(t, "unknown").upper()
-            
-            # --- ROTATION SAFETY LOCK (v60.4) ---
-            if "WEAKENING" in rrg_phase and "BUY" in decision:
-                decision = "CAUTION"
-                reason = "Rotation Weak"
+            if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
             
             analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
@@ -695,10 +460,7 @@ if st.session_state.run_analysis:
                 if parent in analysis_db and "AVOID" in analysis_db[parent]['Decision']:
                     if t != parent: final_decision = "AVOID"; final_reason = "Sector Lock"
 
-            # Re-Check Logic for Blue Spike using clean data
-            # Now we have HTML in RSI_Msg, so we can't parse easily. Use decision logic.
             is_blue_spike = ("#00BFFF" in db['RSI_Msg']) and ("SPIKE" in db['Vol_Msg'])
-            
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
             
@@ -730,7 +492,7 @@ if st.session_state.run_analysis:
 
     if mode == "Sector Rotation":
         st.subheader("🔄 Relative Rotation Graphs (RRG)")
-        is_dark = st.session_state.get('is_dark', True) # Use global setting
+        is_dark = st.session_state.get('is_dark', True)
         rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
         
         if rrg_mode == "Indices":
@@ -742,18 +504,17 @@ if st.session_state.run_analysis:
             elif "SPY" in idx_list: idx_list.remove("SPY")
             
             if st.button("Run Indices"):
-                wide_df = prepare_rrg_inputs(master_data, idx_list, tgt)
-                r, m = calculate_rrg_math(wide_df, tgt)
-                # THE FIX: Explicitly pass correct labels map so SPY is drawn
+                wide_df = tr.prepare_rrg_inputs(master_data, idx_list, tgt)
+                r, m = tr.calculate_rrg_math(wide_df, tgt)
                 lbls = tc.RRG_INDICES.copy(); lbls['SPY'] = 'S&P 500 (Eq)'
-                st.session_state['fig_idx'] = plot_rrg_chart(r, m, lbls, f"Indices vs {tgt}", is_dark)
+                st.session_state['fig_idx'] = tr.plot_rrg_chart(r, m, lbls, f"Indices vs {tgt}", is_dark)
             if 'fig_idx' in st.session_state: st.plotly_chart(st.session_state['fig_idx'], use_container_width=True)
 
         elif rrg_mode == "Sectors":
             if st.button("Run Sectors"):
-                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_SECTORS.keys()), "SPY")
-                r, m = calculate_rrg_math(wide_df, "SPY")
-                st.session_state['fig_sec'] = plot_rrg_chart(r, m, tc.RRG_SECTORS, "Sectors vs SPY", is_dark)
+                wide_df = tr.prepare_rrg_inputs(master_data, list(tc.RRG_SECTORS.keys()), "SPY")
+                r, m = tr.calculate_rrg_math(wide_df, "SPY")
+                st.session_state['fig_sec'] = tr.plot_rrg_chart(r, m, tc.RRG_SECTORS, "Sectors vs SPY", is_dark)
             if 'fig_sec' in st.session_state: st.plotly_chart(st.session_state['fig_sec'], use_container_width=True)
 
         elif rrg_mode == "Drill-Down":
@@ -767,15 +528,15 @@ if st.session_state.run_analysis:
             
             if st.button(f"Run {name_dd}"):
                 comp_list = list(tc.RRG_INDUSTRY_MAP.get(sec_key, {}).keys())
-                wide_df = prepare_rrg_inputs(master_data, comp_list, bench_dd)
-                r, m = calculate_rrg_math(wide_df, bench_dd)
+                wide_df = tr.prepare_rrg_inputs(master_data, comp_list, bench_dd)
+                r, m = tr.calculate_rrg_math(wide_df, bench_dd)
                 all_labels = {**tc.RRG_INDUSTRY_MAP.get(sec_key, {}), **tc.RRG_SECTORS}
-                st.session_state['fig_dd'] = plot_rrg_chart(r, m, all_labels, f"{name_dd} vs {bench_dd}", is_dark)
+                st.session_state['fig_dd'] = tr.plot_rrg_chart(r, m, all_labels, f"{name_dd} vs {bench_dd}", is_dark)
             if 'fig_dd' in st.session_state: st.plotly_chart(st.session_state['fig_dd'], use_container_width=True)
 
         elif rrg_mode == "Themes":
             if st.button("Run Themes"):
-                wide_df = prepare_rrg_inputs(master_data, list(tc.RRG_THEMES.keys()), "SPY")
-                r, m = calculate_rrg_math(wide_df, "SPY")
-                st.session_state['fig_thm'] = plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
+                wide_df = tr.prepare_rrg_inputs(master_data, list(tc.RRG_THEMES.keys()), "SPY")
+                r, m = tr.calculate_rrg_math(wide_df, "SPY")
+                st.session_state['fig_thm'] = tr.plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
             if 'fig_thm' in st.session_state: st.plotly_chart(st.session_state['fig_thm'], use_container_width=True)
