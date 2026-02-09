@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v64.4 Metric Fix)
+#  TITAN STRATEGY APP (v65.0 RRG Tails)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v64.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Dashboard Fixed")
+st.title(f"🛡️ Titan Strategy v65.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Directional RRG")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -243,7 +243,8 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
         rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
         
-        rrg_phase = rrg_snapshot.get(t, "unknown").upper()
+        rrg_phase = rrg_snapshot.get(t, "unknown").upper() # Now includes Arrow!
+        
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
         # Structure Check (SMA 18 vs 40)
