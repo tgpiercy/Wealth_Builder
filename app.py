@@ -24,9 +24,18 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
 
+# --- FIX: INITIALIZE LOGIN KEYS ---
+# This prevents the AttributeError by ensuring keys exist before access
+if 'username_input' not in st.session_state:
+    st.session_state.username_input = ""
+if 'password_input' not in st.session_state:
+    st.session_state.password_input = ""
+
 def check_login():
-    username = st.session_state.username_input
-    password = st.session_state.password_input
+    # Safely access state with default fallback just in case
+    username = st.session_state.get("username_input", "")
+    password = st.session_state.get("password_input", "")
+    
     if username in tc.CREDENTIALS and tc.CREDENTIALS[username] == password:
         st.session_state.authenticated = True
         st.session_state.user = username
@@ -47,7 +56,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v68.1 Sync Fix)
+#  TITAN STRATEGY APP (v68.2 Stable Login)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +72,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v68.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: VSA & Sector Locks")
+st.title(f"🛡️ Titan Strategy v68.2 ({current_user.upper()})")
+st.caption("Institutional Protocol: Login Fixed")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -96,7 +105,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
-        # Calculate VolSMA FIRST because calc_smart_money needs it
+        # Calculate VolSMA FIRST
         df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
         
         df['SMA8'] = tm.calc_sma(df['Close'], 8)
@@ -139,7 +148,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
 
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
         
-        # --- VSA CALL (Now Safe) ---
+        # VSA CALL
         inst_activity = tm.calc_smart_money(df)
         
         ad_score_ok = False
