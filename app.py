@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v62.9 GW2 Scorecard Parity)
+#  TITAN STRATEGY APP (v63.0 Aligned Daily Scoring)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,7 +63,7 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v62.9 ({current_user.upper()})")
+st.title(f"🛡️ Titan Strategy v63.0 ({current_user.upper()})")
 st.caption("Institutional Protocol: GW2 Scorecard Alignment")
 
 # --- UNIFIED DATA ENGINE ---
@@ -340,11 +340,11 @@ if st.session_state.run_analysis:
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = tm.calc_sma(rs_series, 18)
                 
-                # [span_1](start_span)SCORECARD LOGIC: In Zone + Not Down[span_1](end_span)
+                # DAILY ALIGNMENT: Match Weekly Logic exactly
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
                     lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) # 0.5% tolerance
-                    rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2] # Must NOT be falling
+                    rs_not_down = tm.calc_rising(rs_sma18, 2) # Use smoothed "Rising" check to avoid Daily noise
                     rs_in_zone = curr_rs >= lower_band
                     
                     if rs_in_zone and rs_not_down: rs_score_ok = True
@@ -368,13 +368,13 @@ if st.session_state.run_analysis:
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
             inst_activity = tm.calc_structure(df)
             
-            # --- DAILY SCORE (5 Pts - GW2 SCORECARD) ---
-            # 1. Breadth (A/D)
+            # --- DAILY SCORE (5 Pts - ALIGNED) ---
+            # 1. Breadth (A/D) - Aligned with Weekly
             ad_score_ok = False
             if len(ad_sma18) > 2:
                 ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]
                 ad_lower_band = ad18 - (abs(ad18) * 0.005)
-                ad_not_down = ad18 >= ad_sma18.iloc[-2] # Strict Check
+                ad_not_down = tm.calc_rising(ad_sma18, 2) # Smoothed
                 ad_in_zone = ad_val >= ad_lower_band
                 
                 if ad_in_zone and ad_not_down: ad_score_ok = True
