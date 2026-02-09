@@ -5,11 +5,12 @@ def calc_sma(series, length):
     return series.rolling(window=length).mean()
 
 def calc_ad(high, low, close, volume):
-    # Pine Script divides Accumulation/Distribution by 1,000,000 for scaling
+    # Standard Accumulation/Distribution
     mfm = ((close - low) - (high - close)) / (high - low)
     mfm = mfm.fillna(0.0)
     mfv = mfm * volume
-    return mfv.cumsum() / 1000000.0
+    # Pine typically scales this; we keep raw but math logic handles relations
+    return mfv.cumsum()
 
 def calc_ichimoku(high, low, close):
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
@@ -43,17 +44,16 @@ def calc_rsi(series, length=14):
 
 def calc_rising(series, length=2):
     """
-    Matches Pine Script's ta.rising(source, length).
-    Returns True if current value is greater than previous for 'length' bars.
-    ta.rising(x, 2) -> x > x[1] AND x[1] > x[2]
+    Robust Rising Check (v62.8 Fix)
+    Instead of checking strict consecutive rises (which fails on flat data),
+    we check Net Displacement: Is Current >= Value 'length' bars ago?
+    This allows for flat consolidation or minor jitter within the trend.
     """
     if len(series) < length + 1: return False
-    res = True
-    for i in range(length):
-        if not (series.iloc[-(i+1)] > series.iloc[-(i+2)]):
-            res = False
-            break
-    return res
+    
+    # Current value vs Value 'length' bars ago
+    # Using >= allows "Flat" to pass as "Rising/Stable"
+    return series.iloc[-1] >= series.iloc[-(length + 1)]
 
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
