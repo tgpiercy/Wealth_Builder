@@ -1,7 +1,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-# Note: Redefining basic rolling calc here to keep module independent
+# --- RRG CALCULATIONS ---
 def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns: return pd.DataFrame(), pd.DataFrame()
     df_ratio = pd.DataFrame(); df_mom = pd.DataFrame()
@@ -46,7 +46,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
                         elif vr < 100 and vm < 100: status_map[t] = "LAGGING"
                         else: status_map[t] = "IMPROVING"
                     except: continue
-        # SPY vs IEF Check
+        
         if "SPY" in data_map and "IEF" in data_map:
             spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
             rs, ms = calculate_rrg_math(spy_ief, "IEF")
@@ -60,6 +60,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
     except: pass
     return status_map
 
+# --- PLOTTING ENGINE (CLEAN LABELS & NO HOVER) ---
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     fig = go.Figure()
     if is_dark:
@@ -86,26 +87,30 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
         elif cx < 100 and cy < 100: color = c_lag
         else: color = c_imp
         
-        # FIX: Get full name for tooltip, but use TICKER for chart label
-        full_name = labels_map.get(ticker, ticker)
-        
+        # 1. DRAW TAIL
         fig.add_trace(go.Scatter(
-            x=xt, y=yt, mode='lines', 
+            x=xt, y=yt, 
+            mode='lines', 
             line=dict(color=color, width=2, shape='spline'), 
-            opacity=0.6, showlegend=False, hoverinfo='skip'
+            opacity=0.6, 
+            showlegend=False, 
+            hoverinfo='skip' # No hover on tail
         ))
         
+        # 2. DRAW HEAD (LABEL = TICKER ONLY, NO POPUP)
         fig.add_trace(go.Scatter(
-            x=[cx], y=[cy], mode='markers+text', 
+            x=[cx], y=[cy], 
+            mode='markers+text', 
             marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), 
-            text=[ticker],  # <--- CHANGED FROM full_name TO ticker
+            text=[ticker],  # <--- FORCE TICKER ONLY
             textposition="top center", 
             textfont=dict(color=text_col), 
-            hovertemplate=f"<b>{full_name} ({ticker})</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"
+            hoverinfo='skip' # <--- COMPLETELY DISABLES POPUP
         ))
 
     if not has_data: return None
     
+    # Dynamic Scaling
     min_x, max_x = min(x_vals + [96]), max(x_vals + [104])
     min_y, max_y = min(y_vals + [96]), max(y_vals + [104])
     buff_x = (max_x - min_x) * 0.05; buff_y = (max_y - min_y) * 0.05
@@ -113,6 +118,8 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
 
     op = 0.1 if is_dark else 0.05
     fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
+    
+    # Infinite Backgrounds
     fig.add_shape(type="rect", x0=100, y0=100, x1=500, y1=500, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=100, y0=-500, x1=500, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
     fig.add_shape(type="rect", x0=-500, y0=-500, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
