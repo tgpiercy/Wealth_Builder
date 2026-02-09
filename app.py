@@ -5,7 +5,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime, timedelta
-import importlib # REQUIRED FOR RELOAD FIX
+import importlib 
 
 # --- IMPORT MODULES ---
 try:
@@ -14,7 +14,6 @@ try:
     import titan_rrg as tr
     import titan_style as ts
     
-    # --- FORCE RELOAD TO FIX ATTRIBUTE ERROR ---
     importlib.reload(tm)
     importlib.reload(tc)
     importlib.reload(tr)
@@ -32,16 +31,12 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user = None
 
-# Initialize keys to prevent AttributeError
-if 'username_input' not in st.session_state:
-    st.session_state.username_input = ""
-if 'password_input' not in st.session_state:
-    st.session_state.password_input = ""
+if 'username_input' not in st.session_state: st.session_state.username_input = ""
+if 'password_input' not in st.session_state: st.session_state.password_input = ""
 
 def check_login():
     username = st.session_state.get("username_input", "")
     password = st.session_state.get("password_input", "")
-    
     if username in tc.CREDENTIALS and tc.CREDENTIALS[username] == password:
         st.session_state.authenticated = True
         st.session_state.user = username
@@ -62,7 +57,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v68.3 Reload Fix)
+#  TITAN STRATEGY APP (v69.0 Logic Review)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -78,8 +73,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v68.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: Modules Reloaded")
+st.title(f"🛡️ Titan Strategy v69.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Logic Optimized")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -101,7 +96,7 @@ def fetch_master_data(ticker_list):
 @st.cache_data(show_spinner="Running Quantitative Analysis...")
 def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     """
-    Core Logic Engine (Pass 1 & Pass 2).
+    Core Logic Engine.
     """
     calculation_db = {}
     unique_scan_list = sorted(list(set(scan_list)))
@@ -111,7 +106,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
-        # Calculate VolSMA FIRST because calc_smart_money needs it
+        # Calculate VolSMA FIRST
         df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
         
         df['SMA8'] = tm.calc_sma(df['Close'], 8)
@@ -154,7 +149,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
 
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
         
-        # --- VSA CALL (Safe now due to reload) ---
+        # --- VSA CALL ---
         inst_activity = tm.calc_smart_money(df)
         
         ad_score_ok = False
@@ -211,6 +206,14 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
         if risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
+        # --- LOGIC UPGRADE: VSA VETO ---
+        # Prevent Buying into a Bull Trap (Upthrust/Dumping/Churning)
+        if "BUY" in decision or "SCOUT" in decision:
+            if "DUMPING" in final_inst_msg or "UPTHRUST" in final_inst_msg:
+                decision = "WATCH"; reason = "VSA Selling"
+            elif "CHURNING" in final_inst_msg:
+                decision = "WATCH"; reason = "VSA Churn"
+
         rrg_phase = rrg_snapshot.get(t, "UNKNOWN ➡️").upper()
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
@@ -220,7 +223,15 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         elif ad_score_ok: ad_msg = "NEUTRAL"
         else: ad_msg = "DISTRIBUTION"
 
-        calculation_db[t] = {"Decision": decision, "Reason": reason, "RRG": rrg_phase, "W_Score": w_score, "D_Score": d_chk, "Structure": "BULLISH" if struct_pass else "", "A/D": ad_msg, "Vol": vol_msg, "RSI": rsi_msg, "Inst": final_inst_msg, "Pulse": w_pulse, "W_SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL"}
+        calculation_db[t] = {
+            "Decision": decision, "Reason": reason, 
+            "RRG": rrg_phase, 
+            "W_Score": w_score, "D_Score": d_chk, 
+            "Structure": "BULLISH" if struct_pass else "", # Trend Stack
+            "A/D": ad_msg, 
+            "Vol": vol_msg, "RSI": rsi_msg, "Inst": final_inst_msg, 
+            "Pulse": w_pulse, "W_SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL"
+        }
 
     # PASS 2: Enforce Parent Lock
     results = []
@@ -245,7 +256,17 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             disp_action = final_decision if "AVOID" not in final_decision else ""
             sort_priority = TICKER_PRIORITY.get(t, 9999)
             
-            row = {"Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": data["RRG"], "Weekly<br>SMA8": data["W_SMA8"], "Weekly<br>Impulse": data["Pulse"], "Weekly<br>Score": data["W_Score"], "Daily<br>Score": data["D_Score"], "Structure": data["Structure"], "A/D Breadth": data["A/D"], "Volume": data["Vol"], "Dual RSI": data["RSI"], "Institutional<br>Activity": data["Inst"], "Action": disp_action, "Reasoning": final_reason, "Priority": sort_priority}
+            row = {
+                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": data["RRG"], 
+                "Weekly<br>SMA8": data["W_SMA8"], "Weekly<br>Impulse": data["Pulse"], 
+                "Weekly<br>Score": data["W_Score"], "Daily<br>Score": data["D_Score"], 
+                "Trend<br>Stack": data["Structure"], # Renamed Column Header
+                "A/D Breadth": data["A/D"], 
+                "Volume": data["Vol"], "Dual RSI": data["RSI"], 
+                "Institutional<br>Activity": data["Inst"], 
+                "Action": disp_action, "Reasoning": final_reason, 
+                "Priority": sort_priority
+            }
             results.append(row)
 
     return results, calculation_db
@@ -505,7 +526,7 @@ if st.session_state.run_analysis:
         if scan_results:
             df_final = pd.DataFrame(scan_results).sort_values("Priority", ascending=True)
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
+            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Trend<br>Stack", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
             st.warning("Scanner returned no results.")
