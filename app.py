@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v64.0 Info Density)
+#  TITAN STRATEGY APP (v64.1 Duplicates Fixed)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v64.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Enhanced Breadth Signals")
+st.title(f"🛡️ Titan Strategy v64.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Clean Master Table")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -192,7 +192,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 w_rs_in_zone = w_curr_rs >= w_lower_band
                 
                 if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
-        else: w_rs_score_ok = True
+            else: w_rs_score_ok = True
 
         w_score = 0
         if w_ad_score_ok: w_score += 1
@@ -227,13 +227,9 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             else: decision = "WATCH"; reason = "Daily Weak"
         else: decision = "AVOID"; reason = "Weekly Weak"
 
-        # Cloud Lock Logic (Hard Filter)
-        is_below_cloud = not (wc['Close'] > wc['Cloud_Top'])
-        if is_below_cloud: decision = "AVOID"; reason = "Below Cloud"
-        
-        # Impulse Lock Logic
+        # Re-introduced Cloud check as a hard filter instead of score
+        if not (wc['Close'] > wc['Cloud_Top']): decision = "AVOID"; reason = "Below Cloud"
         elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
-        
         if risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
         atr = tm.calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
@@ -274,7 +270,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
             
-            # --- CLEAN OUTPUT LOGIC (v64.0) ---
+            # --- CLEAN OUTPUT LOGIC ---
             disp_struct = "BULLISH" if struct_pass else ""
             disp_action = final_decision if "AVOID" not in final_decision else ""
             
@@ -289,14 +285,28 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
                 "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
                 "Structure": disp_struct,
-                # Removed Ichimoku Column (Logic is hidden lock)
                 "A/D Breadth": ad_msg,
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
                 "Action": disp_action, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
             }
-            results.append(row)
-            if t == "HXT.TO": row_cad = row.copy(); row_cad["Sector"] = "15. CANADA (HXT)"; row_cad["Rank"] = 0; results.append(row_cad)
-            if t in tc.SECTOR_ETFS: row_sec = row.copy(); row_sec["Sector"] = "02. SECTORS (SUMMARY)"; row_sec["Rank"] = 0; results.append(row_sec)
+            
+            # --- DEDUPLICATION LOGIC ---
+            # If it is a Sector ETF (XLK, HXT.TO), we force it to the "Summary" section logic ONLY.
+            # We skip adding it as a regular stock row to avoid duplication.
+            
+            is_summary_ticker = (t == "HXT.TO") or (t in tc.SECTOR_ETFS)
+            
+            if is_summary_ticker:
+                # Only add the summary row
+                if t == "HXT.TO": 
+                    row["Sector"] = "15. CANADA (HXT)"; row["Rank"] = 0
+                    results.append(row)
+                elif t in tc.SECTOR_ETFS:
+                    row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
+                    results.append(row)
+            else:
+                # Regular stock, add normally
+                results.append(row)
 
     return results, analysis_db
 
@@ -555,7 +565,6 @@ if st.session_state.run_analysis:
         if scan_results:
             df_final = pd.DataFrame(scan_results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            # COLS: Removed Ichimoku, Updated Structure
             cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
