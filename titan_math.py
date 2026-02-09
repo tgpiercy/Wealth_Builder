@@ -5,11 +5,9 @@ def calc_sma(series, length):
     return series.rolling(window=length).mean()
 
 def calc_ad(high, low, close, volume):
-    # Standard Accumulation/Distribution
     mfm = ((close - low) - (high - close)) / (high - low)
     mfm = mfm.fillna(0.0)
     mfv = mfm * volume
-    # Pine typically scales this; we keep raw but math logic handles relations
     return mfv.cumsum()
 
 def calc_ichimoku(high, low, close):
@@ -44,16 +42,21 @@ def calc_rsi(series, length=14):
 
 def calc_rising(series, length=2):
     """
-    Robust Rising Check (v62.8 Fix)
-    Instead of checking strict consecutive rises (which fails on flat data),
-    we check Net Displacement: Is Current >= Value 'length' bars ago?
-    This allows for flat consolidation or minor jitter within the trend.
+    STRICT PINE SCRIPT PARITY (ta.rising)
+    Returns True ONLY if values have increased consecutively for 'length' bars.
+    ta.rising(x, 2) --> x[0] > x[1] AND x[1] > x[2]
     """
     if len(series) < length + 1: return False
     
-    # Current value vs Value 'length' bars ago
-    # Using >= allows "Flat" to pass as "Rising/Stable"
-    return series.iloc[-1] >= series.iloc[-(length + 1)]
+    is_rising = True
+    # Iterate backwards from current (-1) to length
+    for i in range(1, length + 1):
+        curr = series.iloc[-i]
+        prev = series.iloc[-(i + 1)]
+        if curr <= prev:  # Strict: If any bar is flat or down, fail.
+            is_rising = False
+            break
+    return is_rising
 
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
