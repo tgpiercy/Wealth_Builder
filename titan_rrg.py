@@ -86,9 +86,23 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
         elif cx < 100 and cy < 100: color = c_lag
         else: color = c_imp
         
-        disp_name = labels_map.get(ticker, ticker)
-        fig.add_trace(go.Scatter(x=xt, y=yt, mode='lines', line=dict(color=color, width=2, shape='spline'), opacity=0.6, showlegend=False, hoverinfo='skip'))
-        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[disp_name], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{disp_name}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
+        # FIX: Get full name for tooltip, but use TICKER for chart label
+        full_name = labels_map.get(ticker, ticker)
+        
+        fig.add_trace(go.Scatter(
+            x=xt, y=yt, mode='lines', 
+            line=dict(color=color, width=2, shape='spline'), 
+            opacity=0.6, showlegend=False, hoverinfo='skip'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=[cx], y=[cy], mode='markers+text', 
+            marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), 
+            text=[ticker],  # <--- CHANGED FROM full_name TO ticker
+            textposition="top center", 
+            textfont=dict(color=text_col), 
+            hovertemplate=f"<b>{full_name} ({ticker})</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"
+        ))
 
     if not has_data: return None
     
@@ -110,4 +124,3 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     fig.add_annotation(x=rx[0], y=ry[0], text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
     fig.add_annotation(x=rx[0], y=ry[1], text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
     return fig
-
