@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.9 Modular & Stable)
+#  TITAN STRATEGY APP (v62.0 Unified Scoring)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -56,7 +56,6 @@ PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
 # --- GLOBAL SETTINGS (SIDEBAR) ---
 st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 
-# Global Dark Mode Logic
 if "is_dark" not in st.session_state:
     st.session_state.is_dark = True
 st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
@@ -64,18 +63,16 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v61.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: Modular Architecture")
+st.title(f"🛡️ Titan Strategy v62.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Unified Scoring Engine")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
 def fetch_master_data(ticker_list):
-    """Downloads daily data for ALL tickers once."""
     unique_tickers = sorted(list(set(ticker_list))) 
     data_map = {}
     for t in unique_tickers:
         try:
-            # Handle special ticker mapping if needed
             fetch_sym = "SPY" if t == "MANL" else t 
             tk = yf.Ticker(fetch_sym)
             df = tk.history(period="2y", interval="1d")
@@ -305,7 +302,6 @@ if st.session_state.run_analysis:
             col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
             msg = "AGGRESSIVE" if mkt_score >= 10 else ("CAUTIOUS" if mkt_score >= 8 else "DEFENSIVE")
             
-            # --- RISK DEFINITION ---
             BASE_RISK = 2300 
             risk_per_trade = BASE_RISK if mkt_score >= 8 else (BASE_RISK * 0.5 if mkt_score >= 5 else 0)
             
@@ -323,56 +319,97 @@ if st.session_state.run_analysis:
         for t in scan_list:
             if t not in master_data or len(master_data[t]) < 50: continue
             df = master_data[t].copy()
-            df['SMA18'] = tm.calc_sma(df['Close'], 18); df['SMA40'] = tm.calc_sma(df['Close'], 40); df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
-            # Pine Parity: Soft Distribution Check
-            ad_sma18 = tm.calc_sma(df['AD'], 18); ad_sma40 = tm.calc_sma(df['AD'], 40)
-            df['VolSMA'] = tm.calc_sma(df['Volume'], 18); df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
             
-            # --- RS CALC ---
+            # --- DAILY CALCULATIONS ---
+            df['SMA18'] = tm.calc_sma(df['Close'], 18)
+            df['SMA40'] = tm.calc_sma(df['Close'], 40)
+            df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
+            ad_sma18 = tm.calc_sma(df['AD'], 18); ad_sma40 = tm.calc_sma(df['AD'], 40)
+            df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
+            df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
+            
+            # --- RS CALC (DAILY) ---
             bench_ticker = "SPY"
             if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
-            
             rs_score_ok = False
             if bench_ticker in master_data:
                 bench_series = master_data[bench_ticker]['Close']
                 common_idx = df.index.intersection(bench_series.index)
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = tm.calc_sma(rs_series, 18)
-                
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
                     prev_rs_sma = rs_sma18.iloc[-2]
-                    
-                    upper_band = curr_rs_sma * 1.005
-                    lower_band = curr_rs_sma * 0.995
-                    
-                    rs_strong = curr_rs > upper_band
-                    rs_stable = (curr_rs <= upper_band) and (curr_rs >= lower_band)
+                    rs_strong = curr_rs > curr_rs_sma * 1.005
+                    rs_stable = (curr_rs <= curr_rs_sma * 1.005) and (curr_rs >= curr_rs_sma * 0.995)
                     rs_not_down = curr_rs_sma >= prev_rs_sma
-                    
-                    if rs_strong: rs_score_ok = True
-                    elif rs_stable and rs_not_down: rs_score_ok = True
+                    if rs_strong or (rs_stable and rs_not_down): rs_score_ok = True
             else:
                 rs_score_ok = True 
             
-            # Weekly
+            # --- WEEKLY CALCULATIONS (NOW MATCHING DAILY LOGIC) ---
             df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
-            df_w['SMA8'] = tm.calc_sma(df_w['Close'], 8); df_w['SMA18'] = tm.calc_sma(df_w['Close'], 18); df_w['SMA40'] = tm.calc_sma(df_w['Close'], 40)
-            span_a, span_b = tm.calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close']); df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
+            
+            df_w['SMA18'] = tm.calc_sma(df_w['Close'], 18)
+            df_w['SMA40'] = tm.calc_sma(df_w['Close'], 40)
+            df_w['AD'] = tm.calc_ad(df_w['High'], df_w['Low'], df_w['Close'], df_w['Volume'])
+            w_ad_sma18 = tm.calc_sma(df_w['AD'], 18)
+            w_ad_sma40 = tm.calc_sma(df_w['AD'], 40)
+            span_a, span_b = tm.calc_ichimoku(df_w['High'], df_w['Low'], df_w['Close'])
+            df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
             inst_activity = tm.calc_structure(df)
             
-            # --- A/D WEAK DISTRIBUTION CHECK ---
+            # --- DAILY SCORE (5 Pts) ---
+            # 1. Breadth
             ad_score_ok = False
             if len(ad_sma18) > 2:
-                ad_val = df['AD'].iloc[-1]
-                ad18 = ad_sma18.iloc[-1]; ad18_prev = ad_sma18.iloc[-2]
-                ad40 = ad_sma40.iloc[-1]
+                ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]; ad18_prev = ad_sma18.iloc[-2]; ad40 = ad_sma40.iloc[-1]
                 ad_weak_distrib = (ad_val < ad18 and ad18 <= ad18_prev) or (ad18 < ad40 and ad18 < ad18_prev)
                 ad_score_ok = not ad_weak_distrib
+            
+            d_chk = 0
+            if ad_score_ok: d_chk += 1
+            if rs_score_ok: d_chk += 1
+            if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1 # Trend
+            if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1 # Momentum
+            if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 # Structure
+
+            # --- WEEKLY SCORE (5 Pts - UNIFIED LOGIC) ---
+            # 1. Breadth (Weekly)
+            w_ad_score_ok = False
+            if len(w_ad_sma18) > 2:
+                w_ad_val = df_w['AD'].iloc[-1]; w_ad18 = w_ad_sma18.iloc[-1]; w_ad18_prev = w_ad_sma18.iloc[-2]; w_ad40 = w_ad_sma40.iloc[-1]
+                w_ad_weak = (w_ad_val < w_ad18 and w_ad18 <= w_ad18_prev) or (w_ad18 < w_ad40 and w_ad18 < w_ad18_prev)
+                w_ad_score_ok = not w_ad_weak
+            
+            # 2. RS (Weekly)
+            w_rs_score_ok = False
+            if bench_ticker in master_data:
+                bench_w = master_data[bench_ticker].resample('W-FRI').last()['Close']
+                common_w = df_w.index.intersection(bench_w.index)
+                w_rs = df_w.loc[common_w, 'Close'] / bench_w.loc[common_w]
+                w_rs_sma18 = tm.calc_sma(w_rs, 18)
+                if len(w_rs) > 2 and len(w_rs_sma18) > 2:
+                    w_curr_rs = w_rs.iloc[-1]; w_curr_rs_sma = w_rs_sma18.iloc[-1]; w_prev_rs_sma = w_rs_sma18.iloc[-2]
+                    w_rs_strong = w_curr_rs > w_curr_rs_sma * 1.005
+                    w_rs_stable = (w_curr_rs <= w_curr_rs_sma * 1.005) and (w_curr_rs >= w_curr_rs_sma * 0.995)
+                    w_rs_up = w_curr_rs_sma >= w_prev_rs_sma
+                    if w_rs_strong or (w_rs_stable and w_rs_up): w_rs_score_ok = True
+            else: w_rs_score_ok = True
+
+            w_score = 0
+            if w_ad_score_ok: w_score += 1
+            if w_rs_score_ok: w_score += 1
+            if wc['Close'] > wc['SMA18']: w_score += 1 # Trend
+            if wc['SMA18'] > df_w.iloc[-2]['SMA18']: w_score += 1 # Momentum
+            if wc['SMA18'] > wc['SMA40']: w_score += 1 # Structure
+
+            # --- DECISION LOGIC ---
+            w_pulse = "GOOD" if (wc['Close'] > wc['SMA18']) and (dc['Close'] > df['SMA18'].iloc[-1]) else "NO"
             
             vol_msg = "NORMAL"
             if df['Volume'].iloc[-1] > (df['VolSMA'].iloc[-1] * 1.5): vol_msg = "SPIKE (Live)"
@@ -389,23 +426,6 @@ if st.session_state.run_analysis:
                 if inst_activity == "LL": final_inst_msg = "CAPITULATION (LL)" if is_rising else "LIQUIDATION (LL)"
                 if inst_activity == "LH": final_inst_msg = "SELLING (LH)"
 
-            w_score = 0
-            if wc['Close'] > wc['SMA18']: w_score += 1
-            if wc['SMA18'] > df_w.iloc[-2]['SMA18']: w_score += 1
-            if wc['SMA18'] > wc['SMA40']: w_score += 1
-            if wc['Close'] > wc['Cloud_Top']: w_score += 1
-            if wc['Close'] > wc['SMA8']: w_score += 1 
-            
-            # --- DAILY SCORE ---
-            d_chk = 0
-            if ad_score_ok: d_chk += 1
-            if rs_score_ok: d_chk += 1
-            if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1
-            if df['SMA18'].iloc[-1] >= df['SMA18'].iloc[-2]: d_chk += 1 # 18 Rising
-            if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 # Structure
-            
-            w_pulse = "GOOD" if (wc['Close'] > wc['SMA18']) and (dc['Close'] > df['SMA18'].iloc[-1]) else "NO"
-
             decision = "AVOID"; reason = "Low Score"
             if w_score >= 4:
                 if d_chk == 5: decision = "BUY"; reason = "Score 5/5" 
@@ -414,16 +434,15 @@ if st.session_state.run_analysis:
                 else: decision = "WATCH"; reason = "Daily Weak"
             else: decision = "AVOID"; reason = "Weekly Weak"
 
-            if not (wc['Close'] > wc['SMA8']): decision = "AVOID"; reason = "BELOW W-SMA8"
+            # Re-introduced Cloud check as a hard filter instead of score
+            if not (wc['Close'] > wc['Cloud_Top']): decision = "AVOID"; reason = "Below Cloud"
             elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
-            # Risk check logic uses the risk_per_trade defined above
             if risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
             atr = tm.calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
             raw_stop = dc['Close'] - (2.618 * atr); smart_stop_val = tm.round_to_03_07(raw_stop)
             stop_dist = dc['Close'] - smart_stop_val; stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
             
-            # --- SPLIT RSI COLOR LOGIC ---
             if r5 >= r20:
                 n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
             else:
