@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.9 Clean UI)
+#  TITAN STRATEGY APP (v64.0 Info Density)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.9 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Output Mode")
+st.title(f"🛡️ Titan Strategy v64.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Enhanced Breadth Signals")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -151,6 +151,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         # --- DAILY SCORE (5 Pts - STRICT) ---
         # 1. Breadth (A/D)
         ad_score_ok = False
+        ad_val = 0; ad18 = 0
         if len(ad_sma18) > 2:
             ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]
             ad_lower_band = ad18 - (abs(ad18) * 0.005)
@@ -191,7 +192,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 w_rs_in_zone = w_curr_rs >= w_lower_band
                 
                 if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
-            else: w_rs_score_ok = True
+        else: w_rs_score_ok = True
 
         w_score = 0
         if w_ad_score_ok: w_score += 1
@@ -226,9 +227,13 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             else: decision = "WATCH"; reason = "Daily Weak"
         else: decision = "AVOID"; reason = "Weekly Weak"
 
-        # Re-introduced Cloud check as a hard filter instead of score
-        if not (wc['Close'] > wc['Cloud_Top']): decision = "AVOID"; reason = "Below Cloud"
+        # Cloud Lock Logic (Hard Filter)
+        is_below_cloud = not (wc['Close'] > wc['Cloud_Top'])
+        if is_below_cloud: decision = "AVOID"; reason = "Below Cloud"
+        
+        # Impulse Lock Logic
         elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
+        
         if risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
         atr = tm.calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
@@ -246,10 +251,14 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
         # Structure Check (SMA 18 vs 40)
-        # We perform the check, but logic dictates: Only show if Passing.
         struct_pass = df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]
         
-        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Pass": struct_pass, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+        # A/D Enhanced Status
+        if ad_val > ad18: ad_msg = "ACCUMULATION"
+        elif ad_score_ok: ad_msg = "NEUTRAL"
+        else: ad_msg = "DISTRIBUTION"
+
+        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Pass": struct_pass, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Msg": ad_msg, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         # Filter Logic for Table
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
@@ -265,14 +274,10 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
             if is_blue_spike: final_risk = risk_per_trade
             
-            # --- CLEAN OUTPUT LOGIC (v63.9) ---
-            # 1. Structure: Only show "BULLISH" if passed. Empty if failed.
+            # --- CLEAN OUTPUT LOGIC (v64.0) ---
             disp_struct = "BULLISH" if struct_pass else ""
-            
-            # 2. Action: Only show text if NOT AVOID.
             disp_action = final_decision if "AVOID" not in final_decision else ""
             
-            # 3. Stop/Shares: Only show if Action is valid (not empty)
             if disp_action == "" and not is_blue_spike: 
                 disp_stop = ""; disp_shares = ""
             else:
@@ -284,7 +289,8 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
                 "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
                 "Structure": disp_struct,
-                "Ichimoku<br>Cloud": "PASS" if (wc['Close']>wc['Cloud_Top']) else "FAIL", "A/D Breadth": "STRONG" if ad_score_ok else "WEAK",
+                # Removed Ichimoku Column (Logic is hidden lock)
+                "A/D Breadth": ad_msg,
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
                 "Action": disp_action, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
             }
@@ -549,7 +555,8 @@ if st.session_state.run_analysis:
         if scan_results:
             df_final = pd.DataFrame(scan_results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "Ichimoku<br>Cloud", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
+            # COLS: Removed Ichimoku, Updated Structure
+            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
             st.warning("Scanner returned no results.")
