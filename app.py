@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v61.0 Master Integration)
+#  TITAN STRATEGY APP (v61.0 Restored Upgrades)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -60,7 +60,7 @@ PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
 # --- GLOBAL SETTINGS (SIDEBAR) ---
 st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 
-# Global Dark Mode
+# Global Dark Mode Logic
 if "is_dark" not in st.session_state:
     st.session_state.is_dark = True
 st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
@@ -96,7 +96,7 @@ def calc_rsi(series, length=14):
         return 100 - (100 / (1 + rs))
     except: return pd.Series(50, index=series.index)
 
-# --- ZIG ZAG ENGINE (SYNTAX FIX) ---
+# --- ZIG ZAG ENGINE (SYNTAX SAFE) ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
     pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
@@ -105,7 +105,7 @@ def calc_structure(df, deviation_pct=0.035):
         if trend == 1:
             if price > last_val:
                 last_val = price
-                # FIXED: Expanded ternary for safety
+                # Expanded logic to prevent SyntaxError
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
             elif price < last_val * (1 - deviation_pct):
@@ -172,7 +172,7 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
 def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
     status_map = {}
     try:
-        # 1. Main Rotation (Everything vs Benchmark)
+        # 1. Standard Rotation
         all_tickers = list(data_map.keys())
         wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
         if not wide_df.empty:
@@ -188,7 +188,7 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
                         else: status_map[t] = "IMPROVING"
                     except: continue
         
-        # 2. SPY vs IEF Special Case (Risk-On/Off)
+        # 2. SPY vs IEF Special Case (For Screener)
         if "SPY" in data_map and "IEF" in data_map:
             spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
             rs, ms = calculate_rrg_math(spy_ief, "IEF")
@@ -205,20 +205,24 @@ def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
     fig = go.Figure()
-    # Uses Global Setting (passed in argument, but driven by session state in call)
+    # Use global setting
     if is_dark:
         bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
     else:
         bg_col, text_col = "white", "black"; c_lead, c_weak, c_lag, c_imp = "#008000", "#FF8C00", "#CC0000", "#0000FF"; template = "plotly_white"
 
     has_data = False
+    # Dynamic Scaling Arrays
+    x_vals, y_vals = [], []
+
     for ticker in labels_map.keys():
         if ticker not in ratios.columns: continue
         xt = ratios[ticker].tail(5); yt = momentums[ticker].tail(5)
         if len(xt) < 5: continue
         has_data = True
         cx, cy = xt.iloc[-1], yt.iloc[-1]
-        
+        x_vals.extend(xt.values); y_vals.extend(yt.values)
+
         if cx > 100 and cy > 100: color = c_lead
         elif cx > 100 and cy < 100: color = c_weak
         elif cx < 100 and cy < 100: color = c_lag
@@ -228,20 +232,29 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode='markers+text', marker=dict(color=color, size=12, line=dict(color=text_col, width=1)), text=[ticker], textposition="top center", textfont=dict(color=text_col), hovertemplate=f"<b>{labels_map.get(ticker, ticker)}</b><br>T: %{{x:.2f}}<br>M: %{{y:.2f}}"))
 
     if not has_data: return None
+    
+    # Auto-Range Calculation
+    min_x, max_x = min(x_vals + [96]), max(x_vals + [104])
+    min_y, max_y = min(y_vals + [96]), max(y_vals + [104])
+    buff_x = (max_x - min_x) * 0.05; buff_y = (max_y - min_y) * 0.05
+    rx = [min_x - buff_x, max_x + buff_x]; ry = [min_y - buff_y, max_y + buff_y]
+
     op = 0.1 if is_dark else 0.05
     fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
+    # Backgrounds (oversized to cover dynamic range)
+    fig.add_shape(type="rect", x0=100, y0=100, x1=rx[1]*1.5, y1=ry[1]*1.5, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=100, y0=ry[0]*1.5, x1=rx[1]*1.5, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=rx[0]*1.5, y0=ry[0]*1.5, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=rx[0]*1.5, y0=100, x1=100, y1=ry[1]*1.5, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
     
-    # FIXED: Use Plotly Auto-Scaling (Removed hardcoded range=[96,104])
-    # But added Quadrant Backgrounds using a large enough range to cover most scenarios
-    fig.add_shape(type="rect", x0=100, y0=100, x1=150, y1=150, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=100, y0=50, x1=150, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=50, y0=50, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=50, y0=100, x1=100, y1=150, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
-    
-    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(showgrid=False, title="RS-Momentum (Velocity)"))
+    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=rx, showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=ry, showgrid=False, title="RS-Momentum (Velocity)"))
+    fig.add_annotation(x=rx[1], y=ry[1], text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
+    fig.add_annotation(x=rx[1], y=ry[0], text="WEAKENING", showarrow=False, font=dict(size=16, color=c_weak), xanchor="right", yanchor="bottom")
+    fig.add_annotation(x=rx[0], y=ry[0], text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
+    fig.add_annotation(x=rx[0], y=ry[1], text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
     return fig
 
-# --- STYLING ---
+# --- STYLING (CSS SAFE) ---
 def style_final(styler):
     def color_rotation(val):
         if "LEADING" in val: return 'color: #00FF00; font-weight: bold'
@@ -250,7 +263,7 @@ def style_final(styler):
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
     def color_rsi(val):
-        # We handle this via HTML now, this function is backup/unused for the Dual RSI col
+        # HTML handled in scanner loop
         return ''
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
@@ -268,7 +281,7 @@ def style_final(styler):
         elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         elif "CAUTION" in act: styles[idx] = 'background-color: #AA4400; color: white; font-weight: bold'
         return styles
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
 def style_daily_health(styler):
     def color_status(v):
@@ -489,6 +502,20 @@ if st.session_state.run_analysis:
         if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
         else: st.info("No active trades.")
         st.write("---")
+
+        # 3. BENCHMARK
+        shadow_shares_total = pf_df['Shadow_SPY'].sum()
+        spy_data = master_data.get("SPY")
+        if spy_data is not None:
+            curr_spy = spy_data['Close'].iloc[-1]
+            bench_val = shadow_shares_total * curr_spy
+            alpha = total_net_worth - bench_val
+            alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
+            c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
+            c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
+            st.write("---")
 
         # 4. MARKET HEALTH (RESTORED FULL)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
