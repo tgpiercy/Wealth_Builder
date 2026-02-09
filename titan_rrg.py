@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import titan_math as tm
+import math
 
 # --- RRG MATH ENGINE ---
 def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14, smooth_period=3):
@@ -75,23 +76,33 @@ def calculate_rrg_math(wide_df, benchmark_ticker):
 
 def get_heading_from_tail(x_series, y_series):
     """
-    Determines arrow direction using the EXACT last two points.
+    Determines 8-POINT COMPASS direction using atan2 trigonometry.
     """
-    if len(x_series) < 2 or len(y_series) < 2: 
-        return "<span style='font-size: 22px; line-height: 1;'>➡️</span>"
-    
-    x2 = x_series.iloc[-1]; x1 = x_series.iloc[-2]
-    y2 = y_series.iloc[-1]; y1 = y_series.iloc[-2]
-    
-    dx = x2 - x1
-    dy = y2 - y1
-    
     style = "style='font-size: 22px; line-height: 1;'"
     
-    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" 
-    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" 
-    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" 
-    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" 
+    if len(x_series) < 2 or len(y_series) < 2: 
+        return f"<span {style}>➡️</span>"
+    
+    # Delta (Change from T-1 to T)
+    dx = x_series.iloc[-1] - x_series.iloc[-2]
+    dy = y_series.iloc[-1] - y_series.iloc[-2]
+    
+    if dx == 0 and dy == 0: return f"<span {style}>➡️</span>"
+    
+    # Calculate Angle in Degrees (-180 to 180)
+    # 0 is East, 90 is North
+    angle = math.degrees(math.atan2(dy, dx))
+    
+    # Map Angle to 8 Cardinal Directions
+    if -22.5 <= angle < 22.5: return f"<span {style}>➡️</span>"   # E
+    elif 22.5 <= angle < 67.5: return f"<span {style}>↗️</span>"  # NE
+    elif 67.5 <= angle < 112.5: return f"<span {style}>⬆️</span>" # N
+    elif 112.5 <= angle < 157.5: return f"<span {style}>↖️</span>" # NW
+    elif 157.5 <= angle <= 180: return f"<span {style}>⬅️</span>"  # W
+    elif -180 <= angle < -157.5: return f"<span {style}>⬅️</span>" # W (Wrap)
+    elif -157.5 <= angle < -112.5: return f"<span {style}>↙️</span>" # SW
+    elif -112.5 <= angle < -67.5: return f"<span {style}>⬇️</span>" # S
+    elif -67.5 <= angle < -22.5: return f"<span {style}>↘️</span>" # SE
     
     return f"<span {style}>➡️</span>"
 
@@ -121,6 +132,7 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
                 curr_r = ts_r.loc[common[-1]]
                 curr_m = ts_m.loc[common[-1]]
                 
+                # Use new 8-point logic
                 heading = get_heading_from_tail(ts_r.loc[common], ts_m.loc[common])
                 
                 phase = "UNKNOWN"
@@ -160,7 +172,7 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
 
 def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
     """
-    Plots RRG Scatter with Tails.
+    Plots RRG Scatter with Tails (5-week smooth).
     """
     fig = go.Figure()
     
@@ -177,9 +189,9 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         valid_idx = r_df[col].dropna().index.intersection(m_df[col].dropna().index)
         if len(valid_idx) < 5: continue
         
-        # --- SHORTER TAILS: 5 WEEKS ---
-        x_tail = r_df.loc[valid_idx, col].iloc[-5:] # Changed from -10
-        y_tail = m_df.loc[valid_idx, col].iloc[-5:] # Changed from -10
+        # 5-Week Tail
+        x_tail = r_df.loc[valid_idx, col].iloc[-5:] 
+        y_tail = m_df.loc[valid_idx, col].iloc[-5:] 
         
         curr_x = x_tail.iloc[-1]
         curr_y = y_tail.iloc[-1]
