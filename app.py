@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v66.4 RSI Fix)
+#  TITAN STRATEGY APP (v66.6 Header Override Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v66.4 ({current_user.upper()})")
-st.caption("Institutional Protocol: Stable Release")
+st.title(f"🛡️ Titan Strategy v66.6 ({current_user.upper()})")
+st.caption("Institutional Protocol: Headers Fixed")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -206,7 +206,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         r5 = df['RSI5'].iloc[-1]; r20 = df['RSI20'].iloc[-1] if not pd.isna(df['RSI20'].iloc[-1]) else 50
         r5_prev = df['RSI5'].iloc[-2]; is_rising = r5 > r5_prev
         
-        # --- RSI MSG CONSTRUCTION (Restored) ---
+        # --- RSI MSG CONSTRUCTION ---
         if r5 >= r20:
             n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
         else:
@@ -271,11 +271,9 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Priority": sort_priority 
             }
             
-            if t in tc.SECTOR_ETFS:
-                row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
-                results.append(row)
-            else:
-                results.append(row)
+            # --- NO MORE OVERRIDES ---
+            # We now trust the 'cat_name' directly from DATA_MAP for everything.
+            results.append(row)
 
     return results, analysis_db
 
@@ -513,84 +511,4 @@ if st.session_state.run_analysis:
             h_rows.append({"Indicator": f"VIX Level ({v:.2f})", "Status": s})
             
             sc = spy.iloc[-1]['Close']; s18 = tm.calc_sma(spy['Close'], 18).iloc[-1]; s8 = tm.calc_sma(spy['Close'], 8).iloc[-1]
-            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span style='color:#ff4444'>FAIL</span>"})
-            h_rows.append({"Indicator": "SPY SMA18 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s18 >= tm.calc_sma(spy['Close'], 18).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
-            h_rows.append({"Indicator": "SPY SMA8 Rising", "Status": "<span style='color:#00ff00'>RISING</span>" if s8 > tm.calc_sma(spy['Close'], 8).iloc[-2] else "<span style='color:#ff4444'>FALLING</span>"})
-
-            if rsp is not None:
-                rc = rsp.iloc[-1]['Close']; r18 = tm.calc_sma(rsp['Close'], 18).iloc[-1]
-                h_rows.append({"Indicator": "RSP Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if rc > r18 else "<span style='color:#ff4444'>FAIL</span>"})
-            
-            col = "#00ff00" if mkt_score >= 8 else ("#ffaa00" if mkt_score >= 5 else "#ff4444")
-            msg = "AGGRESSIVE" if mkt_score >= 10 else ("CAUTIOUS" if mkt_score >= 8 else "DEFENSIVE")
-            
-            h_rows.append({"Indicator": "TOTAL SCORE", "Status": f"<span style='color:{col}'><b>{mkt_score}/11</b></span>"})
-            h_rows.append({"Indicator": "STRATEGY MODE", "Status": f"<span style='color:{col}'><b>{msg}</b></span>"})
-            st.subheader("🏥 Daily Market Health")
-            st.markdown(pd.DataFrame(h_rows).style.pipe(ts.style_daily_health).to_html(escape=False), unsafe_allow_html=True)
-            st.write("---")
-
-        # --- SECTION 4: SCANNER RESULTS (Cached) ---
-        if scan_results:
-            # 1. SORT BY PRIORITY
-            df_final = pd.DataFrame(scan_results).sort_values("Priority", ascending=True)
-            
-            # 2. CLEAN SECTOR NAMES (Strip "01. ", "02. " etc)
-            df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            
-            # 3. SELECT COLUMNS (Priority hidden)
-            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
-            st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
-        else:
-            st.warning("Scanner returned no results.")
-
-    if mode == "Sector Rotation":
-        st.subheader("🔄 Relative Rotation Graphs (RRG)")
-        is_dark = st.session_state.get('is_dark', True)
-        rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
-        
-        if rrg_mode == "Indices":
-            c1, c2 = st.columns([1,3])
-            with c1: bench_sel = st.selectbox("Benchmark", ["SPY", "IEF"], key="bench_idx")
-            tgt = "IEF" if bench_sel == "IEF" else "SPY"
-            idx_list = list(tc.RRG_INDICES.keys())
-            if tgt == "IEF": idx_list.append("SPY")
-            elif "SPY" in idx_list: idx_list.remove("SPY")
-            
-            if st.button("Run Indices"):
-                wide_df = tr.prepare_rrg_inputs(master_data, idx_list, tgt)
-                r, m = tr.calculate_rrg_math(wide_df, tgt)
-                lbls = tc.RRG_INDICES.copy(); lbls['SPY'] = 'S&P 500 (Eq)'
-                st.session_state['fig_idx'] = tr.plot_rrg_chart(r, m, lbls, f"Indices vs {tgt}", is_dark)
-            if 'fig_idx' in st.session_state: st.plotly_chart(st.session_state['fig_idx'], use_container_width=True)
-
-        elif rrg_mode == "Sectors":
-            if st.button("Run Sectors"):
-                wide_df = tr.prepare_rrg_inputs(master_data, list(tc.RRG_SECTORS.keys()), "SPY")
-                r, m = tr.calculate_rrg_math(wide_df, "SPY")
-                st.session_state['fig_sec'] = tr.plot_rrg_chart(r, m, tc.RRG_SECTORS, "Sectors vs SPY", is_dark)
-            if 'fig_sec' in st.session_state: st.plotly_chart(st.session_state['fig_sec'], use_container_width=True)
-
-        elif rrg_mode == "Drill-Down":
-            c1, c2 = st.columns([1,3])
-            with c1:
-                def fmt(x): return f"{x} - {tc.RRG_SECTORS[x]}" if x in tc.RRG_SECTORS else x
-                opts = list(tc.RRG_SECTORS.keys()) + ["Canada (TSX)"]
-                sec_key = st.selectbox("Select Sector", opts, format_func=fmt, key="dd_sel")
-            if sec_key == "Canada (TSX)": bench_dd = "HXT.TO"; name_dd = "Canadian Titans"
-            else: bench_dd = sec_key; name_dd = tc.RRG_SECTORS[sec_key]
-            
-            if st.button(f"Run {name_dd}"):
-                comp_list = list(tc.RRG_INDUSTRY_MAP.get(sec_key, {}).keys())
-                wide_df = tr.prepare_rrg_inputs(master_data, comp_list, bench_dd)
-                r, m = tr.calculate_rrg_math(wide_df, bench_dd)
-                all_labels = {**tc.RRG_INDUSTRY_MAP.get(sec_key, {}), **tc.RRG_SECTORS}
-                st.session_state['fig_dd'] = tr.plot_rrg_chart(r, m, all_labels, f"{name_dd} vs {bench_dd}", is_dark)
-            if 'fig_dd' in st.session_state: st.plotly_chart(st.session_state['fig_dd'], use_container_width=True)
-
-        elif rrg_mode == "Themes":
-            if st.button("Run Themes"):
-                wide_df = tr.prepare_rrg_inputs(master_data, list(tc.RRG_THEMES.keys()), "SPY")
-                r, m = tr.calculate_rrg_math(wide_df, "SPY")
-                st.session_state['fig_thm'] = tr.plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
-            if 'fig_thm' in st.session_state: st.plotly_chart(st.session_state['fig_thm'], use_container_width=True)
+            h_rows.append({"Indicator": "SPY Price > SMA18", "Status": "<span style='color:#00ff00'>PASS</span>" if sc > s18 else "<span
