@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.3 Logic Precision)
+#  TITAN STRATEGY APP (v63.4 Performance Restoration)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.3 ({current_user.upper()})")
-st.caption("Institutional Protocol: GW2 Scorecard Alignment")
+st.title(f"🛡️ Titan Strategy v63.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Performance Tracking Restored")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
@@ -266,10 +266,21 @@ if st.session_state.run_analysis:
         open_pl_val = eq_val - total_cost_basis
         open_pl_cad = open_pl_val * cad_rate
         
-        c1, c2, c3, c4 = st.columns(4)
+        # --- SHADOW SPY BENCHMARK CALCULATION ---
+        shadow_spy_qty = pf_df['Shadow_SPY'].sum() if not pf_df.empty else 0.0
+        spy_price = master_data['SPY']['Close'].iloc[-1] if 'SPY' in master_data else 0.0
+        shadow_equity = shadow_spy_qty * spy_price
+        
+        alpha_dollars = total_net_worth - shadow_equity
+        alpha_pct = ((total_net_worth - shadow_equity) / shadow_equity) * 100 if shadow_equity > 0 else 0.0
+        
+        # DISPLAY METRICS
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", ts.fmt_delta(open_pl_cad))
         c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", ts.fmt_delta(open_pl_val))
-        c3.metric("Cash", f"${current_cash:,.2f}"); c4.metric("Equity", f"${eq_val:,.2f}")
+        c3.metric("Benchmark (Shadow SPY)", f"${shadow_equity:,.2f}", f"{alpha_dollars:+.2f} Alpha")
+        c4.metric("Cash", f"${current_cash:,.2f}")
+        c5.metric("Equity", f"${eq_val:,.2f}")
         
         if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(ts.style_portfolio).to_html(), unsafe_allow_html=True)
         else: st.info("No active trades.")
