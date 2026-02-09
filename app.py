@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v68.0 VSA Upgrade)
+#  TITAN STRATEGY APP (v68.1 Sync Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v68.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: VSA Engine")
+st.title(f"🛡️ Titan Strategy v68.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: VSA & Sector Locks")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -96,12 +96,14 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
+        # Calculate VolSMA FIRST because calc_smart_money needs it
+        df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
+        
         df['SMA8'] = tm.calc_sma(df['Close'], 8)
         df['SMA18'] = tm.calc_sma(df['Close'], 18)
         df['SMA40'] = tm.calc_sma(df['Close'], 40)
         df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
         ad_sma18 = tm.calc_sma(df['AD'], 18); ad_sma40 = tm.calc_sma(df['AD'], 40)
-        df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
         df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
         
         bench_ticker = "SPY"
@@ -137,7 +139,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
 
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
         
-        # --- NEW VSA CALL ---
+        # --- VSA CALL (Now Safe) ---
         inst_activity = tm.calc_smart_money(df)
         
         ad_score_ok = False
@@ -180,7 +182,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
         rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
         
-        final_inst_msg = inst_activity # Now using the VSA Result
+        final_inst_msg = inst_activity 
 
         decision = "AVOID"; reason = "Low Score"
         if w_score >= 4:
