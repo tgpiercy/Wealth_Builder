@@ -62,19 +62,24 @@ def calculate_rrg_math(wide_df, benchmark_ticker):
 def get_heading(r_series, m_series):
     """
     Determines the directional arrow based on the movement from T-1 to T.
+    Returns HTML formatted arrow for larger visibility (22px).
     """
-    if len(r_series) < 2 or len(m_series) < 2: return "➡️" # Default stable
+    # HTML Wrapper for size
+    style = "style='font-size: 22px; line-height: 1;'"
+    
+    if len(r_series) < 2 or len(m_series) < 2: 
+        return f"<span {style}>➡️</span>"
     
     dx = r_series.iloc[-1] - r_series.iloc[-2] # Change in Ratio (X-axis)
     dy = m_series.iloc[-1] - m_series.iloc[-2] # Change in Momentum (Y-axis)
     
     # Directional Logic
-    if dx > 0 and dy > 0: return "↗️" # NE (Strongest)
-    if dx > 0 and dy < 0: return "↘️" # SE (Weakening)
-    if dx < 0 and dy < 0: return "↙️" # SW (Weakest)
-    if dx < 0 and dy > 0: return "↖️" # NW (Improving)
+    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" # NE (Strongest)
+    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" # SE (Weakening)
+    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" # SW (Weakest)
+    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" # NW (Improving)
     
-    return "➡️" # Flat
+    return f"<span {style}>➡️</span>"
 
 def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
     """
@@ -97,7 +102,7 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
             curr_r = r_df[t].iloc[-1]
             curr_m = m_df[t].iloc[-1]
             
-            # Get Heading Arrow
+            # Get Heading Arrow (Now Large HTML)
             heading = get_heading(r_df[t], m_df[t])
             
             # Determine Quadrant Phase
