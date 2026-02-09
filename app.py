@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.7 Duplicate Fix)
+#  TITAN STRATEGY APP (v63.8 Structure Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Master Table")
+st.title(f"🛡️ Titan Strategy v63.8 ({current_user.upper()})")
+st.caption("Institutional Protocol: Structure Logic Alignment")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -191,7 +191,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 w_rs_in_zone = w_curr_rs >= w_lower_band
                 
                 if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
-        else: w_rs_score_ok = True
+            else: w_rs_score_ok = True
 
         w_score = 0
         if w_ad_score_ok: w_score += 1
@@ -245,7 +245,11 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         rrg_phase = rrg_snapshot.get(t, "unknown").upper()
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
-        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "D_Chk_Price": (dc['Close'] > df['SMA18'].iloc[-1]), "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+        # Structure Logic: 18 > 40
+        struct_check = df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]
+        struct_msg = "BULLISH (18>40)" if struct_check else "BEARISH (18<40)"
+
+        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Msg": struct_msg, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Pass": ad_score_ok, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
 
         # Filter Logic for Table
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
@@ -255,9 +259,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if is_scanner:
             final_decision = decision; final_reason = reason
             if cat_name in tc.SECTOR_PARENTS:
-                parent = tc.SECTOR_PARENTS[cat_name]
-                # Note: Parent check would require 2 passes or parent pre-calc.
-                # Simplified: If parent is AVOID, child caution.
                 pass 
 
             is_blue_spike = ("#00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
@@ -273,7 +274,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": rrg_phase,
                 "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
                 "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
-                "Structure": "ABOVE 18" if (dc['Close'] > df['SMA18'].iloc[-1]) else "BELOW 18",
+                "Structure": struct_msg,
                 "Ichimoku<br>Cloud": "PASS" if (wc['Close']>wc['Cloud_Top']) else "FAIL", "A/D Breadth": "STRONG" if ad_score_ok else "WEAK",
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
                 "Action": final_decision, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
