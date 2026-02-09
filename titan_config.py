@@ -1,11 +1,11 @@
 # ==============================================================================
-#  TITAN STRATEGY CONFIGURATION (v66.0 - Market Order)
+#  TITAN STRATEGY CONFIGURATION (v66.2 - Login Fix)
 # ==============================================================================
 
 # --- AUTHENTICATION ---
 CREDENTIALS = {
-    "admin": "password",  # Change this for security
-    "user": "titan"
+    "son": "",  # No password
+    "dad": ""   # No password
 }
 
 # --- MASTER DATA MAP ---
