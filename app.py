@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v63.0 Aligned Daily Scoring)
+#  TITAN STRATEGY APP (v63.1 RS Correction)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,7 +63,7 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v63.0 ({current_user.upper()})")
+st.title(f"🛡️ Titan Strategy v63.1 ({current_user.upper()})")
 st.caption("Institutional Protocol: GW2 Scorecard Alignment")
 
 # --- UNIFIED DATA ENGINE ---
@@ -330,9 +330,10 @@ if st.session_state.run_analysis:
             df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
             df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
             
-            # --- RS CALC (DAILY) ---
+            # --- RS CALC (DAILY - UPDATED LOGIC) ---
             bench_ticker = "SPY"
             if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
+            
             rs_score_ok = False
             if bench_ticker in master_data:
                 bench_series = master_data[bench_ticker]['Close']
@@ -340,11 +341,11 @@ if st.session_state.run_analysis:
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = tm.calc_sma(rs_series, 18)
                 
-                # DAILY ALIGNMENT: Match Weekly Logic exactly
+                # DAILY ALIGNMENT: Strict Replication of Weekly Logic
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
                     lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) # 0.5% tolerance
-                    rs_not_down = tm.calc_rising(rs_sma18, 2) # Use smoothed "Rising" check to avoid Daily noise
+                    rs_not_down = tm.calc_rising(rs_sma18, 2) # Use smoothed "Rising" for Daily stability
                     rs_in_zone = curr_rs >= lower_band
                     
                     if rs_in_zone and rs_not_down: rs_score_ok = True
