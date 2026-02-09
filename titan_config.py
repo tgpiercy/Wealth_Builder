@@ -1,5 +1,5 @@
 # ==============================================================================
-#  TITAN STRATEGY CONFIGURATION (v66.9 - Full List Restored)
+#  TITAN STRATEGY CONFIGURATION (v67.0 - Specific Industry Headers)
 # ==============================================================================
 
 # --- AUTHENTICATION ---
@@ -23,7 +23,7 @@ DATA_MAP = {
     "IEF": ("01. MARKETS", "SPY"),
     "^VIX": ("01. MARKETS", "SPY"),
 
-    # --- 02. SECTORS ---
+    # --- 02. SECTORS (Major ETFs) ---
     "XLK": ("02. SECTORS", "SPY"), # Tech
     "XLC": ("02. SECTORS", "SPY"), # Comms
     "XLF": ("02. SECTORS", "SPY"), # Financials
@@ -35,9 +35,9 @@ DATA_MAP = {
     "XLP": ("02. SECTORS", "SPY"), # Staples
     "XLRE": ("02. SECTORS", "SPY"), # Real Estate
     "XLU": ("02. SECTORS", "SPY"), # Utilities
-    "XBI": ("02. SECTORS", "SPY"), # Biotech
+    "XBI": ("02. SECTORS", "SPY"), # Biotech (Major)
 
-    # --- 03. THEMES ---
+    # --- 03. THEMES (Major ETFs) ---
     "BOTZ": ("03. THEMES", "SPY"),
     "REMX": ("03. THEMES", "SPY"),
     "ICLN": ("03. THEMES", "SPY"),
@@ -47,71 +47,79 @@ DATA_MAP = {
     "GLD": ("04. METALS", "SPY"),
     "SLV": ("04. METALS", "SPY"),
 
-    # --- 05. INDUSTRIES (Specialized ETFs & Top Stocks) ---
-    
-    # Tech & AI
-    "IGV": ("05. INDUSTRIES", "XLK"),   # Software
-    "SMH": ("05. INDUSTRIES", "XLK"),   # Semis
-    "AIQ": ("05. INDUSTRIES", "BOTZ"),  # AI
-    "MSFT": ("05. INDUSTRIES", "XLK"),  # Microsoft
-    "NVDA": ("05. INDUSTRIES", "SMH"),  # Nvidia
-    "SMCI": ("05. INDUSTRIES", "XLK"),  # Super Micro
-    "DELL": ("05. INDUSTRIES", "XLK"),  # Dell
-    "ANET": ("05. INDUSTRIES", "XLK"),  # Arista
-    "WDC": ("05. INDUSTRIES", "XLK"),   # Western Digital
-    "PSTG": ("05. INDUSTRIES", "XLK"),  # Pure Storage
+    # === INDUSTRIES & CONSTITUENTS ===
 
-    # Comms
-    "META": ("05. INDUSTRIES", "XLC"),  # Meta
-    "GOOGL": ("05. INDUSTRIES", "XLC"), # Google
+    # --- 05. TECHNOLOGY (XLK) ---
+    "IGV": ("05. TECHNOLOGY (XLK)", "XLK"),   # Software
+    "SMH": ("05. TECHNOLOGY (XLK)", "XLK"),   # Semis
+    "MSFT": ("05. TECHNOLOGY (XLK)", "XLK"),
+    "NVDA": ("05. TECHNOLOGY (XLK)", "SMH"),
+    "SMCI": ("05. TECHNOLOGY (XLK)", "XLK"),
+    "DELL": ("05. TECHNOLOGY (XLK)", "XLK"),
+    "ANET": ("05. TECHNOLOGY (XLK)", "XLK"),
+    "WDC": ("05. TECHNOLOGY (XLK)", "XLK"),
+    "PSTG": ("05. TECHNOLOGY (XLK)", "XLK"),
 
-    # Energy & Clean Energy
-    "XOP": ("05. INDUSTRIES", "XLE"),   # E&P
-    "OIH": ("05. INDUSTRIES", "XLE"),   # Oil Services
-    "MLPX": ("05. INDUSTRIES", "XLE"),  # Midstream
-    "TAN": ("05. INDUSTRIES", "ICLN"),  # Solar
-    "NLR": ("05. INDUSTRIES", "ICLN"),  # Nuclear
-    "URA": ("05. INDUSTRIES", "ICLN"),  # Uranium
+    # --- 06. COMMUNICATIONS (XLC) ---
+    "META": ("06. COMMUNICATIONS (XLC)", "XLC"),
+    "GOOGL": ("06. COMMUNICATIONS (XLC)", "XLC"),
 
-    # Financials
-    "KRE": ("05. INDUSTRIES", "XLF"),   # Reg Banks
-    "KBE": ("05. INDUSTRIES", "XLF"),   # Banks
-    "IAK": ("05. INDUSTRIES", "XLF"),   # Insurance
+    # --- 07. ENERGY (XLE) ---
+    "XOP": ("07. ENERGY (XLE)", "XLE"),   # E&P
+    "OIH": ("07. ENERGY (XLE)", "XLE"),   # Services
+    "MLPX": ("07. ENERGY (XLE)", "XLE"),  # Midstream
 
-    # Industrials
-    "ITA": ("05. INDUSTRIES", "XLI"),   # Aerospace
-    "IYT": ("05. INDUSTRIES", "XLI"),   # Transport
-    "PAVE": ("05. INDUSTRIES", "XLI"),  # Infrastructure
+    # --- 08. FINANCIALS (XLF) ---
+    "KRE": ("08. FINANCIALS (XLF)", "XLF"), # Reg Banks
+    "KBE": ("08. FINANCIALS (XLF)", "XLF"), # Banks
+    "IAK": ("08. FINANCIALS (XLF)", "XLF"), # Insurance
 
-    # Materials & Miners
-    "GDXJ": ("05. INDUSTRIES", "GDX"),  # Jr Miners
-    "SIL": ("05. INDUSTRIES", "GDX"),   # Silver Miners
-    "COPX": ("05. INDUSTRIES", "XLB"),  # Copper
-    "SLX": ("05. INDUSTRIES", "XLB"),   # Steel
-    "MOO": ("05. INDUSTRIES", "XLB"),   # Agribusiness
-    "AA": ("05. INDUSTRIES", "XLB"),    # Alcoa
-    "DD": ("05. INDUSTRIES", "XLB"),    # DuPont
+    # --- 09. INDUSTRIALS (XLI) ---
+    "ITA": ("09. INDUSTRIALS (XLI)", "XLI"),  # Aerospace
+    "IYT": ("09. INDUSTRIALS (XLI)", "XLI"),  # Transport
+    "PAVE": ("09. INDUSTRIALS (XLI)", "XLI"), # Infrastructure
 
-    # Healthcare & Biotech
-    "IBB": ("05. INDUSTRIES", "XBI"),   # Biotech
-    "ARKG": ("05. INDUSTRIES", "XBI"),  # Genomics
-    "PPH": ("05. INDUSTRIES", "XLV"),   # Pharma
-    "IHI": ("05. INDUSTRIES", "XLV"),   # Med Devices
+    # --- 10. MATERIALS (XLB) ---
+    "COPX": ("10. MATERIALS (XLB)", "XLB"), # Copper
+    "SLX": ("10. MATERIALS (XLB)", "XLB"),  # Steel
+    "MOO": ("10. MATERIALS (XLB)", "XLB"),  # Agribusiness
+    "AA": ("10. MATERIALS (XLB)", "XLB"),   # Alcoa
+    "DD": ("10. MATERIALS (XLB)", "XLB"),   # DuPont
 
-    # Discretionary
-    "ITB": ("05. INDUSTRIES", "XLY"),   # Homebuilders
-    "AMZN": ("05. INDUSTRIES", "XLY"),  # Amazon
+    # --- 11. GOLD MINERS (GDX) ---
+    "GDXJ": ("11. GOLD MINERS (GDX)", "GDX"), # Jr Miners
+    "SIL": ("11. GOLD MINERS (GDX)", "GDX"),  # Silver Miners
 
-    # --- 06. CANADA ---
-    "RY.TO": ("06. CANADA", "HXT.TO"),
-    "BN.TO": ("06. CANADA", "HXT.TO"),
-    "CNQ.TO": ("06. CANADA", "HXT.TO"),
-    "CP.TO": ("06. CANADA", "HXT.TO"),
-    "WSP.TO": ("06. CANADA", "HXT.TO"),
-    "SHOP.TO": ("06. CANADA", "HXT.TO"),
-    "CSU.TO": ("06. CANADA", "HXT.TO"),
-    "NTR.TO": ("06. CANADA", "HXT.TO"),
-    "TECK-B.TO": ("06. CANADA", "HXT.TO"),
+    # --- 12. HEALTHCARE (XLV) ---
+    "PPH": ("12. HEALTHCARE (XLV)", "XLV"),  # Pharma
+    "IHI": ("12. HEALTHCARE (XLV)", "XLV"),  # Med Devices
+
+    # --- 13. BIOTECH (XBI) ---
+    "IBB": ("13. BIOTECH (XBI)", "XBI"),
+    "ARKG": ("13. BIOTECH (XBI)", "XBI"),
+
+    # --- 14. DISCRETIONARY (XLY) ---
+    "ITB": ("14. DISCRETIONARY (XLY)", "XLY"), # Homebuilders
+    "AMZN": ("14. DISCRETIONARY (XLY)", "XLY"),
+
+    # --- 15. AI & ROBOTICS (BOTZ) ---
+    "AIQ": ("15. AI & ROBOTICS (BOTZ)", "BOTZ"),
+
+    # --- 16. CLEAN ENERGY (ICLN) ---
+    "TAN": ("16. CLEAN ENERGY (ICLN)", "ICLN"), # Solar
+    "NLR": ("16. CLEAN ENERGY (ICLN)", "ICLN"), # Nuclear
+    "URA": ("16. CLEAN ENERGY (ICLN)", "ICLN"), # Uranium
+
+    # --- 17. CANADA (HXT) ---
+    "RY.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "BN.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "CNQ.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "CP.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "WSP.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "SHOP.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "CSU.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "NTR.TO": ("17. CANADA (HXT)", "HXT.TO"),
+    "TECK-B.TO": ("17. CANADA (HXT)", "HXT.TO"),
 }
 
 # --- RRG GROUPS (Unchanged) ---
@@ -149,11 +157,24 @@ RRG_INDUSTRY_MAP = {
     "ICLN": {"TAN": "Solar", "NLR": "Nuclear", "URA": "Uranium"}
 }
 
+# --- PARENT MAPPING (UPDATED FOR NEW HEADERS) ---
+# Ensures "Caution/Avoid" logic flows from Parent ETF to Child Header
 SECTOR_PARENTS = {
     "02. SECTORS": "SPY",
     "03. THEMES": "SPY",
-    "05. INDUSTRIES": "SPY",
-    "06. CANADA": "HXT.TO"
+    "05. TECHNOLOGY (XLK)": "XLK",
+    "06. COMMUNICATIONS (XLC)": "XLC",
+    "07. ENERGY (XLE)": "XLE",
+    "08. FINANCIALS (XLF)": "XLF",
+    "09. INDUSTRIALS (XLI)": "XLI",
+    "10. MATERIALS (XLB)": "XLB",
+    "11. GOLD MINERS (GDX)": "GDX",
+    "12. HEALTHCARE (XLV)": "XLV",
+    "13. BIOTECH (XBI)": "XBI",
+    "14. DISCRETIONARY (XLY)": "XLY",
+    "15. AI & ROBOTICS (BOTZ)": "BOTZ",
+    "16. CLEAN ENERGY (ICLN)": "ICLN",
+    "17. CANADA (HXT)": "HXT.TO"
 }
 
 SECTOR_ETFS = list(RRG_SECTORS.keys()) + list(RRG_THEMES.keys())
