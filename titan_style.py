@@ -76,8 +76,8 @@ def color_inst_activity(val):
     if 'DROP' in val or 'LIQUIDATION' in val: return 'color: #ff4444'
     
     # Neutral/Warning
-    if 'CHURNING' in val: return 'color: #ffaa00; font-weight: bold' # Orange
-    if 'TEST' in val or 'DRIFT' in val: return 'color: #888888' # Grey
+    if 'CHURNING' in val: return 'color: #ffaa00; font-weight: bold' 
+    if 'TEST' in val or 'DRIFT' in val: return 'color: #888888' 
     
     return 'color: white'
 
@@ -87,7 +87,8 @@ def style_final(styler):
     styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8'])
     styler.applymap(color_impulse, subset=['Weekly<br>Impulse'])
     styler.applymap(color_score, subset=['Weekly<br>Score', 'Daily<br>Score'])
-    styler.applymap(color_structure, subset=['Structure']) 
+    # Updated mapping for Trend Stack
+    styler.applymap(color_structure, subset=['Trend<br>Stack']) 
     styler.applymap(color_ad_breadth, subset=['A/D Breadth'])
     styler.applymap(color_volume, subset=['Volume']) 
     styler.applymap(color_inst_activity, subset=['Institutional<br>Activity'])
