@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v62.0 Unified Scoring)
+#  TITAN STRATEGY APP (v62.1 Fixed SMA8 Error)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,7 +63,7 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v62.0 ({current_user.upper()})")
+st.title(f"🛡️ Titan Strategy v62.1 ({current_user.upper()})")
 st.caption("Institutional Protocol: Unified Scoring Engine")
 
 # --- UNIFIED DATA ENGINE ---
@@ -352,6 +352,8 @@ if st.session_state.run_analysis:
             df_w.dropna(inplace=True)
             if len(df_w) < 5: continue
             
+            # FIXED: Added SMA8 back so table display doesn't crash
+            df_w['SMA8'] = tm.calc_sma(df_w['Close'], 8)
             df_w['SMA18'] = tm.calc_sma(df_w['Close'], 18)
             df_w['SMA40'] = tm.calc_sma(df_w['Close'], 40)
             df_w['AD'] = tm.calc_ad(df_w['High'], df_w['Low'], df_w['Close'], df_w['Volume'])
