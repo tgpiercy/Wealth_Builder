@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v67.1 Sector Lock)
+#  TITAN STRATEGY APP (v68.0 VSA Upgrade)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v67.1 ({current_user.upper()})")
-st.caption("Institutional Protocol: Sector Locks Active")
+st.title(f"🛡️ Titan Strategy v68.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: VSA Engine")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -75,7 +75,6 @@ def fetch_master_data(ticker_list):
         try:
             fetch_sym = "SPY" if t == "MANL" else t 
             tk = yf.Ticker(fetch_sym)
-            # 10Y History for robust Moving Average calculation
             df = tk.history(period="10y", interval="1d")
             df.index = pd.to_datetime(df.index).tz_localize(None)
             if not df.empty and 'Close' in df.columns:
@@ -87,21 +86,16 @@ def fetch_master_data(ticker_list):
 @st.cache_data(show_spinner="Running Quantitative Analysis...")
 def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     """
-    Core Logic Engine. 
-    REFACTORED for Parent-Child Dependencies.
+    Core Logic Engine (Pass 1 & Pass 2).
     """
-    
-    # 1. PASS 1: CALCULATE ALL METRICS & INDIVIDUAL DECISIONS
-    # We store raw data here first so we know every ticker's status before building the table.
     calculation_db = {}
-    
     unique_scan_list = sorted(list(set(scan_list)))
     
+    # PASS 1: Calculate
     for t in unique_scan_list:
         if t not in master_data or len(master_data[t]) < 50: continue
         df = master_data[t].copy()
         
-        # --- DAILY CALCULATIONS ---
         df['SMA8'] = tm.calc_sma(df['Close'], 8)
         df['SMA18'] = tm.calc_sma(df['Close'], 18)
         df['SMA40'] = tm.calc_sma(df['Close'], 40)
@@ -110,7 +104,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         df['VolSMA'] = tm.calc_sma(df['Volume'], 18)
         df['RSI5'] = tm.calc_rsi(df['Close'], 5); df['RSI20'] = tm.calc_rsi(df['Close'], 20)
         
-        # --- RS CALC (DAILY) ---
         bench_ticker = "SPY"
         if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
         
@@ -127,10 +120,8 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2] 
                 rs_in_zone = curr_rs >= lower_band
                 if rs_in_zone and rs_not_down: rs_score_ok = True
-        else:
-            rs_score_ok = True 
+        else: rs_score_ok = True 
         
-        # --- WEEKLY CALCULATIONS ---
         df_w = df.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'})
         df_w.dropna(inplace=True)
         if len(df_w) < 5: continue
@@ -145,9 +136,10 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         df_w['Cloud_Top'] = pd.concat([span_a, span_b], axis=1).max(axis=1)
 
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
-        inst_activity = tm.calc_structure(df)
         
-        # --- DAILY SCORE ---
+        # --- NEW VSA CALL ---
+        inst_activity = tm.calc_smart_money(df)
+        
         ad_score_ok = False
         ad_val = 0; ad18 = 0
         if len(ad_sma18) > 2:
@@ -164,37 +156,13 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         if tm.calc_rising(df['SMA18'], 2): d_chk += 1     
         if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 
 
-        # --- WEEKLY SCORE ---
-        w_ad_score_ok = False
-        if len(w_ad_sma18) > 2:
-            w_ad_val = df_w['AD'].iloc[-1]; w_ad18 = w_ad_sma18.iloc[-1]
-            w_ad_lower = w_ad18 - (abs(w_ad18) * 0.005)
-            w_ad_not_down = w_ad18 >= w_ad_sma18.iloc[-2] 
-            w_ad_in_zone = w_ad_val >= w_ad_lower
-            if w_ad_in_zone and w_ad_not_down: w_ad_score_ok = True
-        
-        w_rs_score_ok = False
-        if bench_ticker in master_data:
-            bench_w = master_data[bench_ticker].resample('W-FRI').last()['Close']
-            common_w = df_w.index.intersection(bench_w.index)
-            w_rs = df_w.loc[common_w, 'Close'] / bench_w.loc[common_w]
-            w_rs_sma18 = tm.calc_sma(w_rs, 18)
-            if len(w_rs) > 2 and len(w_rs_sma18) > 2:
-                w_curr_rs = w_rs.iloc[-1]; w_curr_rs_sma = w_rs_sma18.iloc[-1]
-                w_lower_band = w_curr_rs_sma - (abs(w_curr_rs_sma) * 0.005)
-                w_rs_not_down = w_curr_rs_sma >= w_rs_sma18.iloc[-2] 
-                w_rs_in_zone = w_curr_rs >= w_lower_band
-                if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
-        else: w_rs_score_ok = True
-
         w_score = 0
-        if w_ad_score_ok: w_score += 1
-        if w_rs_score_ok: w_score += 1
-        if wc['Close'] > wc['SMA18']: w_score += 1 
-        if tm.calc_rising(df_w['SMA18'], 2): w_score += 1 
-        if wc['SMA18'] > wc['SMA40']: w_score += 1 
+        if len(w_ad_sma18) > 2 and (df_w['AD'].iloc[-1] >= (w_ad_sma18.iloc[-1] * 0.99)): w_score += 1
+        if rs_score_ok: w_score += 1
+        if wc['Close'] > wc['SMA18']: w_score += 1
+        if tm.calc_rising(df_w['SMA18'], 2): w_score += 1
+        if wc['SMA18'] > wc['SMA40']: w_score += 1
 
-        # --- DECISION LOGIC ---
         w_pulse = "GOOD" if (wc['Close'] > wc['SMA18']) and (dc['Close'] > df['SMA18'].iloc[-1]) else "NO"
         
         vol_msg = "NORMAL"
@@ -212,12 +180,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
         rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
         
-        final_inst_msg = inst_activity
-        if "SPIKE" in vol_msg:
-            if inst_activity == "HL": final_inst_msg = "ACCUMULATION (HL)" if is_rising else final_inst_msg
-            if inst_activity == "HH": final_inst_msg = "BREAKOUT (HH)" if is_rising else "DISTRIBUTION (HH)"
-            if inst_activity == "LL": final_inst_msg = "CAPITULATION (LL)" if is_rising else "LIQUIDATION (LL)"
-            if inst_activity == "LH": final_inst_msg = "SELLING (LH)"
+        final_inst_msg = inst_activity # Now using the VSA Result
 
         decision = "AVOID"; reason = "Low Score"
         if w_score >= 4:
@@ -240,48 +203,22 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         elif ad_score_ok: ad_msg = "NEUTRAL"
         else: ad_msg = "DISTRIBUTION"
 
-        # STORE IN CALCULATION DB (Used for lookup in Pass 2)
-        calculation_db[t] = {
-            "Decision": decision, 
-            "Reason": reason, 
-            "RRG": rrg_phase, 
-            "W_Score": w_score, 
-            "D_Score": d_chk,
-            "Structure": "BULLISH" if struct_pass else "",
-            "A/D": ad_msg,
-            "Vol": vol_msg,
-            "RSI": rsi_msg,
-            "Inst": final_inst_msg,
-            "Pulse": w_pulse,
-            "W_SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL"
-        }
+        calculation_db[t] = {"Decision": decision, "Reason": reason, "RRG": rrg_phase, "W_Score": w_score, "D_Score": d_chk, "Structure": "BULLISH" if struct_pass else "", "A/D": ad_msg, "Vol": vol_msg, "RSI": rsi_msg, "Inst": final_inst_msg, "Pulse": w_pulse, "W_SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL"}
 
-    # 2. PASS 2: GENERATE TABLE (Enforce Parent Lock)
+    # PASS 2: Enforce Parent Lock
     results = []
     TICKER_PRIORITY = {t: i for i, t in enumerate(tc.DATA_MAP.keys())}
     
     for t in unique_scan_list:
         if t not in calculation_db: continue
-        
         data = calculation_db[t]
-        final_decision = data["Decision"]
-        final_reason = data["Reason"]
+        final_decision = data["Decision"]; final_reason = data["Reason"]
         
-        # --- SECTOR LOCK LOGIC ---
-        # Get Parent Ticker (Benchmark) from config
         parent_ticker = tc.DATA_MAP.get(t, [None, None])[1]
-        
-        # Ensure we don't lock the parent itself (e.g. SPY shouldn't lock SPY)
-        # And ensure we don't lock things benchmarked to general Markets like SPY
-        # The rule implies: If "XLK" is Avoid, then "IGV" is Locked.
-        
         if parent_ticker and parent_ticker != "SPY" and parent_ticker != "HXT.TO":
-            # If Parent exists in our analysis and is AVOID
             if parent_ticker in calculation_db:
-                parent_decision = calculation_db[parent_ticker]["Decision"]
-                if "AVOID" in parent_decision:
-                    final_decision = "LOCKED"
-                    final_reason = f"Parent ({parent_ticker}) Weak"
+                if "AVOID" in calculation_db[parent_ticker]["Decision"]:
+                    final_decision = "LOCKED"; final_reason = f"Parent ({parent_ticker}) Weak"
 
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
         if "99. DATA" in cat_name: continue
@@ -291,16 +228,7 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             disp_action = final_decision if "AVOID" not in final_decision else ""
             sort_priority = TICKER_PRIORITY.get(t, 9999)
             
-            row = {
-                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": data["RRG"],
-                "Weekly<br>SMA8": data["W_SMA8"], "Weekly<br>Impulse": data["Pulse"], 
-                "Weekly<br>Score": data["W_Score"], "Daily<br>Score": data["D_Score"],
-                "Structure": data["Structure"],
-                "A/D Breadth": data["A/D"],
-                "Volume": data["Vol"], "Dual RSI": data["RSI"], "Institutional<br>Activity": data["Inst"],
-                "Action": disp_action, "Reasoning": final_reason,
-                "Priority": sort_priority 
-            }
+            row = {"Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": data["RRG"], "Weekly<br>SMA8": data["W_SMA8"], "Weekly<br>Impulse": data["Pulse"], "Weekly<br>Score": data["W_Score"], "Daily<br>Score": data["D_Score"], "Structure": data["Structure"], "A/D Breadth": data["A/D"], "Volume": data["Vol"], "Dual RSI": data["RSI"], "Institutional<br>Activity": data["Inst"], "Action": disp_action, "Reasoning": final_reason, "Priority": sort_priority}
             results.append(row)
 
     return results, calculation_db
@@ -325,7 +253,7 @@ def save_portfolio(df):
     if not df.empty: df['Shares'] = df.apply(clean_shares, axis=1)
     df.to_csv(PORTFOLIO_FILE, index=False)
 
-# --- SIDEBAR: MANAGER ---
+# --- SIDEBAR & MAIN EXECUTION ---
 st.sidebar.header("💼 Portfolio Manager")
 pf_df = load_portfolio()
 cash_rows = pf_df[(pf_df['Ticker'] == 'CASH') & (pf_df['Status'] == 'OPEN')]
@@ -558,13 +486,8 @@ if st.session_state.run_analysis:
 
         # --- SECTION 4: SCANNER RESULTS (Cached) ---
         if scan_results:
-            # 1. SORT BY PRIORITY
             df_final = pd.DataFrame(scan_results).sort_values("Priority", ascending=True)
-            
-            # 2. CLEAN SECTOR NAMES (Strip "01. ", "02. " etc)
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            
-            # 3. SELECT COLUMNS (Priority hidden)
             cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
@@ -573,7 +496,7 @@ if st.session_state.run_analysis:
     if mode == "Sector Rotation":
         st.subheader("🔄 Relative Rotation Graphs (RRG)")
         is_dark = st.session_state.get('is_dark', True)
-        rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes"], horizontal=True, key="rrg_nav")
+        rrg_mode = st.radio("View:", ["Indices", "Sectors", "Drill-Down", "Themes", "Metals"], horizontal=True, key="rrg_nav")
         
         if rrg_mode == "Indices":
             c1, c2 = st.columns([1,3])
@@ -620,3 +543,11 @@ if st.session_state.run_analysis:
                 r, m = tr.calculate_rrg_math(wide_df, "SPY")
                 st.session_state['fig_thm'] = tr.plot_rrg_chart(r, m, tc.RRG_THEMES, "Themes vs SPY", is_dark)
             if 'fig_thm' in st.session_state: st.plotly_chart(st.session_state['fig_thm'], use_container_width=True)
+
+        elif rrg_mode == "Metals":
+            if st.button("Run Precious Metals"):
+                metals = ["GLD", "SLV"]
+                wide_df = tr.prepare_rrg_inputs(master_data, metals, "SPY")
+                r, m = tr.calculate_rrg_math(wide_df, "SPY")
+                st.session_state['fig_met'] = tr.plot_rrg_chart(r, m, {k:k for k in metals}, "Precious Metals vs SPY", is_dark)
+            if 'fig_met' in st.session_state: st.plotly_chart(st.session_state['fig_met'], use_container_width=True)
