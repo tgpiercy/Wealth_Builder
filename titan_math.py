@@ -5,10 +5,11 @@ def calc_sma(series, length):
     return series.rolling(window=length).mean()
 
 def calc_ad(high, low, close, volume):
+    # Pine Script divides Accumulation/Distribution by 1,000,000 for scaling
     mfm = ((close - low) - (high - close)) / (high - low)
     mfm = mfm.fillna(0.0)
     mfv = mfm * volume
-    return mfv.cumsum()
+    return mfv.cumsum() / 1000000.0
 
 def calc_ichimoku(high, low, close):
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
@@ -40,6 +41,20 @@ def calc_rsi(series, length=14):
     except:
         return pd.Series(50, index=series.index)
 
+def calc_rising(series, length=2):
+    """
+    Matches Pine Script's ta.rising(source, length).
+    Returns True if current value is greater than previous for 'length' bars.
+    ta.rising(x, 2) -> x > x[1] AND x[1] > x[2]
+    """
+    if len(series) < length + 1: return False
+    res = True
+    for i in range(length):
+        if not (series.iloc[-(i+1)] > series.iloc[-(i+2)]):
+            res = False
+            break
+    return res
+
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
     pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
@@ -67,4 +82,3 @@ def round_to_03_07(price):
     whole = int(price)
     candidates = [c for c in [whole + 0.03, whole + 0.07, (whole - 1) + 0.97, (whole - 1) + 0.93] if c > 0]
     return min(candidates, key=lambda x: abs(x - price)) if candidates else price
-
