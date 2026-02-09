@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v62.2 Pine Parity)
+#  TITAN STRATEGY APP (v62.3 Robust Math)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v62.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Pine Script Parity")
+st.title(f"🛡️ Titan Strategy v62.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Robust Math & Parity")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
@@ -321,6 +321,7 @@ if st.session_state.run_analysis:
             df = master_data[t].copy()
             
             # --- DAILY CALCULATIONS ---
+            df['SMA8'] = tm.calc_sma(df['Close'], 8) # Added to prevent KeyErrors
             df['SMA18'] = tm.calc_sma(df['Close'], 18)
             df['SMA40'] = tm.calc_sma(df['Close'], 40)
             df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
@@ -331,7 +332,6 @@ if st.session_state.run_analysis:
             # --- RS CALC (DAILY) ---
             bench_ticker = "SPY"
             if t in tc.DATA_MAP and tc.DATA_MAP[t][1]: bench_ticker = tc.DATA_MAP[t][1]
-            
             rs_score_ok = False
             if bench_ticker in master_data:
                 bench_series = master_data[bench_ticker]['Close']
@@ -339,10 +339,11 @@ if st.session_state.run_analysis:
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = tm.calc_sma(rs_series, 18)
                 
-                # EXACT PARITY: Band Logic
+                # EXACT PARITY: Band Logic with Abs Value protection
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
-                    lower_band = curr_rs_sma * 0.995 # Pine: rsBandPct = 0.5
+                    # Robust lower band: SMA - 0.5% of its Magnitude
+                    lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005)
                     
                     rs_in_zone = curr_rs >= lower_band
                     rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2]
@@ -373,7 +374,8 @@ if st.session_state.run_analysis:
             ad_score_ok = False
             if len(ad_sma18) > 2:
                 ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]
-                ad_lower_band = ad18 * 0.995 # Pine: adBandPct = 0.5
+                # Robust lower band: SMA - 0.5% of its Magnitude (works for neg A/D)
+                ad_lower_band = ad18 - (abs(ad18) * 0.005)
                 ad_not_down = ad18 >= ad_sma18.iloc[-2]
                 ad_in_zone = ad_val >= ad_lower_band
                 if ad_in_zone and ad_not_down: ad_score_ok = True
@@ -390,7 +392,7 @@ if st.session_state.run_analysis:
             w_ad_score_ok = False
             if len(w_ad_sma18) > 2:
                 w_ad_val = df_w['AD'].iloc[-1]; w_ad18 = w_ad_sma18.iloc[-1]
-                w_ad_lower = w_ad18 * 0.995
+                w_ad_lower = w_ad18 - (abs(w_ad18) * 0.005)
                 w_ad_not_down = w_ad18 >= w_ad_sma18.iloc[-2]
                 w_ad_in_zone = w_ad_val >= w_ad_lower
                 if w_ad_in_zone and w_ad_not_down: w_ad_score_ok = True
@@ -404,7 +406,7 @@ if st.session_state.run_analysis:
                 w_rs_sma18 = tm.calc_sma(w_rs, 18)
                 if len(w_rs) > 2 and len(w_rs_sma18) > 2:
                     w_curr_rs = w_rs.iloc[-1]; w_curr_rs_sma = w_rs_sma18.iloc[-1]
-                    w_lower_band = w_curr_rs_sma * 0.995
+                    w_lower_band = w_curr_rs_sma - (abs(w_curr_rs_sma) * 0.005)
                     w_rs_not_down = w_curr_rs_sma >= w_rs_sma18.iloc[-2]
                     w_rs_in_zone = w_curr_rs >= w_lower_band
                     if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
