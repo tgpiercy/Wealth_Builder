@@ -39,8 +39,6 @@ def color_structure(val):
     val = str(val).upper()
     if 'BULLISH' in val: return 'color: #00ff00'
     if 'BEARISH' in val: return 'color: #ff4444'
-    if 'ABOVE' in val: return 'color: #00ff00'
-    if 'BELOW' in val: return 'color: #ff4444'
     return 'color: white'
 
 def color_score(val):
@@ -58,19 +56,24 @@ def color_ad_breadth(val):
     if 'ACCUMULATION' in val: return 'color: #00ff00; font-weight: bold'
     if 'NEUTRAL' in val: return 'color: #ffaa00'
     if 'DISTRIBUTION' in val: return 'color: #ff4444'
-    if 'STRONG' in val: return 'color: #00ff00'
-    if 'WEAK' in val: return 'color: #ff4444'
+    return 'color: white'
+
+def color_volume(val):
+    val = str(val).upper()
+    if 'SPIKE' in val: return 'color: #00bfff; font-weight: bold' # Cyan for spike
+    if 'HIGH' in val: return 'color: #00ff00' # Green for high
     return 'color: white'
 
 # --- MAIN STYLER ---
 def style_final(styler):
     # 1. Apply Column Specific Coloring
     styler.applymap(color_rotation, subset=['Rotation'])
-    styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8'])
+    styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8', 'Ichimoku<br>Cloud'])
     styler.applymap(color_impulse, subset=['Weekly<br>Impulse'])
     styler.applymap(color_score, subset=['Weekly<br>Score', 'Daily<br>Score'])
-    styler.applymap(color_structure, subset=['Structure', 'Daily<br>Score']) 
-    styler.applymap(color_ad_breadth, subset=['A/D Breadth']) # New Column
+    styler.applymap(color_structure, subset=['Structure']) 
+    styler.applymap(color_ad_breadth, subset=['A/D Breadth'])
+    styler.applymap(color_volume, subset=['Volume']) # Restored!
     styler.applymap(color_action, subset=['Action'])
 
     # 2. Global Table Formatting
@@ -105,5 +108,5 @@ def style_portfolio(styler):
 # --- DAILY HEALTH STYLER ---
 def style_daily_health(styler):
     styler.hide(axis='index')
-    styler.hide(axis='columns') # Hides headers for cleaner look if desired, or remove this line
+    styler.hide(axis='columns') 
     return styler
