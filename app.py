@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v64.1 Duplicates Fixed)
+#  TITAN STRATEGY APP (v64.2 Final Polish)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,7 +63,7 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v64.1 ({current_user.upper()})")
+st.title(f"🛡️ Titan Strategy v64.2 ({current_user.upper()})")
 st.caption("Institutional Protocol: Clean Master Table")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
@@ -274,12 +274,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             disp_struct = "BULLISH" if struct_pass else ""
             disp_action = final_decision if "AVOID" not in final_decision else ""
             
-            if disp_action == "" and not is_blue_spike: 
-                disp_stop = ""; disp_shares = ""
-            else:
-                shares = int(final_risk / (dc['Close'] - smart_stop_val)) if (dc['Close'] - smart_stop_val) > 0 else 0
-                disp_stop = f"${smart_stop_val:.2f} (-{stop_pct:.1f}%)"; disp_shares = f"{shares} shares"
-
             row = {
                 "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": rrg_phase,
                 "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
@@ -287,17 +281,13 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Structure": disp_struct,
                 "A/D Breadth": ad_msg,
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
-                "Action": disp_action, "Reasoning": final_reason, "Stop Price": disp_stop, "Position Size": disp_shares
+                "Action": disp_action, "Reasoning": final_reason
             }
             
             # --- DEDUPLICATION LOGIC ---
-            # If it is a Sector ETF (XLK, HXT.TO), we force it to the "Summary" section logic ONLY.
-            # We skip adding it as a regular stock row to avoid duplication.
-            
             is_summary_ticker = (t == "HXT.TO") or (t in tc.SECTOR_ETFS)
             
             if is_summary_ticker:
-                # Only add the summary row
                 if t == "HXT.TO": 
                     row["Sector"] = "15. CANADA (HXT)"; row["Rank"] = 0
                     results.append(row)
@@ -305,7 +295,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                     row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
                     results.append(row)
             else:
-                # Regular stock, add normally
                 results.append(row)
 
     return results, analysis_db
@@ -565,7 +554,8 @@ if st.session_state.run_analysis:
         if scan_results:
             df_final = pd.DataFrame(scan_results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning", "Stop Price", "Position Size"]
+            # COLS: Removed Ichimoku, Removed Stop/Size
+            cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
             st.warning("Scanner returned no results.")
