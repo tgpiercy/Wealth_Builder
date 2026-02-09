@@ -12,7 +12,7 @@ def color_action(val):
     if 'SCOUT' in val: return 'color: #00bfff; font-weight: bold'
     if 'WATCH' in val: return 'color: #ffff00; font-weight: bold'
     if 'CAUTION' in val: return 'color: #ffaa00; font-weight: bold'
-    if 'LOCKED' in val: return 'color: #888888; font-weight: bold; font-style: italic' # Grey for Sector Lock
+    if 'LOCKED' in val: return 'color: #888888; font-weight: bold; font-style: italic'
     if 'AVOID' in val: return 'color: #ff4444'
     return 'color: white'
 
@@ -61,19 +61,28 @@ def color_ad_breadth(val):
 
 def color_volume(val):
     val = str(val).upper()
-    if 'SPIKE' in val: return 'color: #ff00ff; font-weight: bold' # Magenta
-    if 'HIGH' in val: return 'color: #00ff00' # Green
+    if 'SPIKE' in val: return 'color: #ff00ff; font-weight: bold' 
+    if 'HIGH' in val: return 'color: #00ff00' 
     return 'color: white'
 
 def color_inst_activity(val):
     val = str(val).upper()
-    if 'ACCUMULATION' in val or 'BREAKOUT' in val: return 'color: #00ff00'
-    if 'DISTRIBUTION' in val or 'LIQUIDATION' in val or 'SELLING' in val or 'CAPITULATION' in val: return 'color: #ff4444'
+    # Bullish VSA
+    if 'IGNITION' in val or 'STOPPING' in val: return 'color: #00ff00; font-weight: bold'
+    if 'RALLY' in val: return 'color: #ccff66'
+    
+    # Bearish VSA
+    if 'DUMPING' in val or 'UPTHRUST' in val: return 'color: #ff4444; font-weight: bold'
+    if 'DROP' in val or 'LIQUIDATION' in val: return 'color: #ff4444'
+    
+    # Neutral/Warning
+    if 'CHURNING' in val: return 'color: #ffaa00; font-weight: bold' # Orange
+    if 'TEST' in val or 'DRIFT' in val: return 'color: #888888' # Grey
+    
     return 'color: white'
 
 # --- MAIN STYLER ---
 def style_final(styler):
-    # 1. Apply Column Specific Coloring
     styler.applymap(color_rotation, subset=['Rotation'])
     styler.applymap(color_pass_fail, subset=['Weekly<br>SMA8'])
     styler.applymap(color_impulse, subset=['Weekly<br>Impulse'])
@@ -84,7 +93,6 @@ def style_final(styler):
     styler.applymap(color_inst_activity, subset=['Institutional<br>Activity'])
     styler.applymap(color_action, subset=['Action'])
 
-    # 2. Global Table Formatting
     styler.hide(axis='index')
     styler.set_table_styles([
         {'selector': 'thead th', 'props': [
@@ -104,7 +112,6 @@ def style_final(styler):
     ])
     return styler
 
-# --- PORTFOLIO STYLER ---
 def style_portfolio(styler):
     styler.hide(axis='index')
     styler.set_table_styles([
@@ -113,7 +120,6 @@ def style_portfolio(styler):
     ])
     return styler
 
-# --- DAILY HEALTH STYLER ---
 def style_daily_health(styler):
     styler.hide(axis='index')
     styler.hide(axis='columns') 
