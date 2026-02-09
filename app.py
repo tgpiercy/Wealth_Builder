@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v62.5 Data Depth 10y)
+#  TITAN STRATEGY APP (v62.9 GW2 Scorecard Parity)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v62.5 ({current_user.upper()})")
-st.caption("Institutional Protocol: Deep History (10y)")
+st.title(f"🛡️ Titan Strategy v62.9 ({current_user.upper()})")
+st.caption("Institutional Protocol: GW2 Scorecard Alignment")
 
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
@@ -75,7 +75,7 @@ def fetch_master_data(ticker_list):
         try:
             fetch_sym = "SPY" if t == "MANL" else t 
             tk = yf.Ticker(fetch_sym)
-            # INCREASED DATA FETCH TO 10 YEARS FOR ACCURACY
+            # 10Y History for robust Moving Average calculation
             df = tk.history(period="10y", interval="1d")
             df.index = pd.to_datetime(df.index).tz_localize(None)
             if not df.empty and 'Close' in df.columns:
@@ -312,7 +312,7 @@ if st.session_state.run_analysis:
             st.markdown(pd.DataFrame(h_rows).style.pipe(ts.style_daily_health).to_html(escape=False), unsafe_allow_html=True)
             st.write("---")
 
-        # 5. SCANNER LOOP (EXACT PARITY)
+        # 5. SCANNER LOOP (GW2 SCORECARD PARITY)
         results = []
         scan_list = list(set(list(tc.DATA_MAP.keys()) + pf_tickers))
         analysis_db = {}
@@ -322,7 +322,7 @@ if st.session_state.run_analysis:
             df = master_data[t].copy()
             
             # --- DAILY CALCULATIONS ---
-            df['SMA8'] = tm.calc_sma(df['Close'], 8) # Added to prevent KeyErrors
+            df['SMA8'] = tm.calc_sma(df['Close'], 8)
             df['SMA18'] = tm.calc_sma(df['Close'], 18)
             df['SMA40'] = tm.calc_sma(df['Close'], 40)
             df['AD'] = tm.calc_ad(df['High'], df['Low'], df['Close'], df['Volume'])
@@ -340,14 +340,14 @@ if st.session_state.run_analysis:
                 rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
                 rs_sma18 = tm.calc_sma(rs_series, 18)
                 
-                # RELAXED LOGIC: If Strong (Above SMA), Pass. Else check Band & Slope.
+                # [span_1](start_span)SCORECARD LOGIC: In Zone + Not Down[span_1](end_span)
                 if len(rs_series) > 2 and len(rs_sma18) > 2:
                     curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
-                    lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005)
-                    rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2]
+                    lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) # 0.5% tolerance
+                    rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2] # Must NOT be falling
+                    rs_in_zone = curr_rs >= lower_band
                     
-                    if curr_rs > curr_rs_sma: rs_score_ok = True # Strong
-                    elif curr_rs >= lower_band and rs_not_down: rs_score_ok = True # Stable
+                    if rs_in_zone and rs_not_down: rs_score_ok = True
             else:
                 rs_score_ok = True 
             
@@ -368,16 +368,16 @@ if st.session_state.run_analysis:
             dc = df.iloc[-1]; wc = df_w.iloc[-1]
             inst_activity = tm.calc_structure(df)
             
-            # --- DAILY SCORE (5 Pts - RELAXED) ---
-            # 1. Breadth
+            # --- DAILY SCORE (5 Pts - GW2 SCORECARD) ---
+            # 1. Breadth (A/D)
             ad_score_ok = False
             if len(ad_sma18) > 2:
                 ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]
                 ad_lower_band = ad18 - (abs(ad18) * 0.005)
-                ad_not_down = ad18 >= ad_sma18.iloc[-2]
+                ad_not_down = ad18 >= ad_sma18.iloc[-2] # Strict Check
+                ad_in_zone = ad_val >= ad_lower_band
                 
-                if ad_val > ad18: ad_score_ok = True # Strong
-                elif ad_val >= ad_lower_band and ad_not_down: ad_score_ok = True # Stable
+                if ad_in_zone and ad_not_down: ad_score_ok = True
             
             d_chk = 0
             if ad_score_ok: d_chk += 1
@@ -386,16 +386,16 @@ if st.session_state.run_analysis:
             if tm.calc_rising(df['SMA18'], 2): d_chk += 1     # Momentum
             if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 # Structure
 
-            # --- WEEKLY SCORE (5 Pts - RELAXED) ---
-            # 1. Breadth (Weekly)
+            # --- WEEKLY SCORE (5 Pts - GW2 SCORECARD) ---
+            # 1. Breadth (Weekly A/D)
             w_ad_score_ok = False
             if len(w_ad_sma18) > 2:
                 w_ad_val = df_w['AD'].iloc[-1]; w_ad18 = w_ad_sma18.iloc[-1]
                 w_ad_lower = w_ad18 - (abs(w_ad18) * 0.005)
                 w_ad_not_down = w_ad18 >= w_ad_sma18.iloc[-2]
+                w_ad_in_zone = w_ad_val >= w_ad_lower
                 
-                if w_ad_val > w_ad18: w_ad_score_ok = True
-                elif w_ad_val >= w_ad_lower and w_ad_not_down: w_ad_score_ok = True
+                if w_ad_in_zone and w_ad_not_down: w_ad_score_ok = True
             
             # 2. RS (Weekly)
             w_rs_score_ok = False
@@ -408,9 +408,9 @@ if st.session_state.run_analysis:
                     w_curr_rs = w_rs.iloc[-1]; w_curr_rs_sma = w_rs_sma18.iloc[-1]
                     w_lower_band = w_curr_rs_sma - (abs(w_curr_rs_sma) * 0.005)
                     w_rs_not_down = w_curr_rs_sma >= w_rs_sma18.iloc[-2]
+                    w_rs_in_zone = w_curr_rs >= w_lower_band
                     
-                    if w_curr_rs > w_curr_rs_sma: w_rs_score_ok = True
-                    elif w_curr_rs >= w_lower_band and w_rs_not_down: w_rs_score_ok = True
+                    if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
             else: w_rs_score_ok = True
 
             w_score = 0
