@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v64.2 Final Polish)
+#  TITAN STRATEGY APP (v64.4 Metric Fix)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v64.2 ({current_user.upper()})")
-st.caption("Institutional Protocol: Clean Master Table")
+st.title(f"🛡️ Titan Strategy v64.4 ({current_user.upper()})")
+st.caption("Institutional Protocol: Dashboard Fixed")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -511,9 +511,9 @@ if st.session_state.run_analysis:
         # --- SECTION 1: PERFORMANCE DASHBOARD ---
         st.subheader("📊 Performance Dashboard")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", ts.fmt_delta(open_pl_cad))
-        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", ts.fmt_delta(open_pl_val))
-        c3.metric("Benchmark (Shadow SPY)", f"${shadow_equity:,.2f}", f"{alpha_dollars:+.2f} Alpha")
+        c1.metric(f"Net Worth (CAD @ {cad_rate:.2f})", f"${total_nw_cad:,.2f}", f"{open_pl_cad:+.2f}")
+        c2.metric("Net Worth (USD)", f"${total_net_worth:,.2f}", f"{open_pl_val:+.2f}")
+        c3.metric("Benchmark (Shadow SPY)", f"${shadow_equity:,.2f}", f"{alpha_dollars:+.2f}")
         c4.metric("Cash", f"${current_cash:,.2f}")
         c5.metric("Equity", f"${eq_val:,.2f}")
         st.write("---")
@@ -554,7 +554,7 @@ if st.session_state.run_analysis:
         if scan_results:
             df_final = pd.DataFrame(scan_results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            # COLS: Removed Ichimoku, Removed Stop/Size
+            # COLS: Final Output Columns (No Stop/Size, No Ichimoku)
             cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
