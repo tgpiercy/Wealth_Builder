@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v65.0 RRG Tails)
+#  TITAN STRATEGY APP (v66.3 Strict Sort)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v65.0 ({current_user.upper()})")
-st.caption("Institutional Protocol: Directional RRG")
+st.title(f"🛡️ Titan Strategy v66.3 ({current_user.upper()})")
+st.caption("Institutional Protocol: Custom Sort Order")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -88,10 +88,13 @@ def fetch_master_data(ticker_list):
 def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     """
     Core Logic Engine.
-    Separated from the UI so it caches the heavy math results.
     """
     results = []
     analysis_db = {}
+    
+    # SORTING PRIORITY MAP (From Config Order)
+    # This creates a map { 'SPY': 0, 'RSP': 1, 'DIA': 2 ... }
+    TICKER_PRIORITY = {t: i for i, t in enumerate(tc.DATA_MAP.keys())}
     
     # DEDUPLICATION: Ensure we process each ticker exactly once
     unique_scan_list = sorted(list(set(scan_list)))
@@ -120,13 +123,12 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             rs_series = df.loc[common_idx, 'Close'] / bench_series.loc[common_idx]
             rs_sma18 = tm.calc_sma(rs_series, 18)
             
-            # SCORECARD LOGIC: In Zone + Not Down (Strict 1-bar check)
+            # SCORECARD LOGIC
             if len(rs_series) > 2 and len(rs_sma18) > 2:
                 curr_rs = rs_series.iloc[-1]; curr_rs_sma = rs_sma18.iloc[-1]
-                lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) # 0.5% tolerance
-                rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2] # Strict 1-bar stability check
+                lower_band = curr_rs_sma - (abs(curr_rs_sma) * 0.005) 
+                rs_not_down = curr_rs_sma >= rs_sma18.iloc[-2] 
                 rs_in_zone = curr_rs >= lower_band
-                
                 if rs_in_zone and rs_not_down: rs_score_ok = True
         else:
             rs_score_ok = True 
@@ -148,37 +150,32 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         dc = df.iloc[-1]; wc = df_w.iloc[-1]
         inst_activity = tm.calc_structure(df)
         
-        # --- DAILY SCORE (5 Pts - STRICT) ---
-        # 1. Breadth (A/D)
+        # --- DAILY SCORE ---
         ad_score_ok = False
         ad_val = 0; ad18 = 0
         if len(ad_sma18) > 2:
             ad_val = df['AD'].iloc[-1]; ad18 = ad_sma18.iloc[-1]
             ad_lower_band = ad18 - (abs(ad18) * 0.005)
-            ad_not_down = ad18 >= ad_sma18.iloc[-2] # Strict 1-bar stability check
+            ad_not_down = ad18 >= ad_sma18.iloc[-2]
             ad_in_zone = ad_val >= ad_lower_band
-            
             if ad_in_zone and ad_not_down: ad_score_ok = True
         
         d_chk = 0
         if ad_score_ok: d_chk += 1
         if rs_score_ok: d_chk += 1
-        if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1 # Trend
-        if tm.calc_rising(df['SMA18'], 2): d_chk += 1     # Momentum (Strict 2-bar rise)
-        if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 # Structure
+        if dc['Close'] > df['SMA18'].iloc[-1]: d_chk += 1 
+        if tm.calc_rising(df['SMA18'], 2): d_chk += 1     
+        if df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]: d_chk += 1 
 
-        # --- WEEKLY SCORE (5 Pts - STRICT) ---
-        # 1. Breadth (Weekly A/D)
+        # --- WEEKLY SCORE ---
         w_ad_score_ok = False
         if len(w_ad_sma18) > 2:
             w_ad_val = df_w['AD'].iloc[-1]; w_ad18 = w_ad_sma18.iloc[-1]
             w_ad_lower = w_ad18 - (abs(w_ad18) * 0.005)
-            w_ad_not_down = w_ad18 >= w_ad_sma18.iloc[-2] # Strict 1-bar stability check
+            w_ad_not_down = w_ad18 >= w_ad_sma18.iloc[-2] 
             w_ad_in_zone = w_ad_val >= w_ad_lower
-            
             if w_ad_in_zone and w_ad_not_down: w_ad_score_ok = True
         
-        # 2. RS (Weekly)
         w_rs_score_ok = False
         if bench_ticker in master_data:
             bench_w = master_data[bench_ticker].resample('W-FRI').last()['Close']
@@ -188,18 +185,17 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             if len(w_rs) > 2 and len(w_rs_sma18) > 2:
                 w_curr_rs = w_rs.iloc[-1]; w_curr_rs_sma = w_rs_sma18.iloc[-1]
                 w_lower_band = w_curr_rs_sma - (abs(w_curr_rs_sma) * 0.005)
-                w_rs_not_down = w_curr_rs_sma >= w_rs_sma18.iloc[-2] # Strict 1-bar stability check
+                w_rs_not_down = w_curr_rs_sma >= w_rs_sma18.iloc[-2] 
                 w_rs_in_zone = w_curr_rs >= w_lower_band
-                
                 if w_rs_in_zone and w_rs_not_down: w_rs_score_ok = True
-            else: w_rs_score_ok = True
+        else: w_rs_score_ok = True
 
         w_score = 0
         if w_ad_score_ok: w_score += 1
         if w_rs_score_ok: w_score += 1
-        if wc['Close'] > wc['SMA18']: w_score += 1 # Trend
-        if tm.calc_rising(df_w['SMA18'], 2): w_score += 1 # Momentum (Strict 2-bar rise)
-        if wc['SMA18'] > wc['SMA40']: w_score += 1 # Structure
+        if wc['Close'] > wc['SMA18']: w_score += 1 
+        if tm.calc_rising(df_w['SMA18'], 2): w_score += 1 
+        if wc['SMA18'] > wc['SMA40']: w_score += 1 
 
         # --- DECISION LOGIC ---
         w_pulse = "GOOD" if (wc['Close'] > wc['SMA18']) and (dc['Close'] > df['SMA18'].iloc[-1]) else "NO"
@@ -227,53 +223,39 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
             else: decision = "WATCH"; reason = "Daily Weak"
         else: decision = "AVOID"; reason = "Weekly Weak"
 
-        # Re-introduced Cloud check as a hard filter instead of score
         if not (wc['Close'] > wc['Cloud_Top']): decision = "AVOID"; reason = "Below Cloud"
         elif "NO" in w_pulse: decision = "AVOID"; reason = "Impulse NO"
         if risk_per_trade == 0 and "BUY" in decision: decision = "CAUTION"; reason = "VIX Lock"
 
-        atr = tm.calc_atr(df['High'], df['Low'], df['Close']).iloc[-1]
-        raw_stop = dc['Close'] - (2.618 * atr); smart_stop_val = tm.round_to_03_07(raw_stop)
-        stop_dist = dc['Close'] - smart_stop_val; stop_pct = (stop_dist / dc['Close']) * 100 if dc['Close'] else 0
-        
-        if r5 >= r20:
-            n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
-        else:
-            n_c = "#FFA500" if r20 > 50 else "#FF4444"
-        a_c = "#00FF00" if is_rising else "#FF4444"; arrow = "↑" if is_rising else "↓"
-        rsi_msg = f"<span style='color:{n_c}'><b>{int(r5)}/{int(r20)}</b></span> <span style='color:{a_c}'><b>{arrow}</b></span>"
-        
-        rrg_phase = rrg_snapshot.get(t, "unknown").upper() # Now includes Arrow!
-        
+        rrg_phase = rrg_snapshot.get(t, "UNKNOWN ➡️").upper()
         if "WEAKENING" in rrg_phase and "BUY" in decision: decision = "CAUTION"; reason = "Rotation Weak"
         
-        # Structure Check (SMA 18 vs 40)
         struct_pass = df['SMA18'].iloc[-1] > df['SMA40'].iloc[-1]
         
-        # A/D Enhanced Status
         if ad_val > ad18: ad_msg = "ACCUMULATION"
         elif ad_score_ok: ad_msg = "NEUTRAL"
         else: ad_msg = "DISTRIBUTION"
 
-        analysis_db[t] = {"Decision": decision, "Reason": reason, "Price": dc['Close'], "Stop": smart_stop_val, "StopPct": stop_pct, "RRG": rrg_phase, "W_SMA8_Pass": (wc['Close']>wc['SMA8']), "W_Pulse": w_pulse, "W_Score": w_score, "D_Score": d_chk, "Struct_Pass": struct_pass, "W_Cloud": (wc['Close']>wc['Cloud_Top']), "AD_Msg": ad_msg, "Vol_Msg": vol_msg, "RSI_Msg": rsi_msg, "Inst_Act": final_inst_msg}
+        analysis_db[t] = {"Decision": decision, "Reason": reason, "RRG": rrg_phase}
 
-        # Filter Logic for Table
+        # Filter Logic
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
         if "99. DATA" in cat_name: continue
-        is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO"])
+        is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO", "SPY", "RSP", "IEF", "^VIX"])
         
         if is_scanner:
             final_decision = decision; final_reason = reason
-            if cat_name in tc.SECTOR_PARENTS:
-                pass 
+            if cat_name in tc.SECTOR_PARENTS: pass # Parent logic hook
 
             is_blue_spike = ("#00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
-            final_risk = risk_per_trade / 3 if "SCOUT" in final_decision else risk_per_trade
-            if is_blue_spike: final_risk = risk_per_trade
             
-            # --- CLEAN OUTPUT LOGIC ---
             disp_struct = "BULLISH" if struct_pass else ""
             disp_action = final_decision if "AVOID" not in final_decision else ""
+            
+            # --- PRIORITY CALCULATION ---
+            # Assign sorting priority based on config position
+            # Default to 9999 if not found
+            sort_priority = TICKER_PRIORITY.get(t, 9999)
             
             row = {
                 "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": rrg_phase,
@@ -282,19 +264,18 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
                 "Structure": disp_struct,
                 "A/D Breadth": ad_msg,
                 "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
-                "Action": disp_action, "Reasoning": final_reason
+                "Action": disp_action, "Reasoning": final_reason,
+                "Priority": sort_priority  # Hidden sort key
             }
             
-            # --- DEDUPLICATION LOGIC ---
-            is_summary_ticker = (t == "HXT.TO") or (t in tc.SECTOR_ETFS)
-            
-            if is_summary_ticker:
-                if t == "HXT.TO": 
-                    row["Sector"] = "15. CANADA (HXT)"; row["Rank"] = 0
-                    results.append(row)
-                elif t in tc.SECTOR_ETFS:
-                    row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
-                    results.append(row)
+            # --- DEDUPLICATION ---
+            # HXT.TO is now treated as a market ticker, no redirection needed based on config v66.2
+            # SECTOR ETFS still get Summary grouping for clarity if needed
+            if t in tc.SECTOR_ETFS:
+                row["Sector"] = "02. SECTORS (SUMMARY)"; row["Rank"] = 0
+                # Give Summary Rows a slightly higher priority in that block? 
+                # Actually we just want them to appear where they are in config.
+                results.append(row)
             else:
                 results.append(row)
 
@@ -412,10 +393,10 @@ with tab5:
         except: st.error("Error")
     st.write("---")
     
-    action_type = st.radio("Advanced Tools", ["Delete Trade", "Edit Trade", "⚠️ FACTORY RESET", "Rebuild Benchmark History"])
-    if action_type == "⚠️ FACTORY RESET" and st.button("CONFIRM RESET"):
-        if os.path.exists(PORTFOLIO_FILE): os.remove(PORTFOLIO_FILE)
-        st.success("Reset!"); st.rerun()
+    action_type = st.radio("Advanced Tools", ["Delete Trade", "Edit Trade", "⚠️ CLEAR CACHE & REBOOT", "Rebuild Benchmark History"])
+    if action_type == "⚠️ CLEAR CACHE & REBOOT" and st.button("EXECUTE CLEAR"):
+        st.cache_data.clear()
+        st.success("Cache Cleared! Rebooting..."); time.sleep(1); st.rerun()
     elif action_type == "Rebuild Benchmark History" and st.button("RUN REBUILD"):
          with st.spinner("Rebuilding..."):
              try:
@@ -553,9 +534,13 @@ if st.session_state.run_analysis:
 
         # --- SECTION 4: SCANNER RESULTS (Cached) ---
         if scan_results:
-            df_final = pd.DataFrame(scan_results).sort_values(["Sector", "Rank", "Ticker"], ascending=[True, True, True])
+            # 1. SORT BY PRIORITY
+            df_final = pd.DataFrame(scan_results).sort_values("Priority", ascending=True)
+            
+            # 2. CLEAN SECTOR NAMES (Strip "01. ", "02. " etc)
             df_final["Sector"] = df_final["Sector"].apply(lambda x: x.split(". ", 1)[1].replace("(SUMMARY)", "").strip() if ". " in x else x)
-            # COLS: Final Output Columns (No Stop/Size, No Ichimoku)
+            
+            # 3. SELECT COLUMNS (Priority hidden)
             cols = ["Sector", "Ticker", "Rotation", "Weekly<br>SMA8", "Weekly<br>Impulse", "Weekly<br>Score", "Daily<br>Score", "Structure", "A/D Breadth", "Volume", "Dual RSI", "Institutional<br>Activity", "Action", "Reasoning"]
             st.markdown(generate_scanner_html(df_final[cols]), unsafe_allow_html=True)
         else:
