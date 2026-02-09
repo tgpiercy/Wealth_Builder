@@ -4,11 +4,12 @@ import plotly.graph_objects as go
 import titan_math as tm
 
 # --- RRG MATH ENGINE ---
-def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14):
+def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14, smooth_period=3):
     """
     Calculates JdK RS-Ratio and RS-Momentum series.
+    Includes SMOOTHING to create curvy tails.
     """
-    # 1. Align Data (Indices are already Weekly due to prepare_rrg_inputs)
+    # 1. Align Data
     common_idx = price_series.dropna().index.intersection(bench_series.dropna().index)
     if len(common_idx) < 30: return pd.Series(dtype=float), pd.Series(dtype=float)
 
@@ -27,18 +28,20 @@ def calculate_rrg_components(price_series, bench_series, len_rs=14, len_mom=14):
     ratio_mean = rs_ratio.rolling(window=len_mom).mean()
     rs_mom = 100 * (rs_ratio / ratio_mean)
     
-    return rs_ratio.dropna(), rs_mom.dropna()
+    # 5. SMOOTHING
+    rs_ratio_smooth = rs_ratio.rolling(window=smooth_period).mean()
+    rs_mom_smooth = rs_mom.rolling(window=smooth_period).mean()
+    
+    return rs_ratio_smooth.dropna(), rs_mom_smooth.dropna()
 
 def prepare_rrg_inputs(master_data, tickers, benchmark):
     """
     Returns a wide DataFrame of Closes, RESAMPLED TO WEEKLY.
-    This ensures RRG calculates on the Standard Weekly Rotation Cycle.
     """
     data = {}
     
-    # helper to resample
     def get_weekly(df):
-        return df['Close'].resample('W-FRI').last()
+        return df['Close'].resample('W-FRI').last().ffill()
 
     if benchmark in master_data:
         data[benchmark] = get_weekly(master_data[benchmark])
@@ -52,7 +55,7 @@ def prepare_rrg_inputs(master_data, tickers, benchmark):
 
 def calculate_rrg_math(wide_df, benchmark_ticker):
     """
-    Returns the Ratio and Momentum DataFrames for all columns vs benchmark.
+    Returns the Ratio and Momentum DataFrames.
     """
     r_dict = {}
     m_dict = {}
@@ -72,12 +75,11 @@ def calculate_rrg_math(wide_df, benchmark_ticker):
 
 def get_heading_from_tail(x_series, y_series):
     """
-    Determines arrow direction using the EXACT last two points of the data.
+    Determines arrow direction using the EXACT last two points.
     """
     if len(x_series) < 2 or len(y_series) < 2: 
         return "<span style='font-size: 22px; line-height: 1;'>➡️</span>"
     
-    # Use exact last 2 points (Weekly points now)
     x2 = x_series.iloc[-1]; x1 = x_series.iloc[-2]
     y2 = y_series.iloc[-1]; y1 = y_series.iloc[-2]
     
@@ -86,33 +88,23 @@ def get_heading_from_tail(x_series, y_series):
     
     style = "style='font-size: 22px; line-height: 1;'"
     
-    # RRG Direction Logic:
-    # 0-90 deg (NE) -> Leading/Improving Strength
-    # 90-180 deg (SE) -> Weakening
-    # 180-270 deg (SW) -> Lagging/Weakness
-    # 270-360 deg (NW) -> Improving
-    
-    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" # NE
-    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" # SE
-    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" # SW
-    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" # NW
+    if dx > 0 and dy > 0: return f"<span {style}>↗️</span>" 
+    if dx > 0 and dy < 0: return f"<span {style}>↘️</span>" 
+    if dx < 0 and dy < 0: return f"<span {style}>↙️</span>" 
+    if dx < 0 and dy > 0: return f"<span {style}>↖️</span>" 
     
     return f"<span {style}>➡️</span>"
 
 def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
     """
     Runs Weekly RRG logic for ALL tickers.
-    Special Handling: If Ticker is 'SPY', compare vs 'IEF'.
     """
     if not master_data: return {}
     
     snapshot = {}
-    
-    # 1. Standard Calculation (Everything vs SPY)
     scan_tickers = list(master_data.keys())
     if benchmark in scan_tickers: scan_tickers.remove(benchmark)
     
-    # This now returns WEEKLY data
     wide_df = prepare_rrg_inputs(master_data, scan_tickers, benchmark)
     
     if not wide_df.empty:
@@ -141,11 +133,11 @@ def generate_full_rrg_snapshot(master_data, benchmark="SPY"):
             except:
                 snapshot[t] = "UNKNOWN"
 
-    # 2. Special Exception: SPY vs IEF (Weekly)
+    # Special Exception: SPY vs IEF
     if "SPY" in master_data and "IEF" in master_data:
         try:
-            spy_s = master_data["SPY"]['Close'].resample('W-FRI').last()
-            ief_s = master_data["IEF"]['Close'].resample('W-FRI').last()
+            spy_s = master_data["SPY"]['Close'].resample('W-FRI').last().ffill()
+            ief_s = master_data["IEF"]['Close'].resample('W-FRI').last().ffill()
             r_spy, m_spy = calculate_rrg_components(spy_s, ief_s)
             
             if not r_spy.empty and not m_spy.empty:
@@ -185,9 +177,9 @@ def plot_rrg_chart(r_df, m_df, label_map, title, is_dark=True):
         valid_idx = r_df[col].dropna().index.intersection(m_df[col].dropna().index)
         if len(valid_idx) < 5: continue
         
-        # Slice last 10 points (Now represents 10 WEEKS)
-        x_tail = r_df.loc[valid_idx, col].iloc[-10:]
-        y_tail = m_df.loc[valid_idx, col].iloc[-10:]
+        # --- SHORTER TAILS: 5 WEEKS ---
+        x_tail = r_df.loc[valid_idx, col].iloc[-5:] # Changed from -10
+        y_tail = m_df.loc[valid_idx, col].iloc[-5:] # Changed from -10
         
         curr_x = x_tail.iloc[-1]
         curr_y = y_tail.iloc[-1]
