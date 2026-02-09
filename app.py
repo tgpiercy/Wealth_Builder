@@ -51,7 +51,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v60.6 Global Dark Mode - Cleaned)
+#  TITAN STRATEGY APP (v61.0 Master Integration)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -60,18 +60,16 @@ PORTFOLIO_FILE = f"portfolio_{current_user}.csv"
 # --- GLOBAL SETTINGS (SIDEBAR) ---
 st.sidebar.write(f"👤 Logged in as: **{current_user.upper()}**")
 
-# Initialize Dark Mode State
+# Global Dark Mode
 if "is_dark" not in st.session_state:
     st.session_state.is_dark = True
-
-# Global Toggle
 st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v60.6 ({current_user.upper()})")
-st.caption("Institutional Protocol: Pine Parity & Global UI")
+st.title(f"🛡️ Titan Strategy v61.0 ({current_user.upper()})")
+st.caption("Institutional Protocol: Global UI & SPY Benchmarking")
 
 # --- CALCULATIONS ---
 def calc_sma(series, length): return series.rolling(window=length).mean()
@@ -98,7 +96,7 @@ def calc_rsi(series, length=14):
         return 100 - (100 / (1 + rs))
     except: return pd.Series(50, index=series.index)
 
-# --- ZIG ZAG ENGINE ---
+# --- ZIG ZAG ENGINE (SYNTAX FIX) ---
 def calc_structure(df, deviation_pct=0.035):
     if len(df) < 50: return "None"
     pivots = []; trend = 1; last_val = df['Close'].iloc[0]; pivots.append((0, last_val, 1))
@@ -107,6 +105,7 @@ def calc_structure(df, deviation_pct=0.035):
         if trend == 1:
             if price > last_val:
                 last_val = price
+                # FIXED: Expanded ternary for safety
                 if pivots[-1][2] == 1: pivots[-1] = (i, price, 1)
                 else: pivots.append((i, price, 1))
             elif price < last_val * (1 - deviation_pct):
@@ -129,7 +128,6 @@ def round_to_03_07(price):
 # --- UNIFIED DATA ENGINE ---
 @st.cache_data(ttl=3600) 
 def fetch_master_data(ticker_list):
-    """Downloads daily data for ALL tickers once."""
     unique_tickers = sorted(list(set(ticker_list))) 
     data_map = {}
     for t in unique_tickers:
@@ -172,31 +170,42 @@ def calculate_rrg_math(price_data, benchmark_col, window_rs=14, window_mom=5, sm
     return df_ratio.rolling(smooth_factor).mean().dropna(), df_mom.rolling(smooth_factor).mean().dropna()
 
 def generate_full_rrg_snapshot(data_map, benchmark="SPY"):
+    status_map = {}
     try:
+        # 1. Main Rotation (Everything vs Benchmark)
         all_tickers = list(data_map.keys())
-        if benchmark not in all_tickers: return {}
         wide_df = prepare_rrg_inputs(data_map, all_tickers, benchmark)
-        if wide_df.empty: return {}
-        r, m = calculate_rrg_math(wide_df, benchmark)
-        if r.empty or m.empty: return {}
-        status_map = {}
-        last_idx = r.index[-1]
-        for t in r.columns:
-            try:
-                val_r = r.at[last_idx, t]; val_m = m.at[last_idx, t]
-                if val_r > 100 and val_m > 100: status = "LEADING"
-                elif val_r > 100 and val_m < 100: status = "WEAKENING"
-                elif val_r < 100 and val_m < 100: status = "LAGGING"
-                else: status = "IMPROVING"
-                status_map[t] = status
-            except: continue
-        return status_map
-    except: return {}
+        if not wide_df.empty:
+            r, m = calculate_rrg_math(wide_df, benchmark)
+            if not r.empty:
+                l_idx = r.index[-1]
+                for t in r.columns:
+                    try:
+                        vr, vm = r.at[l_idx, t], m.at[l_idx, t]
+                        if vr > 100 and vm > 100: status_map[t] = "LEADING"
+                        elif vr > 100 and vm < 100: status_map[t] = "WEAKENING"
+                        elif vr < 100 and vm < 100: status_map[t] = "LAGGING"
+                        else: status_map[t] = "IMPROVING"
+                    except: continue
+        
+        # 2. SPY vs IEF Special Case (Risk-On/Off)
+        if "SPY" in data_map and "IEF" in data_map:
+            spy_ief = prepare_rrg_inputs(data_map, ["SPY"], "IEF")
+            rs, ms = calculate_rrg_math(spy_ief, "IEF")
+            if not rs.empty:
+                l_idx = rs.index[-1]
+                vrs, vms = rs.at[l_idx, "SPY"], ms.at[l_idx, "SPY"]
+                if vrs > 100 and vms > 100: status_map["SPY"] = "LEADING"
+                elif vrs > 100 and vms < 100: status_map["SPY"] = "WEAKENING"
+                elif vrs < 100 and vms < 100: status_map["SPY"] = "LAGGING"
+                else: status_map["SPY"] = "IMPROVING"
+    except: pass
+    return status_map
 
 def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if go is None: return None
     fig = go.Figure()
-    # USE GLOBAL SETTING
+    # Uses Global Setting (passed in argument, but driven by session state in call)
     if is_dark:
         bg_col, text_col = "black", "white"; c_lead, c_weak, c_lag, c_imp = "#00FF00", "#FFFF00", "#FF4444", "#00BFFF"; template = "plotly_dark"
     else:
@@ -209,6 +218,7 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
         if len(xt) < 5: continue
         has_data = True
         cx, cy = xt.iloc[-1], yt.iloc[-1]
+        
         if cx > 100 and cy > 100: color = c_lead
         elif cx > 100 and cy < 100: color = c_weak
         elif cx < 100 and cy < 100: color = c_lag
@@ -220,15 +230,15 @@ def plot_rrg_chart(ratios, momentums, labels_map, title, is_dark):
     if not has_data: return None
     op = 0.1 if is_dark else 0.05
     fig.add_hline(y=100, line_dash="dot", line_color="gray"); fig.add_vline(x=100, line_dash="dot", line_color="gray")
-    fig.add_shape(type="rect", x0=100, y0=100, x1=200, y1=200, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=100, y0=0, x1=200, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=0, y0=0, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
-    fig.add_shape(type="rect", x0=0, y0=100, x1=100, y1=200, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
-    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(range=[96, 104], showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(range=[96, 104], showgrid=False, title="RS-Momentum (Velocity)"))
-    fig.add_annotation(x=104, y=104, text="LEADING", showarrow=False, font=dict(size=16, color=c_lead), xanchor="right", yanchor="top")
-    fig.add_annotation(x=104, y=96, text="WEAKENING", showarrow=False, font=dict(size=16, color=c_weak), xanchor="right", yanchor="bottom")
-    fig.add_annotation(x=96, y=96, text="LAGGING", showarrow=False, font=dict(size=16, color=c_lag), xanchor="left", yanchor="bottom")
-    fig.add_annotation(x=96, y=104, text="IMPROVING", showarrow=False, font=dict(size=16, color=c_imp), xanchor="left", yanchor="top")
+    
+    # FIXED: Use Plotly Auto-Scaling (Removed hardcoded range=[96,104])
+    # But added Quadrant Backgrounds using a large enough range to cover most scenarios
+    fig.add_shape(type="rect", x0=100, y0=100, x1=150, y1=150, fillcolor=f"rgba(0,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=100, y0=50, x1=150, y1=100, fillcolor=f"rgba(255,255,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=50, y0=50, x1=100, y1=100, fillcolor=f"rgba(255,0,0,{op})", layer="below", line_width=0)
+    fig.add_shape(type="rect", x0=50, y0=100, x1=100, y1=150, fillcolor=f"rgba(0,0,255,{op})", layer="below", line_width=0)
+    
+    fig.update_layout(title=title, template=template, height=650, showlegend=False, xaxis=dict(showgrid=False, title="RS-Ratio (Trend)"), yaxis=dict(showgrid=False, title="RS-Momentum (Velocity)"))
     return fig
 
 # --- STYLING ---
@@ -240,11 +250,8 @@ def style_final(styler):
         if "IMPROVING" in val: return 'color: #00BFFF; font-weight: bold'
         return ''
     def color_rsi(val):
-        try:
-            parts = val.split(); r5 = float(parts[0].split('/')[0]); r20 = float(parts[0].split('/')[1]); arrow = parts[1]
-            if r5 >= r20: return 'color: #00BFFF; font-weight: bold' if (r20 > 50 and arrow=="↑") else ('color: #00FF00; font-weight: bold' if arrow=="↑" else 'color: #FF4444; font-weight: bold')
-            return 'color: #FFA500; font-weight: bold' if r20 > 50 else 'color: #FF4444; font-weight: bold'
-        except: return ''
+        # We handle this via HTML now, this function is backup/unused for the Dual RSI col
+        return ''
     def color_inst(val):
         if "ACCUMULATION" in val or "BREAKOUT" in val: return 'color: #00FF00; font-weight: bold' 
         if "CAPITULATION" in val: return 'color: #00BFFF; font-weight: bold'       
@@ -254,14 +261,14 @@ def style_final(styler):
     def highlight_ticker_row(row):
         styles = ['' for _ in row.index]
         if 'Ticker' not in row.index: return styles
-        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper(); rsi = str(row.get('Dual RSI', ''))
+        idx = row.index.get_loc('Ticker'); act = str(row.get('Action', '')).upper(); vol = str(row.get('Volume', '')).upper()
         if "AVOID" in act: pass
         elif "BUY" in act: styles[idx] = 'background-color: #006600; color: white; font-weight: bold'
         elif "SCOUT" in act: styles[idx] = 'background-color: #005555; color: white; font-weight: bold'
         elif "SOON" in act: styles[idx] = 'background-color: #CC5500; color: white; font-weight: bold'
         elif "CAUTION" in act: styles[idx] = 'background-color: #AA4400; color: white; font-weight: bold'
         return styles
-    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_rsi, subset=["Dual RSI"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
+    return styler.set_table_styles([{'selector': 'th', 'props': [('text-align', 'center'), ('background-color', '#111'), ('color', 'white'), ('font-size', '12px')]}, {'selector': 'td', 'props': [('text-align', 'center'), ('font-size', '14px'), ('padding', '8px')]}]).set_properties(**{'background-color': '#222', 'color': 'white', 'border-color': '#444'}).apply(highlight_ticker_row, axis=1).map(lambda v: 'color: #00ff00; font-weight: bold' if v in ["BUY", "STRONG BUY"] else ('color: #00ffff; font-weight: bold' if "SCOUT" in v else ('color: #ffaa00; font-weight: bold' if v in ["SOON", "CAUTION"] else 'color: white')), subset=["Action"]).map(lambda v: 'color: #ff00ff; font-weight: bold' if "SPIKE" in v else ('color: #00ff00' if "HIGH" in v else 'color: #ccc'), subset=["Volume"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "STRONG" in v else ('color: #ff0000' if "WEAK" in v else 'color: #ffaa00'), subset=["A/D Breadth"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "FAIL" in v or "NO" in v else 'color: #00ff00', subset=["Ichimoku<br>Cloud", "Weekly<br>SMA8"]).map(lambda v: 'color: #00ff00; font-weight: bold' if "GOOD" in v else ('color: #ffaa00; font-weight: bold' if "WEAK" in v else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Impulse"]).map(lambda v: 'color: #00ff00; font-weight: bold' if v >= 4 else ('color: #ffaa00; font-weight: bold' if v == 3 else 'color: #ff0000; font-weight: bold'), subset=["Weekly<br>Score", "Daily<br>Score"]).map(lambda v: 'color: #ff0000; font-weight: bold' if "BELOW 18" in v else 'color: #00ff00', subset=["Structure"]).map(color_rotation, subset=["Rotation"]).map(color_inst, subset=["Institutional<br>Activity"]).hide(axis='index')
 
 def style_daily_health(styler):
     def color_status(v):
@@ -436,7 +443,7 @@ if st.session_state.run_analysis:
     # --- UNIFIED LIST GENERATION ---
     pf_tickers = pf_df['Ticker'].unique().tolist() if not pf_df.empty else []
     pf_tickers = [x for x in pf_tickers if x != "CASH"]
-    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X"] 
+    all_tickers = list(tc.DATA_MAP.keys()) + pf_tickers + list(tc.RRG_SECTORS.keys()) + list(tc.RRG_INDICES.keys()) + list(tc.RRG_THEMES.keys()) + ["CAD=X", "IEF", "RSP", "SPY", "^VIX"] 
     for v in tc.RRG_INDUSTRY_MAP.values(): all_tickers.extend(list(v.keys()))
     
     # --- MASTER DATA FETCH & RRG CALC ---
@@ -482,20 +489,6 @@ if st.session_state.run_analysis:
         if pf_rows: st.markdown(pd.DataFrame(pf_rows).style.pipe(style_portfolio).to_html(), unsafe_allow_html=True)
         else: st.info("No active trades.")
         st.write("---")
-
-        # 3. BENCHMARK
-        shadow_shares_total = pf_df['Shadow_SPY'].sum()
-        spy_data = master_data.get("SPY")
-        if spy_data is not None:
-            curr_spy = spy_data['Close'].iloc[-1]
-            bench_val = shadow_shares_total * curr_spy
-            alpha = total_net_worth - bench_val
-            alpha_pct = ((total_net_worth - bench_val) / bench_val * 100) if bench_val > 0 else 0
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Titan Net Worth", f"${total_net_worth:,.2f}")
-            c2.metric("SPY Benchmark", f"${bench_val:,.2f}")
-            c3.metric("Alpha (Edge)", f"${alpha:,.2f}", f"{alpha_pct:+.2f}%")
-            st.write("---")
 
         # 4. MARKET HEALTH (RESTORED FULL)
         spy = master_data.get("SPY"); vix = master_data.get("^VIX"); rsp = master_data.get("RSP")
