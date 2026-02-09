@@ -47,7 +47,7 @@ if not st.session_state.authenticated:
     st.stop() 
 
 # ==============================================================================
-#  TITAN STRATEGY APP (v66.7 Syntax Fixed)
+#  TITAN STRATEGY APP (v67.1 Sector Lock)
 # ==============================================================================
 
 current_user = st.session_state.user
@@ -63,8 +63,8 @@ st.sidebar.toggle("🌙 Dark Mode", key="is_dark")
 if st.sidebar.button("Log Out"):
     logout()
 
-st.title(f"🛡️ Titan Strategy v66.7 ({current_user.upper()})")
-st.caption("Institutional Protocol: Stable Release")
+st.title(f"🛡️ Titan Strategy v67.1 ({current_user.upper()})")
+st.caption("Institutional Protocol: Sector Locks Active")
 
 # --- UNIFIED DATA ENGINE (CACHED) ---
 @st.cache_data(ttl=3600, show_spinner="Downloading Unified Market Data...") 
@@ -87,15 +87,14 @@ def fetch_master_data(ticker_list):
 @st.cache_data(show_spinner="Running Quantitative Analysis...")
 def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
     """
-    Core Logic Engine.
+    Core Logic Engine. 
+    REFACTORED for Parent-Child Dependencies.
     """
-    results = []
-    analysis_db = {}
     
-    # SORTING PRIORITY MAP (From Config Order)
-    TICKER_PRIORITY = {t: i for i, t in enumerate(tc.DATA_MAP.keys())}
+    # 1. PASS 1: CALCULATE ALL METRICS & INDIVIDUAL DECISIONS
+    # We store raw data here first so we know every ticker's status before building the table.
+    calculation_db = {}
     
-    # DEDUPLICATION
     unique_scan_list = sorted(list(set(scan_list)))
     
     for t in unique_scan_list:
@@ -206,7 +205,6 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         r5 = df['RSI5'].iloc[-1]; r20 = df['RSI20'].iloc[-1] if not pd.isna(df['RSI20'].iloc[-1]) else 50
         r5_prev = df['RSI5'].iloc[-2]; is_rising = r5 > r5_prev
         
-        # --- RSI MSG CONSTRUCTION ---
         if r5 >= r20:
             n_c = "#00BFFF" if (r20 > 50 and is_rising) else ("#00FF00" if is_rising else "#FF4444")
         else:
@@ -242,39 +240,70 @@ def run_strategy_engine(master_data, scan_list, risk_per_trade, rrg_snapshot):
         elif ad_score_ok: ad_msg = "NEUTRAL"
         else: ad_msg = "DISTRIBUTION"
 
-        analysis_db[t] = {"Decision": decision, "Reason": reason, "RRG": rrg_phase}
+        # STORE IN CALCULATION DB (Used for lookup in Pass 2)
+        calculation_db[t] = {
+            "Decision": decision, 
+            "Reason": reason, 
+            "RRG": rrg_phase, 
+            "W_Score": w_score, 
+            "D_Score": d_chk,
+            "Structure": "BULLISH" if struct_pass else "",
+            "A/D": ad_msg,
+            "Vol": vol_msg,
+            "RSI": rsi_msg,
+            "Inst": final_inst_msg,
+            "Pulse": w_pulse,
+            "W_SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL"
+        }
 
-        # Filter Logic
+    # 2. PASS 2: GENERATE TABLE (Enforce Parent Lock)
+    results = []
+    TICKER_PRIORITY = {t: i for i, t in enumerate(tc.DATA_MAP.keys())}
+    
+    for t in unique_scan_list:
+        if t not in calculation_db: continue
+        
+        data = calculation_db[t]
+        final_decision = data["Decision"]
+        final_reason = data["Reason"]
+        
+        # --- SECTOR LOCK LOGIC ---
+        # Get Parent Ticker (Benchmark) from config
+        parent_ticker = tc.DATA_MAP.get(t, [None, None])[1]
+        
+        # Ensure we don't lock the parent itself (e.g. SPY shouldn't lock SPY)
+        # And ensure we don't lock things benchmarked to general Markets like SPY
+        # The rule implies: If "XLK" is Avoid, then "IGV" is Locked.
+        
+        if parent_ticker and parent_ticker != "SPY" and parent_ticker != "HXT.TO":
+            # If Parent exists in our analysis and is AVOID
+            if parent_ticker in calculation_db:
+                parent_decision = calculation_db[parent_ticker]["Decision"]
+                if "AVOID" in parent_decision:
+                    final_decision = "LOCKED"
+                    final_reason = f"Parent ({parent_ticker}) Weak"
+
         cat_name = tc.DATA_MAP.get(t, ["OTHER"])[0]
         if "99. DATA" in cat_name: continue
         is_scanner = t in tc.DATA_MAP and (tc.DATA_MAP[t][0] != "BENCH" or t in ["DIA", "QQQ", "IWM", "IWC", "HXT.TO", "SPY", "RSP", "IEF", "^VIX"])
         
         if is_scanner:
-            final_decision = decision; final_reason = reason
-            if cat_name in tc.SECTOR_PARENTS: pass 
-
-            is_blue_spike = ("#00BFFF" in rsi_msg) and ("SPIKE" in vol_msg)
-            
-            disp_struct = "BULLISH" if struct_pass else ""
             disp_action = final_decision if "AVOID" not in final_decision else ""
-            
             sort_priority = TICKER_PRIORITY.get(t, 9999)
             
             row = {
-                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": rrg_phase,
-                "Weekly<br>SMA8": "PASS" if (wc['Close']>wc['SMA8']) else "FAIL", "Weekly<br>Impulse": w_pulse, 
-                "Weekly<br>Score": w_score, "Daily<br>Score": d_chk,
-                "Structure": disp_struct,
-                "A/D Breadth": ad_msg,
-                "Volume": vol_msg, "Dual RSI": rsi_msg, "Institutional<br>Activity": final_inst_msg,
+                "Sector": cat_name, "Ticker": t, "Rank": (0 if "00." in cat_name else 1), "Rotation": data["RRG"],
+                "Weekly<br>SMA8": data["W_SMA8"], "Weekly<br>Impulse": data["Pulse"], 
+                "Weekly<br>Score": data["W_Score"], "Daily<br>Score": data["D_Score"],
+                "Structure": data["Structure"],
+                "A/D Breadth": data["A/D"],
+                "Volume": data["Vol"], "Dual RSI": data["RSI"], "Institutional<br>Activity": data["Inst"],
                 "Action": disp_action, "Reasoning": final_reason,
                 "Priority": sort_priority 
             }
-            
-            # --- NO MORE OVERRIDES ---
             results.append(row)
 
-    return results, analysis_db
+    return results, calculation_db
 
 # --- PORTFOLIO ENGINE ---
 def load_portfolio():
