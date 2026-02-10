@@ -78,6 +78,7 @@ DATA_MAP = {
     "ITA": ("09. INDUSTRIALS (XLI)", "XLI"),  # Aerospace
     "IYT": ("09. INDUSTRIALS (XLI)", "XLI"),  # Transport
     "PAVE": ("09. INDUSTRIALS (XLI)", "XLI"), # Infrastructure
+     "GRID": ("09. INDUSTRIALS (XLI)", "XLI"), # Infrastructure
 
     # --- 10. MATERIALS (XLB) ---
     "COPX": ("10. MATERIALS (XLB)", "XLB"), # Copper
@@ -144,17 +145,17 @@ RRG_THEMES = {
 }
 
 RRG_INDUSTRY_MAP = {
-    "XLK": {"MSFT": "Microsoft", "NVDA": "Nvidia", "SMH": "Semis", "IGV": "Software", "ANET": "Arista", "DELL": "Dell"},
-    "XLC": {"META": "Meta", "GOOGL": "Google"},
-    "XLF": {"KBE": "Banks", "KRE": "Reg Banks", "IAK": "Insurance"},
+  #  "XLK": {"MSFT": "Microsoft", "NVDA": "Nvidia", "SMH": "Semis", "IGV": "Software", "ANET": "Arista", "DELL": "Dell"},
+ #   "XLC": {"META": "Meta", "GOOGL": "Google"},
+  #  "XLF": {"KBE": "Banks", "KRE": "Reg Banks", "IAK": "Insurance"},
     "XLE": {"XOP": "Exploration", "OIH": "Oil Services", "MLPX": "Midstream"},
-    "XLV": {"PPH": "Pharma", "IHI": "Med Devices", "XBI": "Biotech"},
-    "XLI": {"ITA": "Aerospace", "IYT": "Transport", "PAVE": "Infrastructure"},
+  #  "XLV": {"PPH": "Pharma", "IHI": "Med Devices", "XBI": "Biotech"},
+    "XLI": {"ITA": "Aerospace", "IYT": "Transport", "PAVE": "Infrastructure", "GRID": "Elec. Infra"},
     "XLB": {"COPX": "Copper", "SLX": "Steel", "MOO": "Agri", "AA": "Alcoa", "DD": "DuPont"},
-    "XLY": {"AMZN": "Amazon", "ITB": "Homebuilders"},
-    "GDX": {"GDXJ": "Junior Miners", "SIL": "Silver Miners"},
-    "BOTZ": {"AIQ": "Artificial Intel"},
-    "ICLN": {"TAN": "Solar", "NLR": "Nuclear", "URA": "Uranium"}
+  #  "XLY": {"AMZN": "Amazon", "ITB": "Homebuilders"},
+   # "GDX": {"GDXJ": "Junior Miners", "SIL": "Silver Miners"},
+ #   "BOTZ": {"AIQ": "Artificial Intel"},
+  #  "ICLN": {"TAN": "Solar", "NLR": "Nuclear", "URA": "Uranium"}
 }
 
 # --- PARENT MAPPING (UPDATED FOR NEW HEADERS) ---
