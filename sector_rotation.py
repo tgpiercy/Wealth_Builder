@@ -67,7 +67,7 @@ INDUSTRY_MAP = {
 }
 
 # --- CALCULATION ENGINE ---
-def calculate_rrg(price_data, benchmark_col, window_rs=14, window_mom=5, smooth_factor=3):
+def calculate_rrg(price_data, benchmark_col, window_rs=60, window_mom=5, smooth_factor=3):
     if benchmark_col not in price_data.columns:
         return pd.DataFrame(), pd.DataFrame()
 
