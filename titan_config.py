@@ -6,6 +6,7 @@
 CREDENTIALS = {
     "son": "",  # No password
     "dad": ""   # No password
+    "map": "" # No password
 }
 
 # --- MASTER DATA MAP ---
