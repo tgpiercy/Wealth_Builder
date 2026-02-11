@@ -5,7 +5,7 @@
 # --- AUTHENTICATION ---
 CREDENTIALS = {
     "son": "",  # No password
-    "dad": ""   # No password
+    "dad": "",   # No password
     "mattp": "" # No password
 }
 
