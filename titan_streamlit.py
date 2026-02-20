@@ -1,5 +1,5 @@
 # FILE: titan_streamlit.py
-# ROLE: Live Institutional Command Deck
+# ROLE: Live Institutional Command Deck + ADX Chop Radar
 # ARCHITECTURE: Titan Ultimate Engine + Macro Plumbing
 
 import streamlit as st
@@ -19,11 +19,11 @@ st.title("🦅 TITAN ENGINE: LIVE COMMAND DECK")
 st.markdown("---")
 
 # --- DATA INGESTION ---
-@st.cache_data(ttl=3600) # Caches data for 1 hour to prevent API limits
+@st.cache_data(ttl=3600)
 def load_data():
     tickers = ["SPY", "SSO", "IEF", "DX-Y.NYB", "^TNX", "^VIX", "HYG"]
     end_date = datetime.today()
-    start_date = end_date - timedelta(days=400) # Need enough data for 100 SMA + RRG
+    start_date = end_date - timedelta(days=400) 
     
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
     close_px = data['Close'].ffill()
@@ -54,12 +54,25 @@ rrg_ratio = 100 * (rs / rs.rolling(window=10).mean())
 rrg_mom = 100 + rrg_ratio.pct_change() * 100
 rrg_whip = rrg_mom - rrg_mom.shift(1)
 
+# 4. ADX (Trend Strength / Chop Radar)
+plus_dm = high_px['SPY'].diff()
+minus_dm = -low_px['SPY'].diff()
+plus_dm = np.where((plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0.0)
+minus_dm = np.where((minus_dm > plus_dm) & (minus_dm > 0), minus_dm, 0.0)
+
+tr_14_sum = tr.rolling(14).sum()
+plus_di_14 = 100 * (pd.Series(plus_dm, index=spy_close.index).rolling(14).sum() / tr_14_sum)
+minus_di_14 = 100 * (pd.Series(minus_dm, index=spy_close.index).rolling(14).sum() / tr_14_sum)
+dx = 100 * (abs(plus_di_14 - minus_di_14) / (plus_di_14 + minus_di_14))
+adx = dx.rolling(14).mean()
+
 # Extract Today's Data
 today_spy = spy_close.iloc[-1]
 today_sma = sma_100.iloc[-1]
 today_dist = dist_to_100.iloc[-1] * 100
 today_atr = atr_14.iloc[-1]
 today_whip = rrg_whip.iloc[-1]
+today_adx = adx.iloc[-1]
 
 # Macro Data
 today_dxy = close_px['DX-Y.NYB'].iloc[-1]
@@ -75,25 +88,23 @@ gear_color = "gray"
 if today_spy > today_sma:
     current_gear = "GEAR 2: NUCLEAR (SSO)"
     action_text = "The market is in a structural uptrend above the 100 SMA. Hold 2x Leverage."
-    gear_color = "#00FF00" # Green
+    gear_color = "#00FF00" 
 else:
     if today_dist <= -8.0 and today_whip >= 1.25:
         current_gear = "GEAR 1: PHOENIX CATCH (SPY)"
         stop_level = today_spy - (3.5 * today_atr)
         action_text = f"Knives caught. RRG Whip confirmed. Hold 1x SPY. Strict Trailing Stop at ${stop_level:.2f}"
-        gear_color = "#FFA500" # Orange
+        gear_color = "#FFA500" 
     else:
         current_gear = "GEAR 0: CASH (SLEEPING)"
         action_text = "Market is broken (Below 100 SMA). Waiting for -8% depth and institutional RRG snap."
-        gear_color = "#FF0000" # Red
+        gear_color = "#FF0000" 
 
 # --- DASHBOARD RENDER ---
-# Section 1: The Signal
 st.markdown(f"<p class='big-font' style='color:{gear_color};'>CURRENT STATE: {current_gear}</p>", unsafe_allow_html=True)
 st.write(f"**Directive:** {action_text}")
 st.markdown("---")
 
-# Section 2: Core Telemetry & Macro Plumbing
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
@@ -115,13 +126,17 @@ with col3:
     st.metric(label="VIX (Fear Gauge)", value=f"{today_vix:.2f}")
 
 with col4:
-    st.subheader("🛡️ Whipsaw Warning")
-    if current_gear == "GEAR 2: NUCLEAR (SSO)" and dxy_trend and today_vix > 20:
-        st.warning("ELEVATED FRICTION RISK: S&P is above 100 SMA, but Dollar is rising and VIX is elevated. High probability of a sideways paper-cut.")
+    st.subheader("📡 ADX Chop Radar")
+    adx_status = "EXTREME CHOP (Whipsaw Risk)" if today_adx < 20 else ("BUILDING TREND" if today_adx < 25 else "STRONG TREND")
+    st.metric(label="ADX Score (Strength)", value=f"{today_adx:.1f}")
+    st.write(f"**Radar Status:** {adx_status}")
+    
+    if current_gear == "GEAR 2: NUCLEAR (SSO)" and today_adx < 20:
+        st.warning("⚠️ ENGINE IS DEPLOYED BUT ADX IS LOW. Expect sideways paper-cuts.")
     elif current_gear == "GEAR 0: CASH (SLEEPING)":
-        st.info("SAFE HARBOR: Capital preserved. Let the market bleed.")
+        st.info("Capital preserved. Let the market bleed.")
     else:
-        st.success("CONDITIONS NOMINAL: Macro environment supports current gear.")
+        st.success("Conditions Nominal.")
 
 st.markdown("---")
 
@@ -129,12 +144,9 @@ st.markdown("---")
 st.subheader("📈 The Trapdoor Matrix")
 fig = go.Figure()
 
-# Plot SPY
 fig.add_trace(go.Scatter(x=spy_close.index[-200:], y=spy_close.iloc[-200:], mode='lines', name='SPY (S&P 500)', line=dict(color='white', width=2)))
-# Plot 100 SMA
 fig.add_trace(go.Scatter(x=sma_100.index[-200:], y=sma_100.iloc[-200:], mode='lines', name='100 SMA Trapdoor', line=dict(color='blue', width=2, dash='dot')))
 
-# Highlight Background (Green if above SMA, Red if below)
 fig.update_layout(
     plot_bgcolor='#1E1E1E',
     paper_bgcolor='#1E1E1E',
