@@ -74,24 +74,40 @@ live_price = get_live_price("XEQT.TO")
 # --- TAX & DRAWDOWN ALGORITHMS ---
 def calculate_taxes(gross_income, age):
     """Calculates Federal + Ontario tax for a single individual."""
-    if gross_income <= 0: return 0
+    if gross_income <= 0: return 0.0
     
-    # Approx Federal Brackets (2024/2026 adjusted)
-    fed_tax = 0
+    # Approx Federal Brackets 
+    fed_tax = 0.0
     temp_inc = gross_income
-    if temp_inc > 246752: fed_tax += (temp_inc - 246752) * 0.33; temp_inc = 246752
-    if temp_inc > 173205: fed_tax += (temp_inc - 173205) * 0.29; temp_inc = 173205
-    if temp_inc > 111733: fed_tax += (temp_inc - 111733) * 0.26; temp_inc = 111733
-    if temp_inc > 55867:  fed_tax += (temp_inc - 55867) * 0.205; temp_inc = 55867
+    if temp_inc > 246752: 
+        fed_tax += (temp_inc - 246752) * 0.33
+        temp_inc = 246752
+    if temp_inc > 173205: 
+        fed_tax += (temp_inc - 173205) * 0.29
+        temp_inc = 173205
+    if temp_inc > 111733: 
+        fed_tax += (temp_inc - 111733) * 0.26
+        temp_inc = 111733
+    if temp_inc > 55867:  
+        fed_tax += (temp_inc - 55867) * 0.205
+        temp_inc = 55867
     fed_tax += temp_inc * 0.15
 
     # Approx Ontario Brackets
-    ont_tax = 0
+    ont_tax = 0.0
     temp_inc_ont = gross_income
-    if temp_inc_ont > 220000: ont_tax += (temp_inc_ont - 220000) * 0.1316; temp_inc_ont = 220000
-    if temp_inc_ont > 150000: ont_tax += (temp_inc_ont - 150000) * 0.1216; temp_inc_ont = 150000
-    if temp_inc_ont > 102870: ont_tax += (temp_inc_ont - 102870) * 0.1116; temp_inc_ont = 102870
-    if temp_inc_ont > 51446:  ont_tax += (temp_inc_ont - 51446) * 0.0915;  temp_inc_ont = 51446
+    if temp_inc_ont > 220000: 
+        ont_tax += (temp_inc_ont - 220000) * 0.1316
+        temp_inc_ont = 220000
+    if temp_inc_ont > 150000: 
+        ont_tax += (temp_inc_ont - 150000) * 0.1216
+        temp_inc_ont = 150000
+    if temp_inc_ont > 102870: 
+        ont_tax += (temp_inc_ont - 102870) * 0.1116
+        temp_inc_ont = 102870
+    if temp_inc_ont > 51446:  
+        ont_tax += (temp_inc_ont - 51446) * 0.0915  
+        temp_inc_ont = 51446
     ont_tax += temp_inc_ont * 0.0505
     
     # Credits
@@ -103,37 +119,39 @@ def calculate_taxes(gross_income, age):
     return total_tax
 
 def calculate_oas_clawback(gross_income):
-    threshold = 90997
+    threshold = 90997.0
     if gross_income > threshold:
         return (gross_income - threshold) * 0.15
-    return 0
+    return 0.0
 
 def solve_required_gross(target_net_household, combined_gov_gross, age):
-    """Iterative solver to find exact gross RRSP withdrawal needed to hit net target."""
-    low = 0
-    high = 300000 # Upper bound guess
-    tolerance = 100
-    required_rrsp_gross = 0
-    total_taxes_paid = 0
+    """Safe Iterative solver to find exact gross RRSP withdrawal needed to hit net target."""
+    low = 0.0
+    high = 500000.0 # Upper bound guess
+    required_rrsp_gross = 0.0
+    total_taxes_paid = 0.0
     
-    while high - low > tolerance:
-        mid_rrsp_gross = (low + high) / 2
+    for _ in range(50): # Hard cap iterations to prevent infinite loop crashes
+        mid_rrsp_gross = (low + high) / 2.0
         
         # 50/50 Income Split Mechanics
-        individual_gross = (combined_gov_gross + mid_rrsp_gross) / 2
+        individual_gross = (combined_gov_gross + mid_rrsp_gross) / 2.0
         
         individual_tax = calculate_taxes(individual_gross, age)
         individual_clawback = calculate_oas_clawback(individual_gross)
         
         total_individual_net = individual_gross - individual_tax - individual_clawback
-        household_net = total_individual_net * 2
+        household_net = total_individual_net * 2.0
         
         if household_net < target_net_household:
             low = mid_rrsp_gross # Need more money
         else:
             high = mid_rrsp_gross # Pulled too much
             required_rrsp_gross = mid_rrsp_gross
-            total_taxes_paid = (individual_tax + individual_clawback) * 2
+            total_taxes_paid = (individual_tax + individual_clawback) * 2.0
+            
+        if high - low < 1.0:
+            break
             
     return required_rrsp_gross, total_taxes_paid
 
@@ -219,17 +237,16 @@ for i in range(terminal_age - current_age + 1):
             rrsp = 0
             
             # Recalculate taxes based on the lower actual RRSP draw
-            actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2
-            actual_tax = calculate_taxes(actual_individual_gross, age) * 2
-            actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2
+            actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2.0
+            actual_tax = calculate_taxes(actual_individual_gross, age) * 2.0
+            actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2.0
             tax_paid = actual_tax + actual_clawback
             
             net_from_taxable = (combined_gov_gross + rrsp_draw) - tax_paid
             shortfall = target_net_income - net_from_taxable
             
-            # Non-Reg Gap Fill (Simplified 50% inclusion rate)
+            # Non-Reg Gap Fill (Approximate 50% inclusion logic)
             if non_reg > 0 and shortfall > 0:
-                # Approximate 50% inclusion capital gains tax logic for gap fill
                 gross_needed_nonreg = shortfall * 1.15 
                 if non_reg >= gross_needed_nonreg:
                     nonreg_draw = gross_needed_nonreg
@@ -237,7 +254,7 @@ for i in range(terminal_age - current_age + 1):
                     shortfall = 0
                 else:
                     nonreg_draw = non_reg
-                    shortfall -= nonreg_draw * 0.85 # Approx net value
+                    shortfall -= nonreg_draw * 0.85 
                     non_reg = 0
             
             # TFSA Gap Fill (Tax-Free 1:1)
@@ -290,6 +307,26 @@ for i in range(terminal_age - current_age + 1):
     
 df_proj = pd.DataFrame(data)
 
+# --- CPP BREAK-EVEN ACTUARIAL ENGINE ---
+cpp_data = []
+cum_cpp_60 = 0
+cum_cpp_65 = 0
+
+base_65_adjusted = (user_base_cpp * 0.88) + candice_base_cpp 
+base_60 = (user_base_cpp + candice_base_cpp) * 0.64
+
+for age_idx in range(target_age, terminal_age + 1):
+    if age_idx >= 60: cum_cpp_60 += base_60
+    if age_idx >= 65: cum_cpp_65 += base_65_adjusted
+        
+    cpp_data.append({
+        "Age": age_idx,
+        "Cumulative CPP (Start 60)": cum_cpp_60,
+        "Cumulative CPP (Start 65 with Zero-Income Drag)": cum_cpp_65
+    })
+    
+df_cpp = pd.DataFrame(cpp_data)
+
 # --- DASHBOARD UI ---
 st.divider()
 
@@ -319,7 +356,7 @@ else:
 st.divider()
 
 # --- TABS ARCHITECTURE ---
-tab1, tab2 = st.tabs(["📈 Visual Matrix", "🧮 Raw Ledger & Tax Output"])
+tab1, tab2, tab3 = st.tabs(["📈 Visual Matrix", "🧮 Raw Ledger & Tax Output", "🍁 CPP Break-Even Engine"])
 
 with tab1:
     fig = go.Figure()
@@ -342,6 +379,36 @@ with tab1:
 
 with tab2:
     st.markdown("### The Withdrawal Waterfall & Tax Engine")
-    st.markdown("This ledger calculates exact Ontario/Federal tax brackets, applies the 50/50 income split, checks for the $90k+ OAS clawback, and applies the $2,000 Pension Credit at Age 65 to find the required gross withdrawal.")
-    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "CPP Pool (50/50 Split)", "OAS", "RRSP Draw", "TFSA Draw", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
-    st.dataframe(df_decum.set_index("Age").style.format({"Liquid NW": "${:,.0f}", "Net Income": "${:,.0f}", "CPP Pool (50/50 Split)": "${:,.0f}", "OAS": "${:,.0f}", "RRSP Draw": "${:,.0f}", "TFSA Draw": "${:,.0f}", "Est. Taxes Paid": "${:,.0f}", "Effective Tax Rate (%)": "{:.1f}%"}), use_container_width=True, height=600)
+    [span_0](start_span)st.markdown("This ledger calculates exact Ontario/Federal tax brackets, applies the 50/50 income split[span_0](end_span)[span_1](start_span), checks for the $90,997 OAS clawback[span_1](end_span)[span_2](start_span), and mathematically calculates the exact gross draw to hit the net target without overpaying[span_2](end_span).")
+    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "CPP Pool (50/50 Split)", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
+    st.dataframe(df_decum.set_index("Age").style.format({
+        "Liquid NW": "${:,.0f}", 
+        "Net Income": "${:,.0f}", 
+        "CPP Pool (50/50 Split)": "${:,.0f}", 
+        "OAS": "${:,.0f}", 
+        "RRSP Draw": "${:,.0f}", 
+        "NonReg Draw": "${:,.0f}",
+        "TFSA Draw": "${:,.0f}", 
+        "Est. Taxes Paid": "${:,.0f}", 
+        "Effective Tax Rate (%)": "{:.1f}%"
+    }), use_container_width=True, height=600)
+
+with tab3:
+    st.markdown("### Household Actuarial Crossover Analysis")
+    st.markdown("This mathematically maps the cumulative cash collected from **both** CPP pools. It applies the 36% penalty for Age 60, and models an approximate **12% zero-income baseline decay** strictly against your higher earning baseline if deferred to Age 65.")
+    
+    fig_cpp = go.Figure()
+    fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 60)'], mode='lines', name='Take at 60 (Penalty Applied)', line=dict(color='#E74C3C', width=3)))
+    fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 65 with Zero-Income Drag)'], mode='lines', name='Take at 65 (Zero-Income Drag Applied)', line=dict(color='#2ECC71', width=3)))
+    
+    crossover_age = None
+    for idx, row in df_cpp.iterrows():
+        if row['Cumulative CPP (Start 65 with Zero-Income Drag)'] > row['Cumulative CPP (Start 60)']:
+            crossover_age = row['Age']
+            break
+            
+    if crossover_age:
+        fig_cpp.add_vline(x=crossover_age, line_dash="dash", line_color="white", annotation_text=f"Break-Even: Age {crossover_age}")
+        
+    fig_cpp.update_layout(xaxis_title="Age", yaxis_title="Cumulative Dollars Collected ($)", hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
+    st.plotly_chart(fig_cpp, use_container_width=True)
