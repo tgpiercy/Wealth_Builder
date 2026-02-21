@@ -41,10 +41,10 @@ target_net_income = st.sidebar.number_input("Target Net Income ($)", value=12000
 est_effective_tax = st.sidebar.slider("Est. Effective Tax Rate (%)", 10, 40, 20) / 100
 
 st.sidebar.subheader("Gov Benefits (Household Combined)")
-base_cpp = st.sidebar.number_input("Est. CPP at 65", value=24000, step=1000)
-base_oas = st.sidebar.number_input("Est. OAS at 65", value=17000, step=1000)
-cpp_start = st.sidebar.selectbox("CPP Start Age", [60, 65, 70], index=0) 
-oas_start = st.sidebar.selectbox("OAS Start Age", [65, 70], index=0)     
+base_cpp = st.sidebar.number_input("Est. MAX CPP at 65", value=24000, step=1000)
+base_oas = st.sidebar.number_input("Est. MAX OAS at 65", value=17000, step=1000)
+cpp_start = st.sidebar.selectbox("CPP Start Age in Main Model", [60, 65, 70], index=0) 
+oas_start = st.sidebar.selectbox("OAS Start Age in Main Model", [65, 70], index=0)     
 
 # --- SIDEBAR: 5. STRESS TESTING (SORR) ---
 st.sidebar.header("5. Stress Testing (SORR)")
@@ -101,7 +101,7 @@ for i in range(terminal_age - current_age + 1):
     
     if i > 0: tfsa_room += 7000 
     
-    # --- PHASE 1 & 2: ACCUMULATION LOGIC ---
+    # --- PHASE 1 & 2: ACCUMULATION ---
     if age < target_age:
         if mortgage > 0:
             mortgage -= mortgage_pmt
@@ -122,12 +122,15 @@ for i in range(terminal_age - current_age + 1):
 
         tfsa_room -= cur_tfsa_in
             
-    # --- PHASE 3: DECUMULATION LOGIC ---
+    # --- PHASE 3: DECUMULATION ---
     else:
+        # CPP Math with Zero-Income Penalty Simulation
+        penalty_65_ratio = 0.88 # Approx 12% drag for 5 years zero income
+        
         if age >= cpp_start:
             if cpp_start == 60: current_cpp = base_cpp * 0.64
-            elif cpp_start == 65: current_cpp = base_cpp
-            elif cpp_start == 70: current_cpp = base_cpp * 1.42
+            elif cpp_start == 65: current_cpp = base_cpp * penalty_65_ratio
+            elif cpp_start == 70: current_cpp = base_cpp * penalty_65_ratio * 1.42
             
         if age >= oas_start:
             if oas_start == 65: current_oas = base_oas
@@ -140,7 +143,6 @@ for i in range(terminal_age - current_age + 1):
         if net_shortfall > 0:
             gross_needed_taxable = net_shortfall / (1 - est_effective_tax)
             
-            # Waterfall: RRSP -> NonReg -> TFSA
             if rrsp >= gross_needed_taxable:
                 rrsp_draw = gross_needed_taxable
                 rrsp -= rrsp_draw
@@ -175,16 +177,12 @@ for i in range(terminal_age - current_age + 1):
                         
         net_income_achieved = target_net_income - net_shortfall
 
-    # --- UNIFIED MARKET COMPOUNDING ENGINE ---
-    # 1. Determine baseline CAGR based on phase
+    # --- UNIFIED COMPOUNDING ---
     current_year_real_return = real_return if age < target_age else post_retire_real_return
     
-    # 2. Inject SORR Crash if active
     if apply_sorr and age == sorr_age:
-        # Convert nominal crash to real crash
         current_year_real_return = ((1 + (sorr_drop / 100)) / (1 + inflation)) - 1
         
-    # 3. Apply Compounding to remaining balances
     if i > 0:
         rrsp = (rrsp + cur_rrsp_in) * (1 + current_year_real_return)
         tfsa = (tfsa + cur_tfsa_in) * (1 + current_year_real_return)
@@ -216,6 +214,29 @@ for i in range(terminal_age - current_age + 1):
     })
     
 df_proj = pd.DataFrame(data)
+
+# --- CPP BREAK-EVEN ACTUARIAL ENGINE ---
+cpp_data = []
+cum_cpp_60 = 0
+cum_cpp_65 = 0
+
+# Zero-income drag mathematically lowers the Age 65 base by approx 12%
+base_65_adjusted = base_cpp * 0.88 
+base_60 = base_cpp * 0.64
+
+for age_idx in range(target_age, terminal_age + 1):
+    if age_idx >= 60:
+        cum_cpp_60 += base_60
+    if age_idx >= 65:
+        cum_cpp_65 += base_65_adjusted
+        
+    cpp_data.append({
+        "Age": age_idx,
+        "Cumulative CPP (Start 60)": cum_cpp_60,
+        "Cumulative CPP (Start 65 with Zero-Income Drag)": cum_cpp_65
+    })
+    
+df_cpp = pd.DataFrame(cpp_data)
 
 # --- DASHBOARD UI ---
 st.divider()
@@ -251,42 +272,23 @@ else:
 st.divider()
 
 # --- TABS ARCHITECTURE ---
-tab1, tab2 = st.tabs(["📈 Visual Matrix", "🧮 Raw Ledger (Decumulation)"])
+tab1, tab2, tab3 = st.tabs(["📈 Visual Matrix", "🧮 Raw Ledger", "🍁 CPP Break-Even Engine"])
 
 with tab1:
     fig = go.Figure()
-
-    # Base Projection Area Charts
     fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['RRSP'], mode='lines', stackgroup='one', name='Spousal RRSP', line=dict(color='#2E86C1')))
     fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['TFSA'], mode='lines', stackgroup='one', name='TFSA', line=dict(color='#28B463')))
     fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Non-Reg'], mode='lines', stackgroup='one', name='Non-Registered', line=dict(color='#F1C40F')))
-
-    # Drawdown Tolerance Bands
     fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Upper Bound (+10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='+10% Variance'))
     fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Lower Bound (-10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='-10% Variance'))
 
-    # Live Data Overlay
     if live_price:
-        fig.add_trace(go.Scatter(
-            x=[fractional_age], 
-            y=[actual_liquid_nw],
-            mode='markers',
-            marker=dict(size=14, color='white', line=dict(width=2, color='black')),
-            name='Live Net Worth'
-        ))
+        fig.add_trace(go.Scatter(x=[fractional_age], y=[actual_liquid_nw], mode='markers', marker=dict(size=14, color='white', line=dict(width=2, color='black')), name='Live Net Worth'))
 
-    fig.update_layout(
-        xaxis_title="Age",
-        yaxis_title="Portfolio Value ($)",
-        hovermode="x unified",
-        plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
-    )
-
+    fig.update_layout(xaxis_title="Age", yaxis_title="Portfolio Value ($)", hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
     fig.add_vline(x=46, line_dash="dash", line_color="red", annotation_text="Mortgage Dead")
     fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
     
-    # Optional SORR Marker
     if apply_sorr:
         fig.add_vline(x=sorr_age, line_dash="solid", line_color="orange", annotation_text=f"{sorr_drop}% Crash")
 
@@ -294,14 +296,26 @@ with tab1:
 
 with tab2:
     st.markdown("### The Withdrawal Waterfall")
-    st.markdown("This ledger mathematically tracks how the target net income is achieved by draining the Spousal RRSP to the tax threshold, then bridging the gap with the TFSA.")
-    
-    df_decum = df_proj[df_proj['Age'] >= target_age][
-        ["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]
-    ]
+    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]]
+    st.dataframe(df_decum.set_index("Age").style.format("${:,.0f}"), use_container_width=True, height=600)
 
-    st.dataframe(
-        df_decum.set_index("Age").style.format("${:,.0f}"),
-        use_container_width=True,
-        height=600
-    )
+with tab3:
+    st.markdown("### Actuarial Crossover Analysis")
+    st.markdown("This engine mathematically calculates total lifetime cash collected. It factors in the 36% early penalty for Age 60, and models an approximate **12% zero-income baseline decay** for deferring to Age 65 while fully retired.")
+    
+    fig_cpp = go.Figure()
+    fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 60)'], mode='lines', name='Take at 60 (Penalty Applied)', line=dict(color='#E74C3C', width=3)))
+    fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 65 with Zero-Income Drag)'], mode='lines', name='Take at 65 (Zero-Income Drag Applied)', line=dict(color='#2ECC71', width=3)))
+    
+    # Calculate Cross-Over Point
+    crossover_age = None
+    for idx, row in df_cpp.iterrows():
+        if row['Cumulative CPP (Start 65 with Zero-Income Drag)'] > row['Cumulative CPP (Start 60)']:
+            crossover_age = row['Age']
+            break
+            
+    if crossover_age:
+        fig_cpp.add_vline(x=crossover_age, line_dash="dash", line_color="white", annotation_text=f"Break-Even: Age {crossover_age}")
+        
+    fig_cpp.update_layout(xaxis_title="Age", yaxis_title="Cumulative Dollars Collected ($)", hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
+    st.plotly_chart(fig_cpp, use_container_width=True)
