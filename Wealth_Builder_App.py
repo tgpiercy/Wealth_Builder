@@ -40,9 +40,12 @@ post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 
 target_net_income = st.sidebar.number_input("Target Net Income ($)", value=120000, step=5000)
 est_effective_tax = st.sidebar.slider("Est. Effective Tax Rate (%)", 10, 40, 20) / 100
 
-st.sidebar.subheader("Gov Benefits (Household Combined)")
-base_cpp = st.sidebar.number_input("Est. MAX CPP at 65", value=24000, step=1000)
-base_oas = st.sidebar.number_input("Est. MAX OAS at 65", value=17000, step=1000)
+# --- THE FIX: HIS/HERS CPP SPLIT ---
+st.sidebar.subheader("Gov Benefits (Pension Sharing)")
+user_base_cpp = st.sidebar.number_input("Est. MAX CPP at 65 (You)", value=16000, step=1000)
+candice_base_cpp = st.sidebar.number_input("Est. MAX CPP at 65 (Candice)", value=2000, step=500)
+base_oas = st.sidebar.number_input("Est. MAX OAS at 65 (Combined Household)", value=17000, step=1000)
+
 cpp_start = st.sidebar.selectbox("CPP Start Age in Main Model", [60, 65, 70], index=0) 
 oas_start = st.sidebar.selectbox("OAS Start Age in Main Model", [65, 70], index=0)     
 
@@ -91,7 +94,7 @@ for i in range(terminal_age - current_age + 1):
     cur_tfsa_in = 0
     cur_nonreg_in = 0
     
-    current_cpp = 0
+    current_cpp_total = 0
     current_oas = 0
     rrsp_draw = 0
     nonreg_draw = 0
@@ -101,7 +104,7 @@ for i in range(terminal_age - current_age + 1):
     
     if i > 0: tfsa_room += 7000 
     
-    # --- PHASE 1 & 2: ACCUMULATION ---
+    # --- PHASE 1 & 2: ACCUMULATION LOGIC ---
     if age < target_age:
         if mortgage > 0:
             mortgage -= mortgage_pmt
@@ -122,27 +125,39 @@ for i in range(terminal_age - current_age + 1):
 
         tfsa_room -= cur_tfsa_in
             
-    # --- PHASE 3: DECUMULATION ---
+    # --- PHASE 3: DECUMULATION LOGIC ---
     else:
-        # CPP Math with Zero-Income Penalty Simulation
-        penalty_65_ratio = 0.88 # Approx 12% drag for 5 years zero income
+        # CPP Math with His/Hers Pension Sharing Pool
+        user_cpp_active = 0
+        candice_cpp_active = 0
+        penalty_65_ratio = 0.88 # 12% zero-income drag applied to the high earner
         
         if age >= cpp_start:
-            if cpp_start == 60: current_cpp = base_cpp * 0.64
-            elif cpp_start == 65: current_cpp = base_cpp * penalty_65_ratio
-            elif cpp_start == 70: current_cpp = base_cpp * penalty_65_ratio * 1.42
+            if cpp_start == 60: 
+                user_cpp_active = user_base_cpp * 0.64
+                candice_cpp_active = candice_base_cpp * 0.64
+            elif cpp_start == 65: 
+                user_cpp_active = user_base_cpp * penalty_65_ratio
+                candice_cpp_active = candice_base_cpp # Negligible drag on smaller base
+            elif cpp_start == 70: 
+                user_cpp_active = user_base_cpp * penalty_65_ratio * 1.42
+                candice_cpp_active = candice_base_cpp * 1.42
+
+        # 50/50 Legal Pension Sharing Pool
+        current_cpp_total = user_cpp_active + candice_cpp_active
             
         if age >= oas_start:
             if oas_start == 65: current_oas = base_oas
             elif oas_start == 70: current_oas = base_oas * 1.36
             
-        tax_paid = (current_cpp + current_oas) * est_effective_tax
-        net_gov_income = (current_cpp + current_oas) - tax_paid
+        tax_paid = (current_cpp_total + current_oas) * est_effective_tax
+        net_gov_income = (current_cpp_total + current_oas) - tax_paid
         net_shortfall = target_net_income - net_gov_income
         
         if net_shortfall > 0:
             gross_needed_taxable = net_shortfall / (1 - est_effective_tax)
             
+            # Waterfall: RRSP -> NonReg -> TFSA
             if rrsp >= gross_needed_taxable:
                 rrsp_draw = gross_needed_taxable
                 rrsp -= rrsp_draw
@@ -177,7 +192,7 @@ for i in range(terminal_age - current_age + 1):
                         
         net_income_achieved = target_net_income - net_shortfall
 
-    # --- UNIFIED COMPOUNDING ---
+    # --- UNIFIED COMPOUNDING & SORR ---
     current_year_real_return = real_return if age < target_age else post_retire_real_return
     
     if apply_sorr and age == sorr_age:
@@ -204,7 +219,7 @@ for i in range(terminal_age - current_age + 1):
         "Liquid NW": max(0, liquid_nw),
         "Upper Bound (+10%)": liquid_nw * 1.10,
         "Lower Bound (-10%)": liquid_nw * 0.90,
-        "CPP": current_cpp,
+        "CPP Pool (50/50 Split)": current_cpp_total,
         "OAS": current_oas,
         "RRSP Draw": rrsp_draw,
         "NonReg Draw": nonreg_draw,
@@ -220,9 +235,9 @@ cpp_data = []
 cum_cpp_60 = 0
 cum_cpp_65 = 0
 
-# Zero-income drag mathematically lowers the Age 65 base by approx 12%
-base_65_adjusted = base_cpp * 0.88 
-base_60 = base_cpp * 0.64
+# Zero-income drag mathematically lowers the high earner's Age 65 base by approx 12%
+base_65_adjusted = (user_base_cpp * 0.88) + candice_base_cpp 
+base_60 = (user_base_cpp + candice_base_cpp) * 0.64
 
 for age_idx in range(target_age, terminal_age + 1):
     if age_idx >= 60:
@@ -295,19 +310,18 @@ with tab1:
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.markdown("### The Withdrawal Waterfall")
-    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]]
+    st.markdown("### The Withdrawal Waterfall & Pension Sharing")
+    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "CPP Pool (50/50 Split)", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]]
     st.dataframe(df_decum.set_index("Age").style.format("${:,.0f}"), use_container_width=True, height=600)
 
 with tab3:
-    st.markdown("### Actuarial Crossover Analysis")
-    st.markdown("This engine mathematically calculates total lifetime cash collected. It factors in the 36% early penalty for Age 60, and models an approximate **12% zero-income baseline decay** for deferring to Age 65 while fully retired.")
+    st.markdown("### Household Actuarial Crossover Analysis")
+    st.markdown("This mathematically maps the cumulative cash collected from **both** CPP pools. It applies the 36% penalty for Age 60, and models an approximate **12% zero-income baseline decay** strictly against your higher earning baseline if deferred to Age 65.")
     
     fig_cpp = go.Figure()
     fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 60)'], mode='lines', name='Take at 60 (Penalty Applied)', line=dict(color='#E74C3C', width=3)))
     fig_cpp.add_trace(go.Scatter(x=df_cpp['Age'], y=df_cpp['Cumulative CPP (Start 65 with Zero-Income Drag)'], mode='lines', name='Take at 65 (Zero-Income Drag Applied)', line=dict(color='#2ECC71', width=3)))
     
-    # Calculate Cross-Over Point
     crossover_age = None
     for idx, row in df_cpp.iterrows():
         if row['Cumulative CPP (Start 65 with Zero-Income Drag)'] > row['Cumulative CPP (Start 60)']:
