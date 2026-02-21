@@ -49,154 +49,6 @@ rrsp_units = st.sidebar.number_input("XEQT Units (Spousal RRSP)", value=21500, s
 tfsa_units = st.sidebar.number_input("XEQT Units (TFSA)", value=1180, step=10)
 nonreg_units = st.sidebar.number_input("XEQT Units (Non-Reg)", value=0, step=10)
 
-# --- PROJECTION ENGINE ---
-# Cache removed to allow dynamic slider updates for all global variables
-def calculate_projection():
-    data = []
-    current_year = datetime.now().year
-    
-    # Initialize Balances
-    rrsp = rrsp_start
-    tfsa = tfsa_start
-    non_reg = 0
-    resp = resp_start
-    mortgage = mortgage_start
-    tfsa_room = 109000  
-    
-    for i in range(terminal_age - current_age + 1):
-        age = current_age + i
-        year = current_year + i
-        
-        cur_rrsp_in = 0
-        cur_tfsa_in = 0
-        cur_nonreg_in = 0
-        
-        # Drawdown Tracking Variables
-        current_cpp = 0
-        current_oas = 0
-        rrsp_draw = 0
-        nonreg_draw = 0
-        tfsa_draw = 0
-        tax_paid = 0
-        net_income_achieved = 0
-        
-        if i > 0: tfsa_room += 7000 
-        
-        # --- PHASE 1 & 2: ACCUMULATION ---
-        if age < target_age:
-            if mortgage > 0:
-                mortgage -= mortgage_pmt
-                if mortgage < 0: mortgage = 0
-                
-            if age < 46:
-                cur_rrsp_in = rrsp_contrib
-                cur_tfsa_in = min(tax_refund, tfsa_room)
-            elif age >= 46 and age < 50:
-                cur_rrsp_in = rrsp_contrib
-                total_to_tfsa = tax_refund + post_mortgage_tfsa
-                cur_tfsa_in = min(total_to_tfsa, tfsa_room)
-                cur_nonreg_in = max(0, total_to_tfsa - tfsa_room)
-            elif age >= 50:
-                total_cashflow = rrsp_contrib + post_mortgage_tfsa 
-                cur_tfsa_in = min(total_cashflow, tfsa_room)
-                cur_nonreg_in = total_cashflow - cur_tfsa_in
-
-            tfsa_room -= cur_tfsa_in
-            
-            # Market Growth (Accumulation)
-            if i > 0: 
-                rrsp = (rrsp + cur_rrsp_in) * (1 + real_return)
-                tfsa = (tfsa + cur_tfsa_in) * (1 + real_return)
-                non_reg = (non_reg + cur_nonreg_in) * (1 + real_return)
-                resp_cagr = real_return if age < 47 else 0.04
-                resp = resp * (1 + resp_cagr)
-                
-        # --- PHASE 3: DECUMULATION ---
-        else:
-            if age >= cpp_start:
-                if cpp_start == 60: current_cpp = base_cpp * 0.64
-                elif cpp_start == 65: current_cpp = base_cpp
-                elif cpp_start == 70: current_cpp = base_cpp * 1.42
-                
-            if age >= oas_start:
-                if oas_start == 65: current_oas = base_oas
-                elif oas_start == 70: current_oas = base_oas * 1.36
-                
-            tax_paid = (current_cpp + current_oas) * est_effective_tax
-            net_gov_income = (current_cpp + current_oas) - tax_paid
-            net_shortfall = target_net_income - net_gov_income
-            
-            if net_shortfall > 0:
-                gross_needed_taxable = net_shortfall / (1 - est_effective_tax)
-                
-                # Waterfall: RRSP -> NonReg -> TFSA
-                if rrsp >= gross_needed_taxable:
-                    rrsp_draw = gross_needed_taxable
-                    rrsp -= rrsp_draw
-                    tax_paid += rrsp_draw * est_effective_tax
-                    net_shortfall = 0
-                else:
-                    rrsp_draw = rrsp
-                    tax_paid += rrsp_draw * est_effective_tax
-                    net_shortfall -= rrsp_draw * (1 - est_effective_tax)
-                    rrsp = 0
-                    
-                    gross_needed_nonreg = net_shortfall / (1 - est_effective_tax)
-                    if non_reg >= gross_needed_nonreg:
-                        nonreg_draw = gross_needed_nonreg
-                        non_reg -= nonreg_draw
-                        tax_paid += nonreg_draw * est_effective_tax
-                        net_shortfall = 0
-                    else:
-                        nonreg_draw = non_reg
-                        tax_paid += nonreg_draw * est_effective_tax
-                        net_shortfall -= nonreg_draw * (1 - est_effective_tax)
-                        non_reg = 0
-                        
-                        # TFSA is tax-free
-                        if tfsa >= net_shortfall:
-                            tfsa_draw = net_shortfall
-                            tfsa -= tfsa_draw
-                            net_shortfall = 0
-                        else:
-                            tfsa_draw = tfsa
-                            net_shortfall -= tfsa_draw
-                            tfsa = 0 
-                            
-            net_income_achieved = target_net_income - net_shortfall
-
-            # Market Growth (Decumulation - Applied after withdrawals)
-            if i > 0:
-                rrsp = rrsp * (1 + real_return)
-                tfsa = tfsa * (1 + real_return)
-                non_reg = non_reg * (1 + real_return)
-            
-        liquid_nw = rrsp + tfsa + non_reg
-        
-        data.append({
-            "Year": year,
-            "Age": age,
-            "RRSP": max(0, rrsp),
-            "TFSA": max(0, tfsa),
-            "Non-Reg": max(0, non_reg),
-            "RESP": resp,
-            "Mortgage": mortgage,
-            "Liquid NW": max(0, liquid_nw),
-            "Upper Bound (+10%)": liquid_nw * 1.10,
-            "Lower Bound (-10%)": liquid_nw * 0.90,
-            "CPP": current_cpp,
-            "OAS": current_oas,
-            "RRSP Draw": rrsp_draw,
-            "NonReg Draw": nonreg_draw,
-            "TFSA Draw": tfsa_draw,
-            "Est. Taxes Paid": tax_paid,
-            "Net Income": net_income_achieved
-        })
-        
-    return pd.DataFrame(data)
-
-df_proj = calculate_projection()
-
 # --- LIVE API INGESTION LAYER ---
 @st.cache_data(ttl=3600)  
 def get_live_price(ticker="XEQT.TO"):
@@ -209,6 +61,150 @@ def get_live_price(ticker="XEQT.TO"):
         return None
 
 live_price = get_live_price("XEQT.TO")
+
+# --- PROJECTION ENGINE (100% Reactive Flow) ---
+data = []
+current_year = datetime.now().year
+
+# Initialize Balances
+rrsp = rrsp_start
+tfsa = tfsa_start
+non_reg = 0
+resp = resp_start
+mortgage = mortgage_start
+tfsa_room = 109000  
+
+for i in range(terminal_age - current_age + 1):
+    age = current_age + i
+    year = current_year + i
+    
+    cur_rrsp_in = 0
+    cur_tfsa_in = 0
+    cur_nonreg_in = 0
+    
+    # Drawdown Tracking Variables
+    current_cpp = 0
+    current_oas = 0
+    rrsp_draw = 0
+    nonreg_draw = 0
+    tfsa_draw = 0
+    tax_paid = 0
+    net_income_achieved = 0
+    
+    if i > 0: tfsa_room += 7000 
+    
+    # --- PHASE 1 & 2: ACCUMULATION ---
+    if age < target_age:
+        if mortgage > 0:
+            mortgage -= mortgage_pmt
+            if mortgage < 0: mortgage = 0
+            
+        if age < 46:
+            cur_rrsp_in = rrsp_contrib
+            cur_tfsa_in = min(tax_refund, tfsa_room)
+        elif age >= 46 and age < 50:
+            cur_rrsp_in = rrsp_contrib
+            total_to_tfsa = tax_refund + post_mortgage_tfsa
+            cur_tfsa_in = min(total_to_tfsa, tfsa_room)
+            cur_nonreg_in = max(0, total_to_tfsa - tfsa_room)
+        elif age >= 50:
+            total_cashflow = rrsp_contrib + post_mortgage_tfsa 
+            cur_tfsa_in = min(total_cashflow, tfsa_room)
+            cur_nonreg_in = total_cashflow - cur_tfsa_in
+
+        tfsa_room -= cur_tfsa_in
+        
+        # Market Growth (Accumulation)
+        if i > 0: 
+            rrsp = (rrsp + cur_rrsp_in) * (1 + real_return)
+            tfsa = (tfsa + cur_tfsa_in) * (1 + real_return)
+            non_reg = (non_reg + cur_nonreg_in) * (1 + real_return)
+            resp_cagr = real_return if age < 47 else 0.04
+            resp = resp * (1 + resp_cagr)
+            
+    # --- PHASE 3: DECUMULATION ---
+    else:
+        if age >= cpp_start:
+            if cpp_start == 60: current_cpp = base_cpp * 0.64
+            elif cpp_start == 65: current_cpp = base_cpp
+            elif cpp_start == 70: current_cpp = base_cpp * 1.42
+            
+        if age >= oas_start:
+            if oas_start == 65: current_oas = base_oas
+            elif oas_start == 70: current_oas = base_oas * 1.36
+            
+        tax_paid = (current_cpp + current_oas) * est_effective_tax
+        net_gov_income = (current_cpp + current_oas) - tax_paid
+        net_shortfall = target_net_income - net_gov_income
+        
+        if net_shortfall > 0:
+            gross_needed_taxable = net_shortfall / (1 - est_effective_tax)
+            
+            # Waterfall: RRSP -> NonReg -> TFSA
+            if rrsp >= gross_needed_taxable:
+                rrsp_draw = gross_needed_taxable
+                rrsp -= rrsp_draw
+                tax_paid += rrsp_draw * est_effective_tax
+                net_shortfall = 0
+            else:
+                rrsp_draw = rrsp
+                tax_paid += rrsp_draw * est_effective_tax
+                net_shortfall -= rrsp_draw * (1 - est_effective_tax)
+                rrsp = 0
+                
+                gross_needed_nonreg = net_shortfall / (1 - est_effective_tax)
+                if non_reg >= gross_needed_nonreg:
+                    nonreg_draw = gross_needed_nonreg
+                    non_reg -= nonreg_draw
+                    tax_paid += nonreg_draw * est_effective_tax
+                    net_shortfall = 0
+                else:
+                    nonreg_draw = non_reg
+                    tax_paid += nonreg_draw * est_effective_tax
+                    net_shortfall -= nonreg_draw * (1 - est_effective_tax)
+                    non_reg = 0
+                    
+                    # TFSA is tax-free
+                    if tfsa >= net_shortfall:
+                        tfsa_draw = net_shortfall
+                        tfsa -= tfsa_draw
+                        net_shortfall = 0
+                    else:
+                        tfsa_draw = tfsa
+                        net_shortfall -= tfsa_draw
+                        tfsa = 0 
+                        
+        net_income_achieved = target_net_income - net_shortfall
+
+        # Market Growth (Decumulation - Applied after withdrawals)
+        if i > 0:
+            rrsp = rrsp * (1 + real_return)
+            tfsa = tfsa * (1 + real_return)
+            non_reg = non_reg * (1 + real_return)
+        
+    liquid_nw = rrsp + tfsa + non_reg
+    
+    data.append({
+        "Year": year,
+        "Age": age,
+        "RRSP": max(0, rrsp),
+        "TFSA": max(0, tfsa),
+        "Non-Reg": max(0, non_reg),
+        "RESP": resp,
+        "Mortgage": mortgage,
+        "Liquid NW": max(0, liquid_nw),
+        "Upper Bound (+10%)": liquid_nw * 1.10,
+        "Lower Bound (-10%)": liquid_nw * 0.90,
+        "CPP": current_cpp,
+        "OAS": current_oas,
+        "RRSP Draw": rrsp_draw,
+        "NonReg Draw": nonreg_draw,
+        "TFSA Draw": tfsa_draw,
+        "Est. Taxes Paid": tax_paid,
+        "Net Income": net_income_achieved
+    })
+    
+df_proj = pd.DataFrame(data)
 
 # --- DASHBOARD UI ---
 st.divider()
@@ -243,54 +239,55 @@ else:
 
 st.divider()
 
-# --- PLOTTING ---
-st.subheader(f"📈 Full Lifecycle Matrix (Age {current_age} to {terminal_age})")
+# --- TABS ARCHITECTURE ---
+tab1, tab2 = st.tabs(["📈 Visual Matrix", "🧮 Raw Ledger (Decumulation)"])
 
-fig = go.Figure()
+with tab1:
+    fig = go.Figure()
 
-# Base Projection Area Charts
-fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['RRSP'], mode='lines', stackgroup='one', name='Spousal RRSP', line=dict(color='#2E86C1')))
-fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['TFSA'], mode='lines', stackgroup='one', name='TFSA', line=dict(color='#28B463')))
-fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Non-Reg'], mode='lines', stackgroup='one', name='Non-Registered', line=dict(color='#F1C40F')))
+    # Base Projection Area Charts
+    fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['RRSP'], mode='lines', stackgroup='one', name='Spousal RRSP', line=dict(color='#2E86C1')))
+    fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['TFSA'], mode='lines', stackgroup='one', name='TFSA', line=dict(color='#28B463')))
+    fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Non-Reg'], mode='lines', stackgroup='one', name='Non-Registered', line=dict(color='#F1C40F')))
 
-# Drawdown Tolerance Bands
-fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Upper Bound (+10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='+10% Variance'))
-fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Lower Bound (-10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='-10% Variance'))
+    # Drawdown Tolerance Bands
+    fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Upper Bound (+10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='+10% Variance'))
+    fig.add_trace(go.Scatter(x=df_proj['Age'], y=df_proj['Lower Bound (-10%)'], mode='lines', line=dict(color='rgba(255, 255, 255, 0.3)', dash='dot'), name='-10% Variance'))
 
-# Live Data Overlay
-if live_price:
-    fig.add_trace(go.Scatter(
-        x=[fractional_age], 
-        y=[actual_liquid_nw],
-        mode='markers',
-        marker=dict(size=14, color='white', line=dict(width=2, color='black')),
-        name='Live Net Worth'
-    ))
+    # Live Data Overlay
+    if live_price:
+        fig.add_trace(go.Scatter(
+            x=[fractional_age], 
+            y=[actual_liquid_nw],
+            mode='markers',
+            marker=dict(size=14, color='white', line=dict(width=2, color='black')),
+            name='Live Net Worth'
+        ))
 
-fig.update_layout(
-    xaxis_title="Age",
-    yaxis_title="Portfolio Value ($)",
-    hovermode="x unified",
-    plot_bgcolor="rgba(0,0,0,0)",
-    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
-)
+    fig.update_layout(
+        xaxis_title="Age",
+        yaxis_title="Portfolio Value ($)",
+        hovermode="x unified",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+    )
 
-fig.add_vline(x=46, line_dash="dash", line_color="red", annotation_text="Mortgage Dead")
-fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
+    fig.add_vline(x=46, line_dash="dash", line_color="red", annotation_text="Mortgage Dead")
+    fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
 
-st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-# --- DECUMULATION MATRIX DATA TABLE ---
-st.subheader("🔍 Decumulation Ledger (Age 60+ Breakdown)")
+with tab2:
+    st.markdown("### The Withdrawal Waterfall")
+    st.markdown("This ledger mathematically tracks how the target net income is achieved by draining the Spousal RRSP to the tax threshold, then bridging the gap with the TFSA.")
+    
+    # Filter the dataframe to only show the retirement years and specific columns
+    df_decum = df_proj[df_proj['Age'] >= target_age][
+        ["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]
+    ]
 
-# Filter the dataframe to only show the retirement years and specific columns
-df_decum = df_proj[df_proj['Age'] >= target_age][
-    ["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]
-]
-
-# Display as an interactive dataframe
-st.dataframe(
-    df_decum.set_index("Age").style.format("${:,.0f}"),
-    use_container_width=True,
-    height=400
-)
+    st.dataframe(
+        df_decum.set_index("Age").style.format("${:,.0f}"),
+        use_container_width=True,
+        height=600
+    )
