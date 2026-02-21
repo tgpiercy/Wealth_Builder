@@ -34,7 +34,7 @@ post_mortgage_tfsa = st.sidebar.number_input("Post-Mortgage Extra TFSA", value=1
 
 # --- SIDEBAR: 4. DECUMULATION (AGE 60+) ---
 st.sidebar.header("4. Decumulation Logic")
-post_retire_expected_return = st.sidebar.slider("Post-Retirement Nominal Return (%)", 2.0, 10.0, 5.0, 0.1) / 100
+post_retire_expected_return = st.sidebar.slider("Post-Retire Nominal Return (%)", 2.0, 10.0, 5.0, 0.1) / 100
 post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 1
 
 target_net_income = st.sidebar.number_input("Target Net Income ($)", value=120000, step=5000)
@@ -46,8 +46,14 @@ base_oas = st.sidebar.number_input("Est. OAS at 65", value=17000, step=1000)
 cpp_start = st.sidebar.selectbox("CPP Start Age", [60, 65, 70], index=0) 
 oas_start = st.sidebar.selectbox("OAS Start Age", [65, 70], index=0)     
 
-# --- SIDEBAR: 5. LIVE HOLDINGS ---
-st.sidebar.header("5. Live Holdings (Unit Counts)")
+# --- SIDEBAR: 5. STRESS TESTING (SORR) ---
+st.sidebar.header("5. Stress Testing (SORR)")
+apply_sorr = st.sidebar.checkbox("Enable Market Crash Simulation", value=False)
+sorr_age = st.sidebar.number_input("Age of Crash", min_value=target_age, max_value=terminal_age, value=target_age)
+sorr_drop = st.sidebar.slider("Crash Depth (%)", -50, -10, -30, 5)
+
+# --- SIDEBAR: 6. LIVE HOLDINGS ---
+st.sidebar.header("6. Live Holdings (Unit Counts)")
 rrsp_units = st.sidebar.number_input("XEQT Units (Spousal RRSP)", value=21500, step=100)
 tfsa_units = st.sidebar.number_input("XEQT Units (TFSA)", value=1180, step=10)
 nonreg_units = st.sidebar.number_input("XEQT Units (Non-Reg)", value=0, step=10)
@@ -65,7 +71,7 @@ def get_live_price(ticker="XEQT.TO"):
 
 live_price = get_live_price("XEQT.TO")
 
-# --- PROJECTION ENGINE (100% Reactive Flow) ---
+# --- PROJECTION ENGINE (Unified Architecture) ---
 data = []
 current_year = datetime.now().year
 
@@ -85,7 +91,6 @@ for i in range(terminal_age - current_age + 1):
     cur_tfsa_in = 0
     cur_nonreg_in = 0
     
-    # Drawdown Tracking Variables
     current_cpp = 0
     current_oas = 0
     rrsp_draw = 0
@@ -96,7 +101,7 @@ for i in range(terminal_age - current_age + 1):
     
     if i > 0: tfsa_room += 7000 
     
-    # --- PHASE 1 & 2: ACCUMULATION ---
+    # --- PHASE 1 & 2: ACCUMULATION LOGIC ---
     if age < target_age:
         if mortgage > 0:
             mortgage -= mortgage_pmt
@@ -116,16 +121,8 @@ for i in range(terminal_age - current_age + 1):
             cur_nonreg_in = total_cashflow - cur_tfsa_in
 
         tfsa_room -= cur_tfsa_in
-        
-        # Market Growth (Accumulation Phase)
-        if i > 0: 
-            rrsp = (rrsp + cur_rrsp_in) * (1 + real_return)
-            tfsa = (tfsa + cur_tfsa_in) * (1 + real_return)
-            non_reg = (non_reg + cur_nonreg_in) * (1 + real_return)
-            resp_cagr = real_return if age < 47 else 0.04
-            resp = resp * (1 + resp_cagr)
             
-    # --- PHASE 3: DECUMULATION ---
+    # --- PHASE 3: DECUMULATION LOGIC ---
     else:
         if age >= cpp_start:
             if cpp_start == 60: current_cpp = base_cpp * 0.64
@@ -167,7 +164,6 @@ for i in range(terminal_age - current_age + 1):
                     net_shortfall -= nonreg_draw * (1 - est_effective_tax)
                     non_reg = 0
                     
-                    # TFSA is tax-free
                     if tfsa >= net_shortfall:
                         tfsa_draw = net_shortfall
                         tfsa -= tfsa_draw
@@ -179,11 +175,23 @@ for i in range(terminal_age - current_age + 1):
                         
         net_income_achieved = target_net_income - net_shortfall
 
-        # Market Growth (Decumulation Phase - Using Post-Retire Return)
-        if i > 0:
-            rrsp = rrsp * (1 + post_retire_real_return)
-            tfsa = tfsa * (1 + post_retire_real_return)
-            non_reg = non_reg * (1 + post_retire_real_return)
+    # --- UNIFIED MARKET COMPOUNDING ENGINE ---
+    # 1. Determine baseline CAGR based on phase
+    current_year_real_return = real_return if age < target_age else post_retire_real_return
+    
+    # 2. Inject SORR Crash if active
+    if apply_sorr and age == sorr_age:
+        # Convert nominal crash to real crash
+        current_year_real_return = ((1 + (sorr_drop / 100)) / (1 + inflation)) - 1
+        
+    # 3. Apply Compounding to remaining balances
+    if i > 0:
+        rrsp = (rrsp + cur_rrsp_in) * (1 + current_year_real_return)
+        tfsa = (tfsa + cur_tfsa_in) * (1 + current_year_real_return)
+        non_reg = (non_reg + cur_nonreg_in) * (1 + current_year_real_return)
+        
+        resp_cagr = real_return if age < 47 else 0.04
+        resp = resp * (1 + resp_cagr)
         
     liquid_nw = rrsp + tfsa + non_reg
     
@@ -277,6 +285,10 @@ with tab1:
 
     fig.add_vline(x=46, line_dash="dash", line_color="red", annotation_text="Mortgage Dead")
     fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
+    
+    # Optional SORR Marker
+    if apply_sorr:
+        fig.add_vline(x=sorr_age, line_dash="solid", line_color="orange", annotation_text=f"{sorr_drop}% Crash")
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -284,7 +296,6 @@ with tab2:
     st.markdown("### The Withdrawal Waterfall")
     st.markdown("This ledger mathematically tracks how the target net income is achieved by draining the Spousal RRSP to the tax threshold, then bridging the gap with the TFSA.")
     
-    # Filter the dataframe to only show the retirement years and specific columns
     df_decum = df_proj[df_proj['Age'] >= target_age][
         ["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]
     ]
