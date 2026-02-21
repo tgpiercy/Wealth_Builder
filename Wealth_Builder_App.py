@@ -50,11 +50,17 @@ tfsa_units = st.sidebar.number_input("XEQT Units (TFSA)", value=1180, step=10)
 nonreg_units = st.sidebar.number_input("XEQT Units (Non-Reg)", value=0, step=10)
 
 # --- PROJECTION ENGINE ---
-@st.cache_data
-def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
+# Cache removed to allow dynamic slider updates for all global variables
+def calculate_projection():
     data = []
     current_year = datetime.now().year
+    
+    # Initialize Balances
+    rrsp = rrsp_start
+    tfsa = tfsa_start
     non_reg = 0
+    resp = resp_start
+    mortgage = mortgage_start
     tfsa_room = 109000  
     
     for i in range(terminal_age - current_age + 1):
@@ -64,6 +70,15 @@ def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
         cur_rrsp_in = 0
         cur_tfsa_in = 0
         cur_nonreg_in = 0
+        
+        # Drawdown Tracking Variables
+        current_cpp = 0
+        current_oas = 0
+        rrsp_draw = 0
+        nonreg_draw = 0
+        tfsa_draw = 0
+        tax_paid = 0
+        net_income_achieved = 0
         
         if i > 0: tfsa_room += 7000 
         
@@ -90,17 +105,14 @@ def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
             
             # Market Growth (Accumulation)
             if i > 0: 
-                rrsp = (rrsp + cur_rrsp_in) * (1 + cagr)
-                tfsa = (tfsa + cur_tfsa_in) * (1 + cagr)
-                non_reg = (non_reg + cur_nonreg_in) * (1 + cagr)
-                resp_cagr = cagr if age < 47 else 0.04
+                rrsp = (rrsp + cur_rrsp_in) * (1 + real_return)
+                tfsa = (tfsa + cur_tfsa_in) * (1 + real_return)
+                non_reg = (non_reg + cur_nonreg_in) * (1 + real_return)
+                resp_cagr = real_return if age < 47 else 0.04
                 resp = resp * (1 + resp_cagr)
                 
         # --- PHASE 3: DECUMULATION ---
         else:
-            current_cpp = 0
-            current_oas = 0
-            
             if age >= cpp_start:
                 if cpp_start == 60: current_cpp = base_cpp * 0.64
                 elif cpp_start == 65: current_cpp = base_cpp
@@ -110,8 +122,8 @@ def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
                 if oas_start == 65: current_oas = base_oas
                 elif oas_start == 70: current_oas = base_oas * 1.36
                 
-            # Calculate Shortfall
-            net_gov_income = (current_cpp + current_oas) * (1 - est_effective_tax)
+            tax_paid = (current_cpp + current_oas) * est_effective_tax
+            net_gov_income = (current_cpp + current_oas) - tax_paid
             net_shortfall = target_net_income - net_gov_income
             
             if net_shortfall > 0:
@@ -119,28 +131,45 @@ def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
                 
                 # Waterfall: RRSP -> NonReg -> TFSA
                 if rrsp >= gross_needed_taxable:
-                    rrsp -= gross_needed_taxable
+                    rrsp_draw = gross_needed_taxable
+                    rrsp -= rrsp_draw
+                    tax_paid += rrsp_draw * est_effective_tax
+                    net_shortfall = 0
                 else:
-                    remaining_net_shortfall = net_shortfall - (rrsp * (1 - est_effective_tax))
+                    rrsp_draw = rrsp
+                    tax_paid += rrsp_draw * est_effective_tax
+                    net_shortfall -= rrsp_draw * (1 - est_effective_tax)
                     rrsp = 0
                     
-                    gross_needed_nonreg = remaining_net_shortfall / (1 - est_effective_tax)
+                    gross_needed_nonreg = net_shortfall / (1 - est_effective_tax)
                     if non_reg >= gross_needed_nonreg:
-                        non_reg -= gross_needed_nonreg
+                        nonreg_draw = gross_needed_nonreg
+                        non_reg -= nonreg_draw
+                        tax_paid += nonreg_draw * est_effective_tax
+                        net_shortfall = 0
                     else:
-                        remaining_net_shortfall -= (non_reg * (1 - est_effective_tax))
+                        nonreg_draw = non_reg
+                        tax_paid += nonreg_draw * est_effective_tax
+                        net_shortfall -= nonreg_draw * (1 - est_effective_tax)
                         non_reg = 0
                         
-                        if tfsa >= remaining_net_shortfall:
-                            tfsa -= remaining_net_shortfall
+                        # TFSA is tax-free
+                        if tfsa >= net_shortfall:
+                            tfsa_draw = net_shortfall
+                            tfsa -= tfsa_draw
+                            net_shortfall = 0
                         else:
-                            tfsa = 0 # Portfolio Depleted
+                            tfsa_draw = tfsa
+                            net_shortfall -= tfsa_draw
+                            tfsa = 0 
+                            
+            net_income_achieved = target_net_income - net_shortfall
 
             # Market Growth (Decumulation - Applied after withdrawals)
             if i > 0:
-                rrsp = rrsp * (1 + cagr)
-                tfsa = tfsa * (1 + cagr)
-                non_reg = non_reg * (1 + cagr)
+                rrsp = rrsp * (1 + real_return)
+                tfsa = tfsa * (1 + real_return)
+                non_reg = non_reg * (1 + real_return)
             
         liquid_nw = rrsp + tfsa + non_reg
         
@@ -154,12 +183,19 @@ def calculate_projection(cagr, rrsp, tfsa, resp, mortgage):
             "Mortgage": mortgage,
             "Liquid NW": max(0, liquid_nw),
             "Upper Bound (+10%)": liquid_nw * 1.10,
-            "Lower Bound (-10%)": liquid_nw * 0.90
+            "Lower Bound (-10%)": liquid_nw * 0.90,
+            "CPP": current_cpp,
+            "OAS": current_oas,
+            "RRSP Draw": rrsp_draw,
+            "NonReg Draw": nonreg_draw,
+            "TFSA Draw": tfsa_draw,
+            "Est. Taxes Paid": tax_paid,
+            "Net Income": net_income_achieved
         })
         
     return pd.DataFrame(data)
 
-df_proj = calculate_projection(real_return, rrsp_start, tfsa_start, resp_start, mortgage_start)
+df_proj = calculate_projection()
 
 # --- LIVE API INGESTION LAYER ---
 @st.cache_data(ttl=3600)  
@@ -239,12 +275,22 @@ fig.update_layout(
     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
 )
 
-# Milestone Lines
 fig.add_vline(x=46, line_dash="dash", line_color="red", annotation_text="Mortgage Dead")
 fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
 
 st.plotly_chart(fig, use_container_width=True)
 
-# Data Table
-with st.expander("🔍 View Raw Projection Data Matrix"):
-    st.dataframe(df_proj.set_index("Age").style.format("${:,.0f}"))
+# --- DECUMULATION MATRIX DATA TABLE ---
+st.subheader("🔍 Decumulation Ledger (Age 60+ Breakdown)")
+
+# Filter the dataframe to only show the retirement years and specific columns
+df_decum = df_proj[df_proj['Age'] >= target_age][
+    ["Age", "Liquid NW", "Net Income", "CPP", "OAS", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid"]
+]
+
+# Display as an interactive dataframe
+st.dataframe(
+    df_decum.set_index("Age").style.format("${:,.0f}"),
+    use_container_width=True,
+    height=400
+)
