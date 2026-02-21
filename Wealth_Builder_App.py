@@ -14,7 +14,7 @@ st.sidebar.header("1. Core Assumptions")
 current_age = st.sidebar.number_input("Current Age", value=43)
 target_age = st.sidebar.number_input("Retirement Age", value=60)
 terminal_age = st.sidebar.number_input("Terminal Age (Longevity)", value=95, min_value=80, max_value=110)
-expected_return = st.sidebar.slider("Expected Nominal Return (%)", 4.0, 12.0, 7.0, 0.1) / 100
+expected_return = st.sidebar.slider("Accumulation Nominal Return (%)", 4.0, 12.0, 7.0, 0.1) / 100
 inflation = st.sidebar.slider("Expected Inflation (%)", 1.0, 5.0, 2.5, 0.1) / 100
 real_return = (1 + expected_return) / (1 + inflation) - 1
 
@@ -34,6 +34,9 @@ post_mortgage_tfsa = st.sidebar.number_input("Post-Mortgage Extra TFSA", value=1
 
 # --- SIDEBAR: 4. DECUMULATION (AGE 60+) ---
 st.sidebar.header("4. Decumulation Logic")
+post_retire_expected_return = st.sidebar.slider("Post-Retirement Nominal Return (%)", 2.0, 10.0, 5.0, 0.1) / 100
+post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 1
+
 target_net_income = st.sidebar.number_input("Target Net Income ($)", value=120000, step=5000)
 est_effective_tax = st.sidebar.slider("Est. Effective Tax Rate (%)", 10, 40, 20) / 100
 
@@ -114,7 +117,7 @@ for i in range(terminal_age - current_age + 1):
 
         tfsa_room -= cur_tfsa_in
         
-        # Market Growth (Accumulation)
+        # Market Growth (Accumulation Phase)
         if i > 0: 
             rrsp = (rrsp + cur_rrsp_in) * (1 + real_return)
             tfsa = (tfsa + cur_tfsa_in) * (1 + real_return)
@@ -176,11 +179,11 @@ for i in range(terminal_age - current_age + 1):
                         
         net_income_achieved = target_net_income - net_shortfall
 
-        # Market Growth (Decumulation - Applied after withdrawals)
+        # Market Growth (Decumulation Phase - Using Post-Retire Return)
         if i > 0:
-            rrsp = rrsp * (1 + real_return)
-            tfsa = tfsa * (1 + real_return)
-            non_reg = non_reg * (1 + real_return)
+            rrsp = rrsp * (1 + post_retire_real_return)
+            tfsa = tfsa * (1 + post_retire_real_return)
+            non_reg = non_reg * (1 + post_retire_real_return)
         
     liquid_nw = rrsp + tfsa + non_reg
     
