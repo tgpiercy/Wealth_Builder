@@ -24,6 +24,7 @@ rrsp_start = st.sidebar.number_input("Spousal RRSP ($)", value=825000, step=1000
 tfsa_start = st.sidebar.number_input("TFSA ($)", value=45000, step=1000)
 resp_start = st.sidebar.number_input("RESP ($)", value=104000, step=1000)
 mortgage_start = st.sidebar.number_input("Mortgage Remaining ($)", value=65000, step=1000)
+tfsa_room_start = st.sidebar.number_input("Available TFSA Room (Combined)", value=173000, step=5000)
 
 # --- SIDEBAR: 3. CASH FLOW (ACCUMULATION) ---
 st.sidebar.header("3. Cash Flow (Accumulation)")
@@ -38,7 +39,6 @@ post_retire_expected_return = st.sidebar.slider("Post-Retire Nominal Return (%)"
 post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 1
 target_net_income = st.sidebar.number_input("Base Target Net Income ($)", value=120000, step=5000)
 
-# 🎯 FIX: Phased Spending Switch (Smile Curve)
 st.sidebar.subheader("Phased Spending (Smile Curve)")
 enable_smile = st.sidebar.checkbox("Enable Go/Slow/No-Go Phases", value=False)
 gogo_mult = st.sidebar.slider("Go-Go Years (60-74) Spend %", 50, 150, 100, 5) / 100.0 if enable_smile else 1.0
@@ -137,7 +137,6 @@ def solve_required_gross(target_net_household, combined_gov_gross, age):
             
     return required_rrsp_gross, total_taxes_paid
 
-# CRA RRIF Minimum Withdrawal Schedule (Age 72+)
 rrif_min_rates = {
     72: 0.0540, 73: 0.0553, 74: 0.0567, 75: 0.0582, 76: 0.0598,
     77: 0.0617, 78: 0.0636, 79: 0.0658, 80: 0.0682, 81: 0.0708,
@@ -152,7 +151,7 @@ current_year = datetime.now().year
 
 rrsp, tfsa, non_reg = rrsp_start, tfsa_start, 0
 resp, mortgage = resp_start, mortgage_start
-tfsa_room = 109000  
+tfsa_room = tfsa_room_start  
 
 for i in range(terminal_age - current_age + 1):
     age = current_age + i
@@ -163,14 +162,14 @@ for i in range(terminal_age - current_age + 1):
     rrsp_draw, nonreg_draw, tfsa_draw, tax_paid, net_income_achieved = 0, 0, 0, 0, 0
     excess_cash_reinvested = 0
     
-    # 🎯 FIX: Apply Smile Curve Logic
     active_target = target_net_income
     if enable_smile and age >= target_age:
         if age <= 74: active_target = target_net_income * gogo_mult
         elif age <= 84: active_target = target_net_income * slowgo_mult
         else: active_target = target_net_income * nogo_mult
     
-    if i > 0: tfsa_room += 7000 
+    # 🎯 FIX: Add $14,000 household TFSA room per year instead of $7,000
+    if i > 0: tfsa_room += 14000 
     
     # --- PHASE 1 & 2: ACCUMULATION ---
     if age < target_age:
@@ -214,7 +213,6 @@ for i in range(terminal_age - current_age + 1):
             
         combined_gov_gross = current_cpp_total + current_oas
         
-        # Determine RRIF Minimum (Age 72+)
         rrif_min = 0.0
         if age >= 72 and rrsp > 0:
             rate = rrif_min_rates.get(age, 0.20)
@@ -225,8 +223,6 @@ for i in range(terminal_age - current_age + 1):
             forced_draw = meltdown_amount
             
         absolute_floor = max(forced_draw, rrif_min)
-        
-        # Calculate what we ACTUALLY need based on the active dynamic target
         required_rrsp_gross, _ = solve_required_gross(active_target, combined_gov_gross, age)
         
         target_rrsp_draw = max(required_rrsp_gross, absolute_floor)
@@ -271,6 +267,7 @@ for i in range(terminal_age - current_age + 1):
             excess_cash_reinvested = excess_cash
             net_income_achieved = active_target 
             
+            # 🎯 FIX: Improved TFSA Household Absorption
             to_tfsa = min(excess_cash, tfsa_room)
             tfsa += to_tfsa
             tfsa_room -= to_tfsa
