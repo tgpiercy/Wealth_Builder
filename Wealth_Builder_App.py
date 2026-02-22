@@ -280,7 +280,7 @@ if live_price:
     actual_liquid_nw = actual_rrsp + actual_tfsa + actual_nonreg
     fractional_age = current_age + (datetime.now().timetuple().tm_yday / 365.25)
     
-    # FIX: Isolate the Arrival Wealth (End of Age 59) to prevent Decumulation slider distortion
+    # 🎯 FIX: Isolate Arrival Wealth (End of Age 59) to prevent slider distortion
     arrival_age = target_age - 1
     expected_nw_current = df_proj.loc[df_proj['Age'] == current_age, 'Liquid NW'].values[0]
     variance = actual_liquid_nw - expected_nw_current
@@ -290,11 +290,10 @@ if live_price:
     col1, col2, col3, col4 = st.columns(4)
     
     with col1: 
-        # Metric now accurately locked to Arrival Age (59 EOY)
         peak_real = df_proj.loc[df_proj['Age'] == arrival_age, 'Liquid NW'].values[0]
         peak_nominal = peak_real * ((1 + inflation) ** (arrival_age - current_age))
         st.metric(f"Peak Arrival Wealth (Age {target_age})", f"${peak_real:,.0f}")
-        st.caption(f"🎯 **Target 2043 Nominal Balance: ${peak_nominal:,.0f}**")
+        st.caption(f"🎯 **Target Nominal Balance: ${peak_nominal:,.0f}**")
         
     with col2: 
         st.metric("Live Liquid NW", f"${actual_liquid_nw:,.0f}")
