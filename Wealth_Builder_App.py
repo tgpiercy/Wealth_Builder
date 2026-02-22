@@ -72,10 +72,8 @@ live_price = get_live_price("XEQT.TO")
 
 # --- TAX & DRAWDOWN ALGORITHMS (2024 CRA Brackets) ---
 def calculate_taxes(gross_income, age):
-    """Calculates strict Federal + Ontario tax for a single individual."""
     if gross_income <= 0: return 0.0
     
-    # 2024 Federal Brackets
     fed_tax = 0.0
     temp_inc = gross_income
     if temp_inc > 246752: fed_tax += (temp_inc - 246752) * 0.33; temp_inc = 246752
@@ -84,7 +82,6 @@ def calculate_taxes(gross_income, age):
     if temp_inc > 55867:  fed_tax += (temp_inc - 55867) * 0.205; temp_inc = 55867
     fed_tax += temp_inc * 0.15
 
-    # 2024 Ontario Brackets
     ont_tax = 0.0
     temp_inc_ont = gross_income
     if temp_inc_ont > 220000: ont_tax += (temp_inc_ont - 220000) * 0.1316; temp_inc_ont = 220000
@@ -93,7 +90,6 @@ def calculate_taxes(gross_income, age):
     if temp_inc_ont > 51446:  ont_tax += (temp_inc_ont - 51446) * 0.0915;  temp_inc_ont = 51446
     ont_tax += temp_inc_ont * 0.0505
     
-    # Base Credits
     bpa_fed = 15705 * 0.15
     bpa_ont = 12399 * 0.0505
     pension_credit = 2000 * 0.15 if age >= 65 else 0
@@ -102,23 +98,16 @@ def calculate_taxes(gross_income, age):
     return total_tax
 
 def calculate_oas_clawback(gross_income):
-    """Calculates 15% clawback over $90,997."""
     threshold = 90997.0
-    if gross_income > threshold:
-        return (gross_income - threshold) * 0.15
+    if gross_income > threshold: return (gross_income - threshold) * 0.15
     return 0.0
 
 def solve_required_gross(target_net_household, combined_gov_gross, age):
-    """Binary search solver ensuring absolute tax efficiency down to the dollar."""
-    low = 0.0
-    high = 500000.0 
-    required_rrsp_gross = 0.0
-    total_taxes_paid = 0.0
+    low, high = 0.0, 500000.0 
+    required_rrsp_gross, total_taxes_paid = 0.0, 0.0
     
-    for _ in range(60): # Hard cap iterations to protect Streamlit server
+    for _ in range(60): 
         mid_rrsp_gross = (low + high) / 2.0
-        
-        # Core Strategic Split (50/50 Spousal & Pension Sharing)
         individual_gross = (combined_gov_gross + mid_rrsp_gross) / 2.0
         
         individual_tax = calculate_taxes(individual_gross, age)
@@ -127,8 +116,7 @@ def solve_required_gross(target_net_household, combined_gov_gross, age):
         total_individual_net = individual_gross - individual_tax - individual_clawback
         household_net = total_individual_net * 2.0
         
-        if household_net < target_net_household:
-            low = mid_rrsp_gross 
+        if household_net < target_net_household: low = mid_rrsp_gross 
         else:
             high = mid_rrsp_gross 
             required_rrsp_gross = mid_rrsp_gross
@@ -142,11 +130,8 @@ def solve_required_gross(target_net_household, combined_gov_gross, age):
 data = []
 current_year = datetime.now().year
 
-rrsp = rrsp_start
-tfsa = tfsa_start
-non_reg = 0
-resp = resp_start
-mortgage = mortgage_start
+rrsp, tfsa, non_reg = rrsp_start, tfsa_start, 0
+resp, mortgage = resp_start, mortgage_start
 tfsa_room = 109000  
 
 for i in range(terminal_age - current_age + 1):
@@ -154,9 +139,8 @@ for i in range(terminal_age - current_age + 1):
     year = current_year + i
     
     cur_rrsp_in, cur_tfsa_in, cur_nonreg_in = 0, 0, 0
-    current_cpp_total, current_oas = 0, 0
-    rrsp_draw, nonreg_draw, tfsa_draw, tax_paid = 0, 0, 0, 0
-    net_income_achieved = 0
+    current_cpp_total, current_oas, combined_gov_gross = 0, 0, 0
+    rrsp_draw, nonreg_draw, tfsa_draw, tax_paid, net_income_achieved = 0, 0, 0, 0, 0
     
     if i > 0: tfsa_room += 7000 
     
@@ -183,20 +167,16 @@ for i in range(terminal_age - current_age + 1):
             
     # --- PHASE 3: DECUMULATION LOGIC ---
     else:
-        user_cpp_active = 0
-        candice_cpp_active = 0
+        user_cpp_active, candice_cpp_active = 0, 0
         penalty_65_ratio = 0.88 
         
         if age >= cpp_start:
             if cpp_start == 60: 
-                user_cpp_active = user_base_cpp * 0.64
-                candice_cpp_active = candice_base_cpp * 0.64
+                user_cpp_active, candice_cpp_active = user_base_cpp * 0.64, candice_base_cpp * 0.64
             elif cpp_start == 65: 
-                user_cpp_active = user_base_cpp * penalty_65_ratio
-                candice_cpp_active = candice_base_cpp 
+                user_cpp_active, candice_cpp_active = user_base_cpp * penalty_65_ratio, candice_base_cpp 
             elif cpp_start == 70: 
-                user_cpp_active = user_base_cpp * penalty_65_ratio * 1.42
-                candice_cpp_active = candice_base_cpp * 1.42
+                user_cpp_active, candice_cpp_active = user_base_cpp * penalty_65_ratio * 1.42, candice_base_cpp * 1.42
 
         current_cpp_total = user_cpp_active + candice_cpp_active
             
@@ -205,8 +185,6 @@ for i in range(terminal_age - current_age + 1):
             elif oas_start == 70: current_oas = base_oas * 1.36
             
         combined_gov_gross = current_cpp_total + current_oas
-        
-        # Run Algorithmic Tax Solver
         required_rrsp_gross, tax_paid = solve_required_gross(target_net_income, combined_gov_gross, age)
         
         if rrsp >= required_rrsp_gross:
@@ -217,7 +195,6 @@ for i in range(terminal_age - current_age + 1):
             rrsp_draw = rrsp
             rrsp = 0
             
-            # Recalculate taxes based on the lower actual RRSP draw
             actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2.0
             actual_tax = calculate_taxes(actual_individual_gross, age) * 2.0
             actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2.0
@@ -308,10 +285,26 @@ if live_price:
 
     st.subheader(f"⚡ Live Market Tracking (XEQT.TO @ ${live_price:.2f})")
     col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Peak Projected Wealth (Age 60)", f"${df_proj.loc[df_proj['Age'] == target_age, 'Liquid NW'].values[0]:,.0f}")
-    with col2: st.metric("Live Liquid NW", f"${actual_liquid_nw:,.0f}")
-    with col3: st.metric("Variance vs Model", f"${variance:,.0f}", f"{variance_pct:.2f}%")
-    with col4: st.metric("Terminal Wealth", f"${df_proj['Liquid NW'].iloc[-1]:,.0f}")
+    
+    # 🎯 NOMINAL SCOREBOARD INJECTION
+    with col1: 
+        peak_real = df_proj.loc[df_proj['Age'] == target_age, 'Liquid NW'].values[0]
+        peak_nominal = peak_real * ((1 + inflation) ** (target_age - current_age))
+        st.metric("Peak Projected Wealth (Real $)", f"${peak_real:,.0f}")
+        st.caption(f"🎯 **Target 2043 Brokerage Balance: ${peak_nominal:,.0f}**")
+        
+    with col2: 
+        st.metric("Live Liquid NW", f"${actual_liquid_nw:,.0f}")
+        st.caption("*(Current Market Value)*")
+        
+    with col3: 
+        st.metric("Variance vs Model", f"${variance:,.0f}", f"{variance_pct:.2f}%")
+        
+    with col4: 
+        terminal_real = df_proj['Liquid NW'].iloc[-1]
+        terminal_nominal = terminal_real * ((1 + inflation) ** (terminal_age - current_age))
+        st.metric(f"Terminal Wealth (Age {terminal_age})", f"${terminal_real:,.0f}")
+        st.caption(f"Nominal Value: **${terminal_nominal:,.0f}**")
 else:
     st.warning("Liquidity Warning: yfinance API is unreachable.")
 
@@ -334,10 +327,9 @@ with tab1:
     fig.add_vline(x=target_age, line_dash="dash", line_color="white", annotation_text="Decumulation Pivot")
     if apply_sorr: fig.add_vline(x=sorr_age, line_dash="solid", line_color="orange", annotation_text=f"{sorr_drop}% Crash")
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch") 
 
 with tab2:
-    # Diagnostic Block to prove the engine is running
     age_60_row = df_proj[df_proj['Age'] == 60]
     if not age_60_row.empty:
         st.success("✅ **Tax Engine is Active:** The 2024 CRA Brackets are successfully looping. No manual estimates are being used.")
@@ -358,7 +350,7 @@ with tab2:
         "TFSA Draw": "${:,.0f}", 
         "Est. Taxes Paid": "${:,.0f}", 
         "Effective Tax Rate (%)": "{:.1f}%"
-    }), use_container_width=True, height=600)
+    }), width="stretch", height=600)
 
 with tab3:
     st.markdown("### Household Actuarial Crossover Analysis")
@@ -370,4 +362,4 @@ with tab3:
     if crossover_age: fig_cpp.add_vline(x=crossover_age, line_dash="dash", line_color="white", annotation_text=f"Break-Even: Age {crossover_age}")
         
     fig_cpp.update_layout(xaxis_title="Age", yaxis_title="Cumulative Dollars Collected ($)", hovermode="x unified", plot_bgcolor="rgba(0,0,0,0)", legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-    st.plotly_chart(fig_cpp, use_container_width=True)
+    st.plotly_chart(fig_cpp, width="stretch") 
