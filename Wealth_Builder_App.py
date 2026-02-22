@@ -36,7 +36,14 @@ post_mortgage_tfsa = st.sidebar.number_input("Post-Mortgage Extra TFSA", value=1
 st.sidebar.header("4. Decumulation Logic")
 post_retire_expected_return = st.sidebar.slider("Post-Retire Nominal Return (%)", 2.0, 10.0, 5.0, 0.1) / 100
 post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 1
-target_net_income = st.sidebar.number_input("Target Net Income ($)", value=120000, step=5000)
+target_net_income = st.sidebar.number_input("Base Target Net Income ($)", value=120000, step=5000)
+
+# 🎯 FIX: Phased Spending Switch (Smile Curve)
+st.sidebar.subheader("Phased Spending (Smile Curve)")
+enable_smile = st.sidebar.checkbox("Enable Go/Slow/No-Go Phases", value=False)
+gogo_mult = st.sidebar.slider("Go-Go Years (60-74) Spend %", 50, 150, 100, 5) / 100.0 if enable_smile else 1.0
+slowgo_mult = st.sidebar.slider("Slow-Go Years (75-84) Spend %", 50, 150, 75, 5) / 100.0 if enable_smile else 1.0
+nogo_mult = st.sidebar.slider("No-Go Years (85+) Spend %", 50, 200, 125, 5) / 100.0 if enable_smile else 1.0
 
 st.sidebar.subheader("Strategic RRSP Meltdown (Age 60-71)")
 enable_meltdown = st.sidebar.checkbox("Enable Early Meltdown Protocol", value=False)
@@ -156,6 +163,13 @@ for i in range(terminal_age - current_age + 1):
     rrsp_draw, nonreg_draw, tfsa_draw, tax_paid, net_income_achieved = 0, 0, 0, 0, 0
     excess_cash_reinvested = 0
     
+    # 🎯 FIX: Apply Smile Curve Logic
+    active_target = target_net_income
+    if enable_smile and age >= target_age:
+        if age <= 74: active_target = target_net_income * gogo_mult
+        elif age <= 84: active_target = target_net_income * slowgo_mult
+        else: active_target = target_net_income * nogo_mult
+    
     if i > 0: tfsa_room += 7000 
     
     # --- PHASE 1 & 2: ACCUMULATION ---
@@ -206,35 +220,30 @@ for i in range(terminal_age - current_age + 1):
             rate = rrif_min_rates.get(age, 0.20)
             rrif_min = rrsp * rate
             
-        # Determine Strategic Meltdown Floor (Age 60-71)
         forced_draw = 0.0
         if enable_meltdown and 60 <= age <= 71:
             forced_draw = meltdown_amount
             
-        # The true floor is the highest of the Meltdown or the Legal RRIF Minimum
         absolute_floor = max(forced_draw, rrif_min)
         
-        # Calculate what we ACTUALLY need to survive
-        required_rrsp_gross, _ = solve_required_gross(target_net_income, combined_gov_gross, age)
+        # Calculate what we ACTUALLY need based on the active dynamic target
+        required_rrsp_gross, _ = solve_required_gross(active_target, combined_gov_gross, age)
         
-        # Apply the final logic: Take what we need, OR what we are forced to take
         target_rrsp_draw = max(required_rrsp_gross, absolute_floor)
-        target_rrsp_draw = min(target_rrsp_draw, rrsp) # Can't draw more than we have
+        target_rrsp_draw = min(target_rrsp_draw, rrsp) 
         
         rrsp_draw = target_rrsp_draw
         rrsp -= rrsp_draw
         
-        # Recalculate true taxes on this final draw
         actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2.0
         actual_tax = calculate_taxes(actual_individual_gross, age) * 2.0
         actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2.0
         tax_paid = actual_tax + actual_clawback
         
         net_from_taxable = (combined_gov_gross + rrsp_draw) - tax_paid
-        shortfall = target_net_income - net_from_taxable
+        shortfall = active_target - net_from_taxable
         
         if shortfall > 0:
-            # Gap Fill Mode
             if non_reg > 0:
                 gross_needed_nonreg = shortfall * 1.15 
                 if non_reg >= gross_needed_nonreg:
@@ -255,23 +264,19 @@ for i in range(terminal_age - current_age + 1):
                     tfsa_draw = tfsa
                     shortfall -= tfsa_draw
                     tfsa = 0
-            net_income_achieved = target_net_income - shortfall
+            net_income_achieved = active_target - shortfall
             
         else:
-            # Overflow Mode (Capital Funnel)
             excess_cash = -shortfall
             excess_cash_reinvested = excess_cash
-            net_income_achieved = target_net_income # You only 'spend' your target
+            net_income_achieved = active_target 
             
-            # Shove excess cash into TFSA first
             to_tfsa = min(excess_cash, tfsa_room)
             tfsa += to_tfsa
             tfsa_room -= to_tfsa
             
-            # Spillover into Non-Reg
             to_nonreg = excess_cash - to_tfsa
-            if to_nonreg > 0:
-                non_reg += to_nonreg
+            if to_nonreg > 0: non_reg += to_nonreg
 
     # --- UNIFIED COMPOUNDING ---
     current_year_real_return = real_return if age < target_age else post_retire_real_return
@@ -296,6 +301,7 @@ for i in range(terminal_age - current_age + 1):
         "Liquid NW": max(0, liquid_nw),
         "Upper Bound (+10%)": liquid_nw * 1.10,
         "Lower Bound (-10%)": liquid_nw * 0.90,
+        "Active Net Target": active_target if age >= target_age else 0,
         "Gov Benefits (Gross)": current_cpp_total + current_oas,
         "RRSP Draw": rrsp_draw,
         "NonReg Draw": nonreg_draw,
@@ -388,9 +394,10 @@ with tab2:
         st.divider()
 
     st.markdown("### The Withdrawal Waterfall & RRIF Meltdown")
-    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income Spent", "Gov Benefits (Gross)", "RRSP Draw", "TFSA Draw", "Reinvested Overflow", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
+    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Active Net Target", "Net Income Spent", "Gov Benefits (Gross)", "RRSP Draw", "TFSA Draw", "Reinvested Overflow", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
     st.dataframe(df_decum.set_index("Age").style.format({
-        "Liquid NW": "${:,.0f}", 
+        "Liquid NW": "${:,.0f}",
+        "Active Net Target": "${:,.0f}",
         "Net Income Spent": "${:,.0f}", 
         "Gov Benefits (Gross)": "${:,.0f}", 
         "RRSP Draw": "${:,.0f}", 
