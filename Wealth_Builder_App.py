@@ -32,11 +32,15 @@ tax_refund = st.sidebar.number_input("Est. Tax Refund -> TFSA", value=15000)
 mortgage_pmt = st.sidebar.number_input("Annual Mortgage Pmt", value=26000)
 post_mortgage_tfsa = st.sidebar.number_input("Post-Mortgage Extra TFSA", value=10000)
 
-# --- SIDEBAR: 4. DECUMULATION (AGE 60+) ---
+# --- SIDEBAR: 4. DECUMULATION & MELTDOWN ---
 st.sidebar.header("4. Decumulation Logic")
 post_retire_expected_return = st.sidebar.slider("Post-Retire Nominal Return (%)", 2.0, 10.0, 5.0, 0.1) / 100
 post_retire_real_return = (1 + post_retire_expected_return) / (1 + inflation) - 1
 target_net_income = st.sidebar.number_input("Target Net Income ($)", value=120000, step=5000)
+
+st.sidebar.subheader("Strategic RRSP Meltdown (Age 60-71)")
+enable_meltdown = st.sidebar.checkbox("Enable Early Meltdown Protocol", value=False)
+meltdown_amount = st.sidebar.number_input("Forced Annual RRSP Draw ($)", value=100000, step=5000)
 
 st.sidebar.subheader("Gov Benefits (Pension Sharing)")
 user_base_cpp = st.sidebar.number_input("Est. MAX CPP at 65 (You)", value=16000, step=1000)
@@ -126,6 +130,15 @@ def solve_required_gross(target_net_household, combined_gov_gross, age):
             
     return required_rrsp_gross, total_taxes_paid
 
+# CRA RRIF Minimum Withdrawal Schedule (Age 72+)
+rrif_min_rates = {
+    72: 0.0540, 73: 0.0553, 74: 0.0567, 75: 0.0582, 76: 0.0598,
+    77: 0.0617, 78: 0.0636, 79: 0.0658, 80: 0.0682, 81: 0.0708,
+    82: 0.0738, 83: 0.0771, 84: 0.0808, 85: 0.0851, 86: 0.0899,
+    87: 0.0955, 88: 0.1021, 89: 0.1099, 90: 0.1192, 91: 0.1306,
+    92: 0.1449, 93: 0.1634, 94: 0.1879, 95: 0.2000
+}
+
 # --- PROJECTION ENGINE ---
 data = []
 current_year = datetime.now().year
@@ -141,6 +154,7 @@ for i in range(terminal_age - current_age + 1):
     cur_rrsp_in, cur_tfsa_in, cur_nonreg_in = 0, 0, 0
     current_cpp_total, current_oas, combined_gov_gross = 0, 0, 0
     rrsp_draw, nonreg_draw, tfsa_draw, tax_paid, net_income_achieved = 0, 0, 0, 0, 0
+    excess_cash_reinvested = 0
     
     if i > 0: tfsa_room += 7000 
     
@@ -185,25 +199,43 @@ for i in range(terminal_age - current_age + 1):
             elif oas_start == 70: current_oas = base_oas * 1.36
             
         combined_gov_gross = current_cpp_total + current_oas
-        required_rrsp_gross, tax_paid = solve_required_gross(target_net_income, combined_gov_gross, age)
         
-        if rrsp >= required_rrsp_gross:
-            rrsp_draw = required_rrsp_gross
-            rrsp -= rrsp_draw
-            net_income_achieved = target_net_income
-        else:
-            rrsp_draw = rrsp
-            rrsp = 0
+        # Determine RRIF Minimum (Age 72+)
+        rrif_min = 0.0
+        if age >= 72 and rrsp > 0:
+            rate = rrif_min_rates.get(age, 0.20)
+            rrif_min = rrsp * rate
             
-            actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2.0
-            actual_tax = calculate_taxes(actual_individual_gross, age) * 2.0
-            actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2.0
-            tax_paid = actual_tax + actual_clawback
+        # Determine Strategic Meltdown Floor (Age 60-71)
+        forced_draw = 0.0
+        if enable_meltdown and 60 <= age <= 71:
+            forced_draw = meltdown_amount
             
-            net_from_taxable = (combined_gov_gross + rrsp_draw) - tax_paid
-            shortfall = target_net_income - net_from_taxable
-            
-            if non_reg > 0 and shortfall > 0:
+        # The true floor is the highest of the Meltdown or the Legal RRIF Minimum
+        absolute_floor = max(forced_draw, rrif_min)
+        
+        # Calculate what we ACTUALLY need to survive
+        required_rrsp_gross, _ = solve_required_gross(target_net_income, combined_gov_gross, age)
+        
+        # Apply the final logic: Take what we need, OR what we are forced to take
+        target_rrsp_draw = max(required_rrsp_gross, absolute_floor)
+        target_rrsp_draw = min(target_rrsp_draw, rrsp) # Can't draw more than we have
+        
+        rrsp_draw = target_rrsp_draw
+        rrsp -= rrsp_draw
+        
+        # Recalculate true taxes on this final draw
+        actual_individual_gross = (combined_gov_gross + rrsp_draw) / 2.0
+        actual_tax = calculate_taxes(actual_individual_gross, age) * 2.0
+        actual_clawback = calculate_oas_clawback(actual_individual_gross) * 2.0
+        tax_paid = actual_tax + actual_clawback
+        
+        net_from_taxable = (combined_gov_gross + rrsp_draw) - tax_paid
+        shortfall = target_net_income - net_from_taxable
+        
+        if shortfall > 0:
+            # Gap Fill Mode
+            if non_reg > 0:
                 gross_needed_nonreg = shortfall * 1.15 
                 if non_reg >= gross_needed_nonreg:
                     nonreg_draw = gross_needed_nonreg
@@ -223,8 +255,23 @@ for i in range(terminal_age - current_age + 1):
                     tfsa_draw = tfsa
                     shortfall -= tfsa_draw
                     tfsa = 0
-                    
             net_income_achieved = target_net_income - shortfall
+            
+        else:
+            # Overflow Mode (Capital Funnel)
+            excess_cash = -shortfall
+            excess_cash_reinvested = excess_cash
+            net_income_achieved = target_net_income # You only 'spend' your target
+            
+            # Shove excess cash into TFSA first
+            to_tfsa = min(excess_cash, tfsa_room)
+            tfsa += to_tfsa
+            tfsa_room -= to_tfsa
+            
+            # Spillover into Non-Reg
+            to_nonreg = excess_cash - to_tfsa
+            if to_nonreg > 0:
+                non_reg += to_nonreg
 
     # --- UNIFIED COMPOUNDING ---
     current_year_real_return = real_return if age < target_age else post_retire_real_return
@@ -253,9 +300,10 @@ for i in range(terminal_age - current_age + 1):
         "RRSP Draw": rrsp_draw,
         "NonReg Draw": nonreg_draw,
         "TFSA Draw": tfsa_draw,
+        "Reinvested Overflow": excess_cash_reinvested,
         "Est. Taxes Paid": tax_paid,
         "Effective Tax Rate (%)": (tax_paid / (combined_gov_gross + rrsp_draw) * 100) if (combined_gov_gross + rrsp_draw) > 0 else 0,
-        "Net Income": net_income_achieved
+        "Net Income Spent": net_income_achieved
     })
     
 df_proj = pd.DataFrame(data)
@@ -280,7 +328,6 @@ if live_price:
     actual_liquid_nw = actual_rrsp + actual_tfsa + actual_nonreg
     fractional_age = current_age + (datetime.now().timetuple().tm_yday / 365.25)
     
-    # 🎯 FIX: Isolate Arrival Wealth (End of Age 59) to prevent slider distortion
     arrival_age = target_age - 1
     expected_nw_current = df_proj.loc[df_proj['Age'] == current_age, 'Liquid NW'].values[0]
     variance = actual_liquid_nw - expected_nw_current
@@ -334,22 +381,21 @@ with tab1:
 with tab2:
     age_60_row = df_proj[df_proj['Age'] == 60]
     if not age_60_row.empty:
-        st.success("✅ **Tax Engine is Active:** The 2024 CRA Brackets are successfully looping. No manual estimates are being used.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Age 60 Required RRSP Draw (Gross)", f"${age_60_row['RRSP Draw'].values[0]:,.0f}")
         c2.metric("Age 60 Total Taxes Paid", f"${age_60_row['Est. Taxes Paid'].values[0]:,.0f}")
         c3.metric("Age 60 Effective Tax Rate", f"{age_60_row['Effective Tax Rate (%)'].values[0]:.1f}%")
         st.divider()
 
-    st.markdown("### The Withdrawal Waterfall")
-    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income", "Gov Benefits (Gross)", "RRSP Draw", "NonReg Draw", "TFSA Draw", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
+    st.markdown("### The Withdrawal Waterfall & RRIF Meltdown")
+    df_decum = df_proj[df_proj['Age'] >= target_age][["Age", "Liquid NW", "Net Income Spent", "Gov Benefits (Gross)", "RRSP Draw", "TFSA Draw", "Reinvested Overflow", "Est. Taxes Paid", "Effective Tax Rate (%)"]]
     st.dataframe(df_decum.set_index("Age").style.format({
         "Liquid NW": "${:,.0f}", 
-        "Net Income": "${:,.0f}", 
+        "Net Income Spent": "${:,.0f}", 
         "Gov Benefits (Gross)": "${:,.0f}", 
         "RRSP Draw": "${:,.0f}", 
-        "NonReg Draw": "${:,.0f}",
-        "TFSA Draw": "${:,.0f}", 
+        "TFSA Draw": "${:,.0f}",
+        "Reinvested Overflow": "${:,.0f}", 
         "Est. Taxes Paid": "${:,.0f}", 
         "Effective Tax Rate (%)": "{:.1f}%"
     }), width="stretch", height=600)
